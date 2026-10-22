@@ -1,0 +1,13 @@
+[package]
+name = "kokoverse-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy_ecs = { version = "0.17.3", default-features = false, features = ["std"] }
+kokoverse-protocol = { path = "../protocol" }
+serde_json.workspace = true
+uuid.workspace = true
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+glam = "0.30.10"

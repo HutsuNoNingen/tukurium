@@ -1,0 +1,355 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::io;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+pub const MAX_FRAME: usize = 1024 * 1024;
+pub const VERSION: u32 = 2;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct AvatarPose {
+    pub position: [f64; 3],
+    pub yaw: f64,
+    pub pitch: f64,
+}
+
+/// Camera-relative intent. Position and velocity are computed by the local Engine.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct PlayerInput {
+    pub movement: [f64; 2],
+    pub yaw: f64,
+    pub pitch: f64,
+    pub jump: bool,
+    pub face_view: bool,
+    pub active: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct CharacterState {
+    pub velocity: [f64; 3],
+    pub grounded: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ParticipantView {
+    pub id: String,
+    pub name: String,
+    pub pose: AvatarPose,
+    #[serde(default)]
+    pub avatar_texture: Option<String>,
+}
+
+pub fn valid_asset_id(id: &str) -> bool {
+    id.len() == 64
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct Address {
+    pub instance_id: String,
+    pub local_id: u32,
+}
+
+/// Temporary editor display state; never part of a persistent world snapshot.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct ObjectPreview {
+    pub target: Address,
+    pub expected_revision: String,
+    pub position: [f64; 3],
+    #[serde(default)]
+    pub rotation: Option<[f64; 4]>,
+    #[serde(default)]
+    pub scale: Option<[f64; 3]>,
+    #[serde(default)]
+    pub expected_rotation_revision: Option<String>,
+    #[serde(default)]
+    pub expected_scale_revision: Option<String>,
+}
+
+pub fn identity_rotation() -> [f64; 4] {
+    [0.0, 0.0, 0.0, 1.0]
+}
+pub fn unit_scale() -> [f64; 3] {
+    [1.0; 3]
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ColliderSpec {
+    pub half_extents: [f64; 3],
+    pub solid: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct GrabView {
+    pub preview: ObjectPreview,
+    pub distance: f64,
+    pub released: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct InteractionRay {
+    pub origin: [f64; 3],
+    pub point: [f64; 3],
+    pub target: Option<Address>,
+    pub holding: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Field {
+    pub id: String,
+    pub label: String,
+    pub value_type: String,
+    pub revision: String,
+    pub value: Value,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct VideoPlayback {
+    pub playing: bool,
+    pub looping: bool,
+    pub position_seconds: f64,
+    pub anchor_seconds: f64,
+}
+impl VideoPlayback {
+    pub fn position_at(&self, now: f64, duration: f64) -> f64 {
+        let position = self.position_seconds
+            + if self.playing {
+                (now - self.anchor_seconds).max(0.0)
+            } else {
+                0.0
+            };
+        if duration > 0.0 {
+            if self.looping {
+                position.rem_euclid(duration)
+            } else {
+                position.min(duration)
+            }
+        } else {
+            position
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlaybackCommand {
+    pub command_id: String,
+    pub target: Address,
+    pub expected_revision: String,
+    #[serde(flatten)]
+    pub action: PlaybackAction,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum PlaybackAction {
+    Play,
+    Pause,
+    Restart,
+    Seek { position_seconds: f64 },
+    Loop { looping: bool },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ObjectView {
+    pub address: Address,
+    pub renderer: Address,
+    pub object_revision: String,
+    pub world_position: [f64; 3],
+    #[serde(default = "identity_rotation")]
+    pub world_rotation: [f64; 4],
+    #[serde(default = "unit_scale")]
+    pub world_scale: [f64; 3],
+    #[serde(default)]
+    pub collider: Option<ColliderSpec>,
+    #[serde(default)]
+    pub visual: Visual,
+    #[serde(default)]
+    pub playback: Option<VideoPlayback>,
+    pub fields: Vec<Field>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Visual {
+    #[default]
+    Cube,
+    Image {
+        data_url: String,
+        width: u32,
+        height: u32,
+    },
+    Model {
+        asset_id: String,
+        half_extents: [f64; 3],
+    },
+    Video {
+        asset_id: String,
+        width: u32,
+        height: u32,
+        #[serde(default)]
+        duration_seconds: f64,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Snapshot {
+    pub world_revision: String,
+    pub objects: Vec<ObjectView>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Edit {
+    pub command_id: String,
+    pub target: Address,
+    pub field_id: String,
+    pub expected_revision: String,
+    pub value: Value,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TransformCommand {
+    pub command_id: String,
+    pub target: Address,
+    pub expected_position_revision: String,
+    pub expected_rotation_revision: String,
+    pub expected_scale_revision: String,
+    pub position: [f64; 3],
+    pub rotation: [f64; 4],
+    pub scale: [f64; 3],
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StructuralCommand {
+    pub command_id: String,
+    #[serde(flatten)]
+    pub operation: StructuralOperation,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum StructuralOperation {
+    Create,
+    CreateImage {
+        data_url: String,
+    },
+    ImportAsset {
+        name: String,
+        position: [f64; 3],
+        rotation: [f64; 4],
+        visual: Visual,
+    },
+    Duplicate {
+        target: Address,
+        expected_revision: String,
+    },
+    Delete {
+        target: Address,
+        expected_revision: String,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WorldCommand {
+    Edit { edit: Edit },
+    Transform { command: TransformCommand },
+    Structure { command: StructuralCommand },
+    Playback { command: PlaybackCommand },
+}
+
+impl WorldCommand {
+    pub fn command_id(&self) -> &str {
+        match self {
+            Self::Edit { edit } => &edit.command_id,
+            Self::Structure { command } => &command.command_id,
+            Self::Transform { command } => &command.command_id,
+            Self::Playback { command } => &command.command_id,
+        }
+    }
+    pub fn set_command_id(&mut self, id: String) {
+        match self {
+            Self::Edit { edit } => edit.command_id = id,
+            Self::Structure { command } => command.command_id = id,
+            Self::Transform { command } => command.command_id = id,
+            Self::Playback { command } => command.command_id = id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorldCommit {
+    pub world_revision: String,
+    pub upserts: Vec<ObjectView>,
+    pub removed: Vec<Address>,
+}
+
+// All revisions are decimal strings, including over JSON/GDScript boundaries.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Envelope {
+    pub protocol_version: u32,
+    pub session_id: String,
+    pub authority_epoch: String,
+    pub sequence: String,
+    pub body: Value,
+}
+
+pub async fn read_frame<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<Value> {
+    let len = reader.read_u32().await? as usize;
+    if len == 0 || len > MAX_FRAME {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "frame size exceeded",
+        ));
+    }
+    let mut data = vec![0; len];
+    reader.read_exact(&mut data).await?;
+    serde_json::from_slice(&data).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+pub async fn write_frame<W: AsyncWrite + Unpin>(writer: &mut W, value: &Value) -> io::Result<()> {
+    let data = serde_json::to_vec(value)?;
+    if data.len() > MAX_FRAME {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "frame size exceeded",
+        ));
+    }
+    writer.write_u32(data.len() as u32).await?;
+    writer.write_all(&data).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn partial_tcp_reads_preserve_message_boundaries() {
+        let (mut writer, mut reader) = tokio::io::duplex(32);
+        let expected = json!({"label":"共同編集", "revision":"9007199254740993"});
+        let bytes = serde_json::to_vec(&expected).unwrap();
+        let task = tokio::spawn(async move {
+            let framed = [(bytes.len() as u32).to_be_bytes().as_slice(), &bytes].concat();
+            for byte in framed {
+                writer.write_all(&[byte]).await.unwrap();
+            }
+            write_frame(&mut writer, &json!({"next":true}))
+                .await
+                .unwrap();
+        });
+        assert_eq!(read_frame(&mut reader).await.unwrap(), expected);
+        assert_eq!(read_frame(&mut reader).await.unwrap(), json!({"next":true}));
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn oversized_frame_is_rejected_without_reading_body() {
+        let (mut writer, mut reader) = tokio::io::duplex(4);
+        writer.write_u32(MAX_FRAME as u32 + 1).await.unwrap();
+        assert_eq!(
+            read_frame(&mut reader).await.unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+}

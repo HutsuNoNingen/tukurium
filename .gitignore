@@ -1,0 +1,12 @@
+/target/
+/.tools/
+/.run/
+/dist/
+/client-godot/.godot/
+*.log
+relay-access.json
+relay-login.xml
+deployment-access.txt
+.env
+.env.*
+!.env.example

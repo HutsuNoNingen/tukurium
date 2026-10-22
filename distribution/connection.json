@@ -1,0 +1,5 @@
+{
+  "relay": "wss://45.77.130.146/ws",
+  "session": "workshop",
+  "host_peer": "host"
+}

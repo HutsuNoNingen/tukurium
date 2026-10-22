@@ -1,0 +1,157 @@
+use crate::components::*;
+use bevy_ecs::prelude::*;
+use kokoverse_protocol::{Address, ObjectView, Snapshot, WorldCommand, WorldCommit};
+use std::collections::{HashMap, HashSet, VecDeque};
+
+#[derive(Resource, Default)]
+pub(crate) struct EntityIndex(pub HashMap<Address, Entity>);
+#[derive(Resource, Default)]
+pub(crate) struct WorldRevision(pub u64);
+#[derive(Resource, Default, Clone, Copy)]
+pub(crate) struct MediaClock(pub f64);
+#[derive(Resource, Default)]
+pub(crate) struct InputQueue(pub VecDeque<(u64, WorldCommand)>);
+
+pub(crate) enum Mutation {
+    SetName {
+        entity: Entity,
+        value: String,
+    },
+    SetPosition {
+        entity: Entity,
+        value: [f64; 3],
+    },
+    SetColor {
+        slot: Entity,
+        renderer: Entity,
+        value: [f64; 4],
+    },
+    SetRotation {
+        entity: Entity,
+        value: [f64; 4],
+    },
+    SetScale {
+        entity: Entity,
+        value: [f64; 3],
+    },
+    SetCollider {
+        entity: Entity,
+        value: Option<kokoverse_protocol::ColliderSpec>,
+    },
+    SetTransform {
+        entity: Entity,
+        position: [f64; 3],
+        rotation: [f64; 4],
+        scale: [f64; 3],
+    },
+    SetPlayback {
+        entity: Entity,
+        value: kokoverse_protocol::VideoPlayback,
+    },
+    Insert(Box<ObjectView>),
+    Delete(Address),
+}
+
+pub(crate) struct PreparedCommand {
+    pub ticket: u64,
+    pub mutation: Result<Mutation, String>,
+}
+#[derive(Resource, Default)]
+pub(crate) struct Prepared(pub Option<PreparedCommand>);
+
+pub(crate) struct AppliedCommand {
+    pub ticket: u64,
+    pub result: Result<Option<Address>, String>,
+}
+#[derive(Resource, Default)]
+pub(crate) struct Applied(pub Option<AppliedCommand>);
+
+#[derive(Resource, Default)]
+pub(crate) struct ChangeSet {
+    pub upserts: HashSet<Address>,
+    pub removed: Vec<Address>,
+}
+
+#[derive(Resource)]
+pub(crate) struct SnapshotCache(pub Snapshot);
+
+pub struct CommandOutcome {
+    pub ticket: u64,
+    pub result: Result<WorldCommit, String>,
+    pub selected: Option<Address>,
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct OutputQueue(pub Vec<CommandOutcome>);
+
+pub(crate) fn insert_object(world: &mut World, object: ObjectView) {
+    let mut revisions = Revisions::default();
+    for f in &object.fields {
+        revisions.0.insert(
+            f.id.clone(),
+            f.revision.parse().expect("validated revision"),
+        );
+    }
+    let get = |id: &str| {
+        &object
+            .fields
+            .iter()
+            .find(|f| f.id == id)
+            .expect("validated field")
+            .value
+    };
+    let slot = world
+        .spawn((
+            Identity(object.address.clone()),
+            ObjectRoot {
+                revision: object.object_revision.parse().expect("validated revision"),
+                renderer: object.renderer.clone(),
+            },
+            Slot {
+                name: get("name").as_str().expect("validated name").into(),
+            },
+            LocalTransform {
+                translation: serde_json::from_value(get("position").clone())
+                    .expect("validated position"),
+                rotation: object.world_rotation,
+                scale: object.world_scale,
+            },
+            GlobalTransform::default(),
+            revisions,
+        ))
+        .id();
+    if let Some(shape) = object.collider {
+        world.entity_mut(slot).insert(Collider(shape));
+    }
+    if let Some(playback) = object.playback {
+        world.entity_mut(slot).insert(MediaPlayback(playback));
+    }
+    let renderer = world
+        .spawn((
+            Identity(object.renderer.clone()),
+            MeshRenderer {
+                host: object.address.clone(),
+                color: serde_json::from_value(get("color").clone()).expect("validated color"),
+                visual: object.visual,
+            },
+        ))
+        .id();
+    let mut index = world.resource_mut::<EntityIndex>();
+    index.0.insert(object.address, slot);
+    index.0.insert(object.renderer, renderer);
+}
+
+pub(crate) fn remove_object(world: &mut World, address: &Address) {
+    let entity = world.resource::<EntityIndex>().0[address];
+    let renderer = world
+        .get::<ObjectRoot>(entity)
+        .expect("validated root")
+        .renderer
+        .clone();
+    let renderer_entity = world.resource::<EntityIndex>().0[&renderer];
+    world.despawn(renderer_entity);
+    world.despawn(entity);
+    let mut index = world.resource_mut::<EntityIndex>();
+    index.0.remove(&renderer);
+    index.0.remove(address);
+}
