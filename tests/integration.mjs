@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
+const engine = process.argv.find(arg => arg.startsWith('--engine='))?.slice(9) || 'target/debug/kokoverse-engine.exe';
 const session = `test-${randomUUID()}`;
 const children = [];
 const sockets = [];
@@ -70,8 +71,8 @@ const latestPerson = (client, id = 'local') => client.messages.filter(m=>m.kind=
 
 try {
   start('.tools/kokosync-relay.exe', ['--http', `127.0.0.1:${base}`, '--quic', `127.0.0.1:${base + 1}`]);
-  start('target/debug/kokoverse-engine.exe', ['--port', String(base+2), '--transport-port', String(base+3), '--session', session]);
-  const guestEngine = start('target/debug/kokoverse-engine.exe', ['--role', 'guest', '--port', String(base+4), '--transport-port', String(base+5), '--session', session]);
+  start(engine, ['--port', String(base+2), '--transport-port', String(base+3), '--session', session]);
+  const guestEngine = start(engine, ['--role', 'guest', '--port', String(base+4), '--transport-port', String(base+5), '--session', session]);
   const host = await connect(base+2);
   await host.wait(snapshot);
   const guest = await connect(base+4);

@@ -4,6 +4,11 @@ const MAX_FRAME := 1048576
 const AVATAR = preload("res://avatar.gd")
 const TRANSLATION_GIZMO = preload("res://translation_gizmo.gd")
 const ASSET_IMPORTER = preload("res://asset_importer.gd")
+const SCRIPT_EDITOR = preload("res://script_editor.gd")
+var script_editor = SCRIPT_EDITOR.new()
+var script_templates: Array = []
+var script_statuses: Array = []
+var world_tree_signature := ""
 var asset_importer = ASSET_IMPORTER.new()
 var video_controls: VBoxContainer
 var avatar_button: Button
@@ -342,6 +347,13 @@ func build_ui() -> void:
 	inspector.add_child(object_label)
 	revision_label = label("Waiting for world…", 12, Color("8ca7b6"))
 	inspector.add_child(revision_label)
+	var scripts_button := Button.new()
+	scripts_button.text = "Script Systems…"
+	scripts_button.pressed.connect(func():
+		if current.is_empty(): return
+		release_cursor()
+		script_editor.open(selected_id))
+	inspector.add_child(scripts_button)
 	inspector.add_child(HSeparator.new())
 	inspector.add_child(label("Slot · Name", 14))
 	name_input = LineEdit.new()
@@ -441,6 +453,7 @@ func build_ui() -> void:
 	help.get_parent().anchor_top = 1.0
 	help.get_parent().anchor_bottom = 1.0
 	help.add_child(label("WASD Move · Space Jump · V View · RMB Hold · E Rotate\nWheel Distance · Shift+Wheel Scale · Shift+E Yaw · LMB Straighten · Esc Cursor", 12))
+	script_editor.setup(self)
 
 func add_vector_editor(parent: Node, title: String, field_id: String, minimum: float, maximum: float, step: float) -> Array[SpinBox]:
 	parent.add_child(label(title,14))
@@ -700,6 +713,7 @@ func connect_engine() -> void:
 	retry_at = Time.get_ticks_msec() + 2000
 
 func disconnect_engine(message: String) -> void:
+	script_editor.disconnected()
 	avatar_restore_started = false
 	reset_media_clock()
 	asset_importer.disconnected()
@@ -859,6 +873,7 @@ func update_video_controls() -> void:
 	filling = false
 
 func _process(delta: float) -> void:
+	script_editor.tick()
 	tcp.poll()
 	var state := tcp.get_status()
 	if state == StreamPeerTCP.STATUS_CONNECTED:
@@ -971,6 +986,9 @@ func accept_message(message: Dictionary) -> void:
 	match body.get("kind"):
 		"clock_pong":
 			accept_clock(body)
+		"script_statuses":
+			script_statuses = body.statuses
+			script_editor.refresh()
 		"interaction_rays":
 			interaction_rays = body.rays
 			aiming_at_collider = false
@@ -1022,13 +1040,17 @@ func accept_message(message: Dictionary) -> void:
 			people_label.text = "\n".join(names)
 		"snapshot":
 			editable = body.editable
+			script_templates = body.get("script_templates", [])
+			script_statuses = body.get("script_statuses", [])
 			DisplayServer.window_set_title("Kokoverse Workshop — " + str(body.role).capitalize())
 			status_label.text = ("Host" if body.role == "host" else "Guest") + (" · Connected" if editable else " · Waiting for host")
 			apply_snapshot(body.snapshot)
+			script_editor.refresh()
 		"status":
 			status_label.text = body.message
 			editable = body.editable
 			if not editable:
+				script_editor.disconnected()
 				avatar_restore_started = false
 				reset_media_clock()
 				set_remote_previews([])
@@ -1040,6 +1062,9 @@ func accept_message(message: Dictionary) -> void:
 				inspector_edits.clear()
 				dirty.clear()
 		"result":
+			if script_editor.receive_result(body):
+				if body.has("snapshot"): apply_snapshot(body.snapshot)
+				return
 			if pending_action == "gizmo": restore_gizmo_visual()
 			pending = false
 			if pending_action == "edit" and not pending_edit.is_empty():
@@ -1175,6 +1200,15 @@ func update_selected() -> void:
 	refresh_fields()
 
 func rebuild_tree() -> void:
+	var entries: Array = []
+	for id in objects:
+		var name := "Cube"
+		for field in objects[id].fields:
+			if field.id == "name": name = field.value
+		entries.append([id, name])
+	var signature := JSON.stringify([selected_id, entries])
+	if signature == world_tree_signature: return
+	world_tree_signature = signature
 	for node in tree_objects.get_children():
 		tree_objects.remove_child(node)
 		node.queue_free()
@@ -1298,7 +1332,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		var query := PhysicsRayQueryParameters3D.create(origin, origin + camera.project_ray_normal(event.position) * 5000)
 		var hit := get_world_3d().direct_space_state.intersect_ray(query)
 		if not hit.is_empty() and hit.collider.has_meta("object_id"):
-			select_object(str(hit.collider.get_meta("object_id")))
+			var hit_id := str(hit.collider.get_meta("object_id"))
+			select_object(hit_id)
+			script_editor.interact(hit_id)
 	if event is InputEventKey and event.keycode == KEY_F and event.pressed: focus_selected()
 	if event is InputEventKey and event.keycode == KEY_V and event.pressed: set_view_mode((view_mode.selected + 1) % 3)
 	if event is InputEventKey and event.keycode == KEY_SPACE and event.pressed and not event.echo: try_jump()

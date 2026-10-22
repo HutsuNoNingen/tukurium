@@ -32,6 +32,7 @@ PowerShellで、このフォルダーから実行する。
 - アバター操作中はSpaceでジャンプ。箱に当たり、箱の上へ乗れる。乗っている箱を動かすと追従する。`F`で選択した物体を見に行く。アバター操作へ戻るには`V`。
 - `PEOPLE`の入力欄で表示名を変更し、Enterで確定。
 - `PEOPLE`の`Avatar texture…`でお絵描きアバター用の画像を選び、`Reset`で標準へ戻す。見た目は他の参加者と共有され、次回起動時にも引き継ぐ。
+- 物体を選び、Inspectorの`Script Systems…`からLuauの動作を追加する。`Rotator`は回転、`ClickColor`は左クリックで色を切り替える例。コードを書いて`Apply / restart`で反映し、公開パラメータは自動同期する。`Run on host`で停止・再開。コード・設定・明示的な状態も保存・複製できる。詳しくは[UGC Script Systems](docs/ugc-scripting.md)。
 
 ```powershell
 ./scripts/stop-demo.ps1
@@ -63,6 +64,7 @@ Godot :47010 ↔ Guest Engine :47011 ↔ Go adapter
 . ./scripts/env.ps1
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets -- -D warnings
+cargo build --release --workspace --locked
 node tests/integration.mjs --godot
 node tests/assets-integration.mjs
 node tests/assets-integration.mjs --large
@@ -70,6 +72,7 @@ node tests/playback-integration.mjs
 node tests/playback-integration.mjs --rendered
 node tests/avatar-integration.mjs
 node tests/persistence-integration.mjs
+node tests/ugc-integration.mjs --rendered
 ```
 
 統合テストは独立したローカル中継・Engine・アダプターを起動して後片付けする。双方向の編集、同一フィールドの競合、重複要求、再接続、不正値、生成・複製・削除、アバターの名前・姿勢同期と退出を確認する。Godotのフォーム・ボタン操作とモデルの読み込みも含む。強制切断では中継側の古い接続が失効するまで再参加を待つため、約1分かかる場合がある。
@@ -90,7 +93,7 @@ node tests/persistence-integration.mjs
 
 変換後のモデル・動画は1個128 MiBまで。SHA-256をキーに保存し、持っていないクライアントへ128 KiBずつ転送する。配布版の保存先はポートが変わっても同じ `.run/assets/shared/`。以前の配布版のポート別キャッシュは起動時にコピーして引き継ぐ。Engine単体の既定は `.run/assets/<UIポート>/` で、`--asset-dir`で指定できる。移動の確定差分には参照だけを含める。ワールドを別環境へ持ち出す場合は、snapshotとホストのアセットフォルダーを一緒に保存する。受信した動画の再生用キャッシュは `.run/media/` に置く。
 
-箱やモデルの上への着地、動く足場、回転・拡縮したColliderとの衝突に対応する。ワールド内の3Dインスペクタ、部品の追加削除、Flux、保存UI、VR、音声チャット、ホスト移譲は今後の段階。物体の同期はオブジェクト単位の差分、アバターは20Hzの損失許容配送。大規模ワールドは未検証。
+箱やモデルの上への着地、動く足場、回転・拡縮したColliderとの衝突に対応する。Script Componentは各物体4個・全体32個まで追加でき、LuauのSystemをホストで実行する。現在のquery範囲は取り付け先の物体。ワールド内の3Dインスペクタ、親子構造、複数物体のアイテム化、Flux、保存UI、VR、音声チャット、ホスト移譲は今後の段階。物体の同期はオブジェクト単位の差分、アバターは20Hzの損失許容配送。大規模ワールドは未検証。
 
 アバターの出典と変換方法は [assets/oekaki/README.md](client-godot/assets/oekaki/README.md)。モデル・サンプル画像を移植し、描画処理はGodot用に実装した。Tonariumのアカウントや通信形式は使わない。
 

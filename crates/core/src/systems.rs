@@ -12,6 +12,13 @@ fn image_size(visual: &kokoverse_protocol::Visual) -> usize {
 }
 
 type SlotData<'a> = (&'a Slot, &'a LocalTransform, &'a Revisions, &'a ObjectRoot);
+type ValidationState<'a> = (
+    Res<'a, EntityIndex>,
+    Res<'a, WorldRevision>,
+    Res<'a, MediaClock>,
+    Res<'a, SnapshotCache>,
+    Res<'a, crate::scripting::ScriptRuntime>,
+);
 type SnapshotRoot<'a> = (
     &'a Identity,
     &'a Slot,
@@ -28,18 +35,13 @@ type SnapshotRoot<'a> = (
 pub(crate) fn validate_commands(
     mut queue: ResMut<InputQueue>,
     mut prepared: ResMut<Prepared>,
-    state: (
-        Res<EntityIndex>,
-        Res<WorldRevision>,
-        Res<MediaClock>,
-        Res<SnapshotCache>,
-    ),
+    state: ValidationState,
     slots: Query<SlotData>,
     meshes: Query<&MeshRenderer>,
     colliders: Query<&Collider>,
     optional: (Query<&MediaPlayback>, Query<&ScriptComponents>),
 ) {
-    let (index, revision, clock, snapshot) = state;
+    let (index, revision, clock, snapshot, runtime) = state;
     let (playback, scripts) = optional;
     prepared.0 = queue.0.pop_front().map(|(ticket, command)| {
         let validate = || -> Result<Mutation, String> {
@@ -50,7 +52,9 @@ pub(crate) fn validate_commands(
                     slots.get(entity).map_err(|_|"Expected an ObjectRoot Slot")?;
                     let current=&scripts.get(entity).map_err(|_|"Missing script container")?.0;
                     if matches!(command.action,kokoverse_protocol::ScriptAction::Interact) {
-                        if colliders.get(entity).is_err() || !current.iter().any(|s|s.enabled) {return Err("This object has no active interaction".into());}
+                        let handlers=current.iter().filter(|s|s.enabled && s.schema.has_interact).count();
+                        if colliders.get(entity).is_err() || handlers==0 {return Err("This object has no active interaction".into());}
+                        if runtime.events.len()+handlers>128 {return Err("Too many pending script interactions".into());}
                         return Ok(Mutation::ScriptInteract{entity});
                     }
                     let value=crate::scripting::prepare_edit(current,command.action)?;
@@ -194,10 +198,18 @@ pub(crate) fn apply_commands(world: &mut World) {
                 }
                 Mutation::ScriptInteract { entity } => {
                     let target = world.get::<Identity>(entity).unwrap().0.clone();
+                    let events: Vec<_> = world
+                        .get::<ScriptComponents>(entity)
+                        .unwrap()
+                        .0
+                        .iter()
+                        .filter(|s| s.enabled && s.schema.has_interact)
+                        .map(|s| (target.clone(), s.id.clone()))
+                        .collect();
                     world
                         .resource_mut::<crate::scripting::ScriptRuntime>()
                         .events
-                        .push(target.clone());
+                        .extend(events);
                     world.get_mut::<ObjectRoot>(entity).unwrap().revision += 1;
                     Some(target)
                 }

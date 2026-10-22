@@ -19,7 +19,7 @@ struct Cached {
 #[derive(Resource, Default)]
 pub(crate) struct ScriptRuntime {
     cache: HashMap<String, Cached>,
-    pub(crate) events: Vec<Address>,
+    pub(crate) events: Vec<(Address, String)>,
     pub(crate) dt: f64,
     pub(crate) statuses: Vec<ScriptStatus>,
     cursor: usize,
@@ -138,6 +138,7 @@ pub(crate) fn prepare_frame(world: &mut World) {
     let snapshot = world.resource::<SnapshotCache>().0.clone();
     let mut runtime = world.remove_resource::<ScriptRuntime>().unwrap();
     let events = std::mem::take(&mut runtime.events);
+    let mut delivered = HashSet::new();
     let dt = runtime.dt;
     let mut patches = Vec::new();
     let alive: HashSet<_> = snapshot
@@ -188,22 +189,39 @@ pub(crate) fn prepare_frame(world: &mut World) {
                 );
             }
             let cached = runtime.cache.get_mut(&script.id).unwrap();
-            if !script.enabled || cached.error.is_some() || started.elapsed().as_millis() >= 10 {
+            if !script.enabled || cached.error.is_some() {
+                delivered.extend(
+                    events
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, (_, id))| id == &script.id)
+                        .map(|(index, _)| index),
+                );
+                continue;
+            }
+            if started.elapsed().as_millis() >= 10 {
                 continue;
             }
             let program = cached.program.as_ref().unwrap();
             let mut callbacks = Vec::new();
             if dt > 0.0 {
-                callbacks.push(Event::Update);
+                callbacks.push((Event::Update, None));
             }
             // Each accepted interaction runs exactly once, even if several arrive in one frame.
             callbacks.extend(
                 events
                     .iter()
-                    .filter(|a| **a == object.address)
-                    .map(|_| Event::Interact),
+                    .enumerate()
+                    .filter(|(_, (address, id))| *address == object.address && id == &script.id)
+                    .map(|(index, _)| (Event::Interact, Some(index))),
             );
-            for event in callbacks {
+            for (event, event_index) in callbacks {
+                if started.elapsed().as_millis() >= 10 {
+                    break;
+                }
+                if let Some(index) = event_index {
+                    delivered.insert(index);
+                }
                 match program.run(&object, &object.scripts[index], event, dt) {
                     Ok(output) => {
                         let values = [
@@ -278,6 +296,12 @@ pub(crate) fn prepare_frame(world: &mut World) {
                 error: runtime.cache.get(&script.id).and_then(|c| c.error.clone()),
             })
         })
+        .collect();
+    runtime.events = events
+        .into_iter()
+        .enumerate()
+        .filter(|(index, (_, id))| !delivered.contains(index) && alive.contains(id))
+        .map(|(_, event)| event)
         .collect();
     world.insert_resource(runtime);
     if !patches.is_empty() && world.resource::<WorldRevision>().0 < u64::MAX {
@@ -461,5 +485,16 @@ mod tests {
             .insert("invalid".into(), serde_json::json!({"nested":true}));
         assert!(model.restore(invalid).is_err());
         assert_eq!(model.snapshot(), before);
+    }
+
+    #[test]
+    fn queued_interactions_are_bounded_and_delivered_once_across_frames() {
+        let mut model=WorldModel::new();model.set_script_authority(true);
+        command(&mut model,ScriptAction::Attach{source:"return {name='Counter',on_interact=function(ctx) ctx:set_state('count',ctx:get_state('count',0)+1) end}".into()}).unwrap();
+        for _ in 0..128 {command(&mut model,ScriptAction::Interact).unwrap();}
+        assert!(command(&mut model,ScriptAction::Interact).is_err());
+        for _ in 0..128 {model.advance(Duration::ZERO);}
+        assert_eq!(model.snapshot().objects[0].scripts[0].state["count"],serde_json::json!(128));
+        assert!(model.world.resource::<ScriptRuntime>().events.is_empty());
     }
 }
