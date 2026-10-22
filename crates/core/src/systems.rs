@@ -21,23 +21,42 @@ type SnapshotRoot<'a> = (
     &'a ObjectRoot,
     Option<&'a Collider>,
     Option<&'a MediaPlayback>,
+    &'a ScriptComponents,
 );
 
 /// Resolve stable addresses and validate against state committed by the preceding command.
 pub(crate) fn validate_commands(
     mut queue: ResMut<InputQueue>,
     mut prepared: ResMut<Prepared>,
-    state: (Res<EntityIndex>, Res<WorldRevision>, Res<MediaClock>),
+    state: (
+        Res<EntityIndex>,
+        Res<WorldRevision>,
+        Res<MediaClock>,
+        Res<SnapshotCache>,
+    ),
     slots: Query<SlotData>,
     meshes: Query<&MeshRenderer>,
     colliders: Query<&Collider>,
-    playback: Query<&MediaPlayback>,
+    optional: (Query<&MediaPlayback>, Query<&ScriptComponents>),
 ) {
-    let (index, revision, clock) = state;
+    let (index, revision, clock, snapshot) = state;
+    let (playback, scripts) = optional;
     prepared.0 = queue.0.pop_front().map(|(ticket, command)| {
         let validate = || -> Result<Mutation, String> {
             if revision.0 == u64::MAX { return Err("World revision exhausted".into()); }
             match command {
+                WorldCommand::Script { command } => {
+                    let entity=*index.0.get(&command.target).ok_or("Target no longer exists")?;
+                    slots.get(entity).map_err(|_|"Expected an ObjectRoot Slot")?;
+                    let current=&scripts.get(entity).map_err(|_|"Missing script container")?.0;
+                    if matches!(command.action,kokoverse_protocol::ScriptAction::Interact) {
+                        if colliders.get(entity).is_err() || !current.iter().any(|s|s.enabled) {return Err("This object has no active interaction".into());}
+                        return Ok(Mutation::ScriptInteract{entity});
+                    }
+                    let value=crate::scripting::prepare_edit(current,command.action)?;
+                    crate::scripting::validate_world_scripts(snapshot.0.objects.iter().map(|o|if o.address==command.target {value.as_slice()} else {o.scripts.as_slice()}))?;
+                    Ok(Mutation::SetScripts{entity,value})
+                }
                 WorldCommand::Edit { edit } => {
                     if edit.field_id=="playback" { return Err("Use playback controls to change the shared timeline".into()); }
                     validate_value(&edit.field_id, &edit.value)?;
@@ -144,6 +163,9 @@ pub(crate) fn validate_commands(
                             object.world_scale = transform.scale;
                             object.collider = colliders.get(entity).ok().map(|c|c.0.clone());
                             object.playback = playback.get(entity).ok().map(|p|p.0.clone());
+                            object.scripts=scripts.get(entity).map(|s|s.0.clone()).unwrap_or_default();
+                            for script in &mut object.scripts {script.id=uuid::Uuid::new_v4().to_string();script.revision="0".into();}
+                            crate::scripting::validate_world_scripts(snapshot.0.objects.iter().map(|o|o.scripts.as_slice()).chain(std::iter::once(object.scripts.as_slice())))?;
                             crate::sync_object_fields(&mut object);
                             Ok(Mutation::Insert(Box::new(object)))
                         }
@@ -165,6 +187,65 @@ pub(crate) fn apply_commands(world: &mut World) {
         Err(error) => Err(error),
         Ok(mutation) => {
             let selected = match mutation {
+                Mutation::SetScripts { entity, value } => {
+                    world.entity_mut(entity).insert(ScriptComponents(value));
+                    world.get_mut::<ObjectRoot>(entity).unwrap().revision += 1;
+                    Some(world.get::<Identity>(entity).unwrap().0.clone())
+                }
+                Mutation::ScriptInteract { entity } => {
+                    let target = world.get::<Identity>(entity).unwrap().0.clone();
+                    world
+                        .resource_mut::<crate::scripting::ScriptRuntime>()
+                        .events
+                        .push(target.clone());
+                    world.get_mut::<ObjectRoot>(entity).unwrap().revision += 1;
+                    Some(target)
+                }
+                Mutation::ScriptFrame(patches) => {
+                    for patch in patches {
+                        let entity = patch.entity;
+                        let renderer = world.resource::<EntityIndex>().0
+                            [&world.get::<ObjectRoot>(entity).unwrap().renderer];
+                        for (id, changed) in [
+                            (
+                                "position",
+                                world.get::<LocalTransform>(entity).unwrap().translation
+                                    != patch.position,
+                            ),
+                            (
+                                "rotation",
+                                world.get::<LocalTransform>(entity).unwrap().rotation
+                                    != patch.rotation,
+                            ),
+                            (
+                                "scale",
+                                world.get::<LocalTransform>(entity).unwrap().scale != patch.scale,
+                            ),
+                            (
+                                "color",
+                                world.get::<MeshRenderer>(renderer).unwrap().color != patch.color,
+                            ),
+                        ] {
+                            if changed {
+                                *world
+                                    .get_mut::<Revisions>(entity)
+                                    .unwrap()
+                                    .0
+                                    .entry(id.into())
+                                    .or_default() += 1;
+                            }
+                        }
+                        *world.get_mut::<LocalTransform>(entity).unwrap() = LocalTransform {
+                            translation: patch.position,
+                            rotation: patch.rotation,
+                            scale: patch.scale,
+                        };
+                        world.get_mut::<MeshRenderer>(renderer).unwrap().color = patch.color;
+                        world.get_mut::<ScriptComponents>(entity).unwrap().0 = patch.scripts;
+                        world.get_mut::<ObjectRoot>(entity).unwrap().revision += 1;
+                    }
+                    None
+                }
                 Mutation::SetName { entity, value } => {
                     world.get_mut::<Slot>(entity).unwrap().name = value;
                     bump_field(world, entity, "name");
@@ -302,7 +383,7 @@ pub(crate) fn extract_snapshot(
         return;
     }
     let mut objects = Vec::with_capacity(roots.iter().len());
-    for (identity, slot, local, global, revisions, root, collider, playback) in &roots {
+    for (identity, slot, local, global, revisions, root, collider, playback, scripts) in &roots {
         let mesh = meshes
             .get(index.0[&root.renderer])
             .expect("registered renderer");
@@ -316,6 +397,7 @@ pub(crate) fn extract_snapshot(
             collider: collider.map(|c| c.0.clone()),
             visual: mesh.visual.clone(),
             playback: playback.map(|p| p.0.clone()),
+            scripts: scripts.0.clone(),
             fields: vec![
                 crate::field(
                     "name",

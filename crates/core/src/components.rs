@@ -36,6 +36,9 @@ pub struct Collider(pub kokoverse_protocol::ColliderSpec);
 #[derive(Component)]
 pub struct MediaPlayback(pub kokoverse_protocol::VideoPlayback);
 
+#[derive(Component, Clone, Default)]
+pub struct ScriptComponents(pub Vec<kokoverse_protocol::ScriptComponent>);
+
 #[derive(Component)]
 pub struct MeshRenderer {
     pub host: Address,

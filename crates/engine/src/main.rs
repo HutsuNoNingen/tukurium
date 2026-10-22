@@ -101,6 +101,8 @@ struct Engine {
     remote_seen: HashMap<String, std::time::Instant>,
     outcomes: HashMap<String, Value>,
     order: VecDeque<String>,
+    last_script_status: Value,
+    remote_script_status: Vec<kokoverse_protocol::ScriptStatus>,
 }
 
 impl Engine {
@@ -268,7 +270,10 @@ impl Engine {
     }
     fn state(&mut self) -> Value {
         json!({"kind":"snapshot", "snapshot": self.model.snapshot(), "editable":self.synced,
-            "role":if self.host {"host"} else {"guest"}})
+            "role":if self.host {"host"} else {"guest"},
+            "script_statuses":if self.host {self.model.script_statuses()} else {self.remote_script_status.clone()},
+            "script_templates":[{"name":"Rotator","source":kokoverse_core::scripting::ROTATOR},
+                {"name":"ClickColor","source":kokoverse_core::scripting::CLICK_COLOR}]})
     }
     fn publish_state(&mut self) {
         self.previews.prune(&self.model, std::time::Instant::now());
@@ -371,6 +376,7 @@ impl Engine {
         }
     }
     fn tick(&mut self) {
+        self.model.set_script_authority(self.host);
         self.model.set_media_time(self.clock.now());
         let presence_revision = self.model.presence_revision();
         let now = std::time::Instant::now();
@@ -393,6 +399,13 @@ impl Engine {
         let mut replies = Vec::new();
         let mut changed = false;
         for outcome in outcomes {
+            if outcome.ticket == 0 {
+                if let Ok(commit) = outcome.result {
+                    changed = true;
+                    self.network(None, json!({"kind":"commit", "commit":commit}));
+                }
+                continue;
+            }
             let Some((key, command_id, origin)) = self.tickets.remove(&outcome.ticket) else {
                 continue;
             };
@@ -423,6 +436,18 @@ impl Engine {
         }
         if changed {
             self.publish_state();
+        }
+        let statuses = json!(if self.host {
+            self.model.script_statuses()
+        } else {
+            self.remote_script_status.clone()
+        });
+        if statuses != self.last_script_status {
+            self.last_script_status = statuses.clone();
+            self.ui(json!({"kind":"script_statuses","statuses":statuses}));
+            if self.host {
+                self.network(None, json!({"kind":"script_statuses","statuses":statuses}));
+            }
         }
         for (origin, result) in replies {
             self.reply(origin, result);
@@ -564,6 +589,7 @@ impl Engine {
             && envelope.body["kind"] != "structure"
             && envelope.body["kind"] != "transform"
             && envelope.body["kind"] != "playback"
+            && envelope.body["kind"] != "script"
         {
             return;
         }
@@ -776,11 +802,12 @@ impl Engine {
                 if self.host {
                     if e.body["kind"] == "snapshot_request" {
                         let snapshot = self.model.snapshot();
-                        self.network(Some(peer), json!({"kind":"snapshot", "snapshot":snapshot}));
+                        self.network(Some(peer), json!({"kind":"snapshot", "snapshot":snapshot,"script_statuses":self.model.script_statuses()}));
                     } else if (e.body["kind"] == "edit"
                         || e.body["kind"] == "structure"
                         || e.body["kind"] == "transform"
-                        || e.body["kind"] == "playback")
+                        || e.body["kind"] == "playback"
+                        || e.body["kind"] == "script")
                         && e.authority_epoch == self.epoch
                         && let Ok(command) = serde_json::from_value::<WorldCommand>(e.body)
                     {
@@ -812,10 +839,20 @@ impl Engine {
                             return;
                         }
                         if self.model.restore(snapshot).is_ok() {
+                            self.remote_script_status =
+                                serde_json::from_value(e.body["script_statuses"].clone())
+                                    .unwrap_or_default();
                             self.epoch = e.authority_epoch;
                             self.synced = true;
                             self.publish_state();
                             self.flush_results();
+                        }
+                    } else if kind == "script_statuses"
+                        && self.synced
+                        && e.authority_epoch == self.epoch
+                    {
+                        if let Ok(statuses) = serde_json::from_value(e.body["statuses"].clone()) {
+                            self.remote_script_status = statuses;
                         }
                     } else if kind == "commit" && self.synced && e.authority_epoch == self.epoch {
                         let Ok(commit) =
@@ -945,6 +982,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         remote_seen: HashMap::new(),
         outcomes: HashMap::new(),
         order: VecDeque::new(),
+        last_script_status: Value::Null,
+        remote_script_status: Vec::new(),
     };
     engine.model.update_participant(ParticipantView {
         avatar_texture: None,

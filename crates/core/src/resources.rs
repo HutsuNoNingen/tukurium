@@ -48,6 +48,14 @@ pub(crate) enum Mutation {
         entity: Entity,
         value: kokoverse_protocol::VideoPlayback,
     },
+    SetScripts {
+        entity: Entity,
+        value: Vec<kokoverse_protocol::ScriptComponent>,
+    },
+    ScriptInteract {
+        entity: Entity,
+    },
+    ScriptFrame(Vec<crate::scripting::FramePatch>),
     Insert(Box<ObjectView>),
     Delete(Address),
 }
@@ -126,6 +134,9 @@ pub(crate) fn insert_object(world: &mut World, object: ObjectView) {
     if let Some(playback) = object.playback {
         world.entity_mut(slot).insert(MediaPlayback(playback));
     }
+    world
+        .entity_mut(slot)
+        .insert(ScriptComponents(object.scripts.clone()));
     let renderer = world
         .spawn((
             Identity(object.renderer.clone()),

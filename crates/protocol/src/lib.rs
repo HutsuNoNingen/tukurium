@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io;
+mod scripts;
+pub use scripts::*;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const MAX_FRAME: usize = 1024 * 1024;
@@ -166,6 +168,8 @@ pub struct ObjectView {
     pub visual: Visual,
     #[serde(default)]
     pub playback: Option<VideoPlayback>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scripts: Vec<ScriptComponent>,
     pub fields: Vec<Field>,
 }
 
@@ -256,6 +260,7 @@ pub enum WorldCommand {
     Transform { command: TransformCommand },
     Structure { command: StructuralCommand },
     Playback { command: PlaybackCommand },
+    Script { command: ScriptCommand },
 }
 
 impl WorldCommand {
@@ -265,6 +270,7 @@ impl WorldCommand {
             Self::Structure { command } => &command.command_id,
             Self::Transform { command } => &command.command_id,
             Self::Playback { command } => &command.command_id,
+            Self::Script { command } => &command.command_id,
         }
     }
     pub fn set_command_id(&mut self, id: String) {
@@ -273,6 +279,7 @@ impl WorldCommand {
             Self::Structure { command } => command.command_id = id,
             Self::Transform { command } => command.command_id = id,
             Self::Playback { command } => command.command_id = id,
+            Self::Script { command } => command.command_id = id,
         }
     }
 }

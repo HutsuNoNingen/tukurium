@@ -5,6 +5,7 @@ mod grabbing;
 pub mod locomotion;
 pub mod presence;
 mod resources;
+pub mod scripting;
 pub mod systems;
 
 use bevy_ecs::prelude::*;
@@ -27,6 +28,9 @@ pub struct WorldModel {
     next_ticket: u64,
     simulation: Schedule,
     accumulator: f64,
+    script_schedule: Schedule,
+    script_accumulator: f64,
+    script_authority: bool,
 }
 
 impl Default for WorldModel {
@@ -53,6 +57,7 @@ impl WorldModel {
         world.init_resource::<collision::CollisionWorld>();
         world.init_resource::<collision::PreviewPositions>();
         world.init_resource::<grabbing::GrabState>();
+        world.init_resource::<scripting::ScriptRuntime>();
         world.insert_resource(SnapshotCache(Snapshot {
             world_revision: "0".into(),
             objects: vec![],
@@ -81,12 +86,27 @@ impl WorldModel {
             )
                 .chain(),
         );
+        let mut script_schedule = Schedule::default();
+        script_schedule.add_systems(
+            (
+                scripting::prepare_frame,
+                systems::apply_commands,
+                systems::update_transforms,
+                systems::collect_changes,
+                systems::extract_snapshot,
+                systems::publish_changes,
+            )
+                .chain(),
+        );
         Self {
             world,
             schedule,
             next_ticket: 0,
             simulation,
             accumulator: 0.0,
+            script_schedule,
+            script_accumulator: 0.0,
+            script_authority: false,
         }
     }
 
@@ -131,13 +151,43 @@ impl WorldModel {
 
     /// Editing passes do not advance time. Character simulation has its own fixed steps.
     pub fn advance(&mut self, elapsed: std::time::Duration) -> Vec<CommandOutcome> {
-        let outcomes = self.tick();
+        let mut outcomes = self.tick();
         self.accumulator += elapsed.as_secs_f64().min(0.25);
         while self.accumulator + 1e-9 >= locomotion::FIXED_STEP {
             self.simulation.run(&mut self.world);
             self.accumulator -= locomotion::FIXED_STEP;
         }
+        if self.script_authority {
+            self.script_accumulator += elapsed.as_secs_f64().min(0.25);
+            let interact = !self
+                .world
+                .resource::<scripting::ScriptRuntime>()
+                .events
+                .is_empty();
+            if self.script_accumulator >= 0.05 || interact {
+                let dt = if self.script_accumulator >= 0.05 {
+                    std::mem::take(&mut self.script_accumulator)
+                } else {
+                    0.0
+                };
+                self.world.resource_mut::<scripting::ScriptRuntime>().dt = dt;
+                self.script_schedule.run(&mut self.world);
+                outcomes.extend(std::mem::take(
+                    &mut self.world.resource_mut::<OutputQueue>().0,
+                ));
+            }
+        }
         outcomes
+    }
+
+    pub fn set_script_authority(&mut self, enabled: bool) {
+        self.script_authority = enabled;
+    }
+    pub fn script_statuses(&self) -> Vec<kokoverse_protocol::ScriptStatus> {
+        self.world
+            .resource::<scripting::ScriptRuntime>()
+            .statuses
+            .clone()
     }
 
     pub fn enable_local_player(&mut self, id: &str) -> Result<(), String> {
@@ -489,6 +539,7 @@ pub(crate) fn new_object(name: String, position: [f64; 3], color: [f64; 4]) -> O
         }),
         visual: kokoverse_protocol::Visual::Cube,
         playback: None,
+        scripts: Vec::new(),
         fields: vec![
             field("name", "Name", "string", json!(name), &Revisions::default()),
             field(
@@ -590,6 +641,7 @@ pub(crate) fn initialize_playback(object: &mut ObjectView, now: f64) {
 }
 
 fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
+    scripting::validate_world_scripts(snapshot.objects.iter().map(|o| o.scripts.as_slice()))?;
     let revision = snapshot
         .world_revision
         .parse::<u64>()
