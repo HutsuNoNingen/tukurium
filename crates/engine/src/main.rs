@@ -1,5 +1,6 @@
 mod assets;
 mod media_clock;
+mod panels;
 mod persistence;
 mod previews;
 use kokoverse_core::WorldModel;
@@ -70,6 +71,10 @@ enum Origin {
 }
 
 struct Engine {
+    panel_sessions: kokoverse_core::panel_sessions::PanelSessions,
+    remote_panel_sessions: Vec<kokoverse_protocol::PanelEditSession>,
+    last_panel_sessions: Value,
+    pending_panels: HashMap<String, (u64, std::time::Instant, String)>,
     clock: media_clock::ClockSync,
     assets: assets::Assets,
     local_ray: Option<InteractionRay>,
@@ -287,6 +292,8 @@ impl Engine {
         );
     }
     fn clear_remote_presence(&mut self) {
+        self.remote_panel_sessions.clear();
+        self.pending_panels.clear();
         self.remote_rays.clear();
         self.rays_dirty = true;
         self.cancel_grab();
@@ -340,7 +347,7 @@ impl Engine {
             Origin::Peer(peer) => self.network(Some(&peer), result),
         }
     }
-    fn queue_command(&mut self, requester: &str, command: WorldCommand, origin: Origin) {
+    fn queue_command(&mut self, requester: &str, mut command: WorldCommand, origin: Origin) {
         let command_id = command.command_id().to_string();
         let key = format!("{requester}:{command_id}");
         if let Some(mut result) = self.outcomes.get(&key).cloned() {
@@ -352,6 +359,25 @@ impl Engine {
         }
         if self.inflight.contains(&key) {
             return;
+        }
+        self.panel_sessions
+            .prune(&self.model.snapshot(), std::time::Instant::now());
+        if let Err(message) = self.panel_sessions.check_command(requester, &command) {
+            self.reply(
+                origin,
+                json!({"kind":"result","command_id":command_id,"ok":false,"message":message}),
+            );
+            return;
+        }
+        if let WorldCommand::Edit { edit } = &mut command
+            && edit.field_id == "panel_pin"
+            && edit.value["user_id"] == "$self"
+        {
+            edit.value["user_id"] = json!(if matches!(origin, Origin::Local(_)) {
+                "local".to_string()
+            } else {
+                requester.to_string()
+            });
         }
         if let WorldCommand::Structure { command: structure } = &command
             && let kokoverse_protocol::StructuralOperation::ImportAsset {
@@ -461,6 +487,7 @@ impl Engine {
             self.previews.dirty = false;
             self.ui(self.previews.body());
         }
+        self.publish_panel_sessions();
     }
     fn flush_results(&mut self) {
         let revision = self.model.snapshot().world_revision.parse::<u64>().unwrap();
@@ -502,6 +529,15 @@ impl Engine {
             let view = self.model.grab_view();
             let e = self.envelope(json!({"kind":"grab_state","grab":view}));
             self.send(id, e);
+            let body = json!({"kind":"panel_sessions","sessions":if self.host {self.panel_sessions.views()}else{self.remote_panel_sessions.clone()}});
+            let envelope = self.envelope(body);
+            self.send(id, envelope);
+            return;
+        }
+        if envelope.body["kind"] == "panel_input" {
+            if self.synced && envelope.authority_epoch == self.epoch {
+                self.panel_input(id, &envelope.body);
+            }
             return;
         }
         if envelope.body["kind"] == "clock_ping" {
@@ -669,6 +705,7 @@ impl Engine {
                     self.rays_dirty = true;
                     self.remote_seen.remove(&id);
                     self.model.remove_participant(&id);
+                    self.panel_sessions.forget(&id);
                     if peer == self.host_peer && !self.host {
                         self.synced = false;
                         self.pending.clear();
@@ -805,6 +842,19 @@ impl Engine {
                     if e.body["kind"] == "snapshot_request" {
                         let snapshot = self.model.snapshot();
                         self.network(Some(peer), json!({"kind":"snapshot", "snapshot":snapshot,"script_statuses":self.model.script_statuses()}));
+                        self.network(
+                            Some(peer),
+                            json!({"kind":"panel_sessions","sessions":self.panel_sessions.views()}),
+                        );
+                    } else if e.body["kind"] == "panel_input" && e.authority_epoch == self.epoch {
+                        if let Ok(input) = serde_json::from_value(e.body["input"].clone()) {
+                            let owner = format!(
+                                "{}:{}",
+                                peer,
+                                value["publisher_epoch"].as_str().unwrap_or("")
+                            );
+                            self.apply_panel_input(&owner, input, Origin::Peer(peer.into()));
+                        }
                     } else if (e.body["kind"] == "edit"
                         || e.body["kind"] == "structure"
                         || e.body["kind"] == "transform"
@@ -816,11 +866,25 @@ impl Engine {
                         if command.command_id().len() > 80 || command.command_id().is_empty() {
                             return;
                         }
-                        let requester = format!("{}:{}", peer, value["publisher_epoch"]);
+                        let requester = format!(
+                            "{}:{}",
+                            peer,
+                            value["publisher_epoch"].as_str().unwrap_or("")
+                        );
                         self.queue_command(&requester, command, Origin::Peer(peer.into()));
                     }
                 } else if peer == self.host_peer {
                     let kind = e.body["kind"].as_str().unwrap_or("");
+                    if kind == "panel_sessions" && e.authority_epoch == self.epoch {
+                        if let Ok(sessions) = serde_json::from_value(e.body["sessions"].clone()) {
+                            self.remote_panel_sessions = sessions;
+                        }
+                        return;
+                    }
+                    if kind == "panel_result" && e.authority_epoch == self.epoch {
+                        self.receive_panel_result(e.body);
+                        return;
+                    }
                     if kind == "snapshot" {
                         if kind == "snapshot"
                             && !self.epoch.is_empty()
@@ -959,6 +1023,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         last_grab: None,
         previews: previews::Previews::default(),
         model,
+        panel_sessions: Default::default(),
+        remote_panel_sessions: Vec::new(),
+        last_panel_sessions: Value::Null,
+        pending_panels: HashMap::new(),
         host,
         automatic_role: role == "auto",
         host_peer: arg("--host-peer", "host"),
@@ -1085,6 +1153,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 },
                 Some(Event::Closed(id)) => {
+                    engine.panel_sessions.forget(&format!("local-{id}"));
+                    engine.pending_panels.retain(|_,(client,_,_)|*client!=id);
                     engine.close_asset_client(id);
                     if engine.grab_owner == Some(id) { engine.cancel_grab(); }
                     if engine.input_owner.is_some_and(|(owner, _)| owner == id) {

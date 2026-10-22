@@ -13,6 +13,11 @@ pub(crate) struct MediaClock(pub f64);
 pub(crate) struct InputQueue(pub VecDeque<(u64, WorldCommand)>);
 
 pub(crate) enum Mutation {
+    SetPanelField {
+        entity: Entity,
+        field: String,
+        value: serde_json::Value,
+    },
     SetName {
         entity: Entity,
         value: String,
@@ -133,6 +138,12 @@ pub(crate) fn insert_object(world: &mut World, object: ObjectView) {
     }
     if let Some(playback) = object.playback {
         world.entity_mut(slot).insert(MediaPlayback(playback));
+    }
+    if let Some(panel) = object.panel.clone() {
+        world.entity_mut(slot).insert(WorldPanel(panel));
+    }
+    if let Some(inspector) = object.inspector.clone() {
+        world.entity_mut(slot).insert(InspectorView(inspector));
     }
     world
         .entity_mut(slot)

@@ -29,6 +29,8 @@ type SnapshotRoot<'a> = (
     Option<&'a Collider>,
     Option<&'a MediaPlayback>,
     &'a ScriptComponents,
+    Option<&'a WorldPanel>,
+    Option<&'a InspectorView>,
 );
 
 /// Resolve stable addresses and validate against state committed by the preceding command.
@@ -69,6 +71,15 @@ pub(crate) fn validate_commands(
                     let expected = edit.expected_revision.parse::<u64>().map_err(|_| "Invalid revision")?;
                     if expected != revisions.0.get(&edit.field_id).copied().unwrap_or(0) {
                         return Err("This field was changed by another editor. Review its current value and retry.".into());
+                    }
+                    if crate::panels::FIELDS.contains(&edit.field_id.as_str()) {
+                        let object = snapshot.0.objects.iter().find(|o|o.address==edit.target).unwrap();
+                        if object.panel.is_none() { return Err("Expected a world panel".into()); }
+                        if edit.field_id == "inspector_target" && !edit.value.is_null() {
+                            let address: Address=serde_json::from_value(edit.value.clone()).unwrap();
+                            if !snapshot.0.objects.iter().any(|o|o.address==address) {return Err("Inspector target no longer exists".into());}
+                        }
+                        return Ok(Mutation::SetPanelField{entity,field:edit.field_id,value:edit.value});
                     }
                     Ok(match edit.field_id.as_str() {
                         "name" => Mutation::SetName { entity, value: edit.value.as_str().unwrap().into() },
@@ -119,6 +130,7 @@ pub(crate) fn validate_commands(
                 WorldCommand::Structure { command } => {
                     let deleting = matches!(&command.operation, StructuralOperation::Delete { .. });
                     match command.operation {
+                        StructuralOperation::CreateInspector {target,position,rotation} => Ok(Mutation::Insert(Box::new(crate::panels::create(&snapshot.0,target,position,rotation)?))),
                         StructuralOperation::Create => {
                             let count = slots.iter().count();
                             if count >= MAX_OBJECTS { return Err("Object limit reached (128)".into()); }
@@ -137,6 +149,7 @@ pub(crate) fn validate_commands(
                         StructuralOperation::ImportAsset {name, position, rotation, visual} => {
                             if slots.iter().count() >= MAX_OBJECTS { return Err("Object limit reached (128)".into()); }
                             crate::validate_visual(&visual)?;
+                            if matches!(visual,kokoverse_protocol::Visual::Panel) {return Err("Use CreateInspector to create a panel".into());}
                             validate_value("name", &serde_json::json!(name))?;
                             validate_value("position", &serde_json::json!(position))?;
                             validate_value("rotation", &serde_json::json!(rotation))?;
@@ -158,6 +171,7 @@ pub(crate) fn validate_commands(
                             if deleting { return Ok(Mutation::Delete(target)); }
                             if slots.iter().count() >= MAX_OBJECTS { return Err("Object limit reached (128)".into()); }
                             let mesh = meshes.get(index.0[&root.renderer]).map_err(|_| "Renderer is missing")?;
+                            if matches!(mesh.visual,kokoverse_protocol::Visual::Panel) && snapshot.0.objects.iter().filter(|o|o.panel.is_some()).count()>=crate::panels::MAX_PANELS {return Err("Panel limit reached (16)".into());}
                             if meshes.iter().map(|m|image_size(&m.visual)).sum::<usize>() + image_size(&mesh.visual) > crate::MAX_IMAGE_WORLD { return Err("World image budget exceeded; remove an image first".into()); }
                             let mut position = transform.translation;
                             position[0] = (position[0] + 1.8).min(1000.0);
@@ -167,6 +181,10 @@ pub(crate) fn validate_commands(
                             object.world_scale = transform.scale;
                             object.collider = colliders.get(entity).ok().map(|c|c.0.clone());
                             object.playback = playback.get(entity).ok().map(|p|p.0.clone());
+                            let source=snapshot.0.objects.iter().find(|o|o.address==target).unwrap();
+                            object.panel=source.panel.clone();
+                            if let Some(panel)=&mut object.panel {panel.attachment=None;}
+                            object.inspector=source.inspector.clone();
                             object.scripts=scripts.get(entity).map(|s|s.0.clone()).unwrap_or_default();
                             for script in &mut object.scripts {script.id=uuid::Uuid::new_v4().to_string();script.revision="0".into();}
                             crate::scripting::validate_world_scripts(snapshot.0.objects.iter().map(|o|o.scripts.as_slice()).chain(std::iter::once(object.scripts.as_slice())))?;
@@ -191,6 +209,14 @@ pub(crate) fn apply_commands(world: &mut World) {
         Err(error) => Err(error),
         Ok(mutation) => {
             let selected = match mutation {
+                Mutation::SetPanelField {
+                    entity,
+                    field,
+                    value,
+                } => {
+                    crate::panels::apply_field(world, entity, &field, value);
+                    Some(world.get::<Identity>(entity).unwrap().0.clone())
+                }
                 Mutation::SetScripts { entity, value } => {
                     world.entity_mut(entity).insert(ScriptComponents(value));
                     world.get_mut::<ObjectRoot>(entity).unwrap().revision += 1;
@@ -329,6 +355,7 @@ pub(crate) fn apply_commands(world: &mut World) {
                     Some(selected)
                 }
                 Mutation::Delete(address) => {
+                    crate::panels::target_removed(world, &address);
                     remove_object(world, &address);
                     world.resource_mut::<ChangeSet>().removed.push(address);
                     None
@@ -344,7 +371,7 @@ pub(crate) fn apply_commands(world: &mut World) {
     });
 }
 
-fn bump_field(world: &mut World, entity: Entity, field: &str) {
+pub(crate) fn bump_field(world: &mut World, entity: Entity, field: &str) {
     *world
         .get_mut::<Revisions>(entity)
         .unwrap()
@@ -395,11 +422,24 @@ pub(crate) fn extract_snapshot(
         return;
     }
     let mut objects = Vec::with_capacity(roots.iter().len());
-    for (identity, slot, local, global, revisions, root, collider, playback, scripts) in &roots {
+    for (
+        identity,
+        slot,
+        local,
+        global,
+        revisions,
+        root,
+        collider,
+        playback,
+        scripts,
+        panel,
+        inspector,
+    ) in &roots
+    {
         let mesh = meshes
             .get(index.0[&root.renderer])
             .expect("registered renderer");
-        objects.push(kokoverse_protocol::ObjectView {
+        let mut object = kokoverse_protocol::ObjectView {
             address: identity.0.clone(),
             renderer: root.renderer.clone(),
             object_revision: root.revision.to_string(),
@@ -410,6 +450,8 @@ pub(crate) fn extract_snapshot(
             visual: mesh.visual.clone(),
             playback: playback.map(|p| p.0.clone()),
             scripts: scripts.0.clone(),
+            panel: panel.map(|p| p.0.clone()),
+            inspector: inspector.map(|i| i.0.clone()),
             fields: vec![
                 crate::field(
                     "name",
@@ -461,7 +503,9 @@ pub(crate) fn extract_snapshot(
                     revisions,
                 ),
             ],
-        });
+        };
+        crate::panels::append_fields(&mut object, revisions);
+        objects.push(object);
     }
     objects.sort_by(|a, b| a.address.instance_id.cmp(&b.address.instance_id));
     cache.0 = kokoverse_protocol::Snapshot {

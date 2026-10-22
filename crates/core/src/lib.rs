@@ -3,6 +3,8 @@ mod collision;
 mod components;
 mod grabbing;
 pub mod locomotion;
+pub mod panel_sessions;
+pub mod panels;
 pub mod presence;
 mod resources;
 pub mod scripting;
@@ -31,6 +33,7 @@ pub struct WorldModel {
     script_schedule: Schedule,
     script_accumulator: f64,
     script_authority: bool,
+    panel_schedule: Schedule,
 }
 
 impl Default for WorldModel {
@@ -98,6 +101,17 @@ impl WorldModel {
             )
                 .chain(),
         );
+        let mut panel_schedule = Schedule::default();
+        panel_schedule.add_systems(
+            (
+                panels::follow_users,
+                systems::update_transforms,
+                systems::collect_changes,
+                systems::extract_snapshot,
+                systems::publish_changes,
+            )
+                .chain(),
+        );
         Self {
             world,
             schedule,
@@ -107,6 +121,7 @@ impl WorldModel {
             script_schedule,
             script_accumulator: 0.0,
             script_authority: false,
+            panel_schedule,
         }
     }
 
@@ -176,6 +191,10 @@ impl WorldModel {
                     &mut self.world.resource_mut::<OutputQueue>().0,
                 ));
             }
+            self.panel_schedule.run(&mut self.world);
+            outcomes.extend(std::mem::take(
+                &mut self.world.resource_mut::<OutputQueue>().0,
+            ));
         }
         outcomes
     }
@@ -540,6 +559,8 @@ pub(crate) fn new_object(name: String, position: [f64; 3], color: [f64; 4]) -> O
         visual: kokoverse_protocol::Visual::Cube,
         playback: None,
         scripts: Vec::new(),
+        panel: None,
+        inspector: None,
         fields: vec![
             field("name", "Name", "string", json!(name), &Revisions::default()),
             field(
@@ -591,6 +612,7 @@ pub(crate) fn new_object(name: String, position: [f64; 3], color: [f64; 4]) -> O
 pub(crate) fn set_default_collider(object: &mut ObjectView) {
     let half_extents = match &object.visual {
         kokoverse_protocol::Visual::Cube => [0.75; 3],
+        kokoverse_protocol::Visual::Panel => [0.6, 0.8, 0.025],
         kokoverse_protocol::Visual::Image { width, height, .. }
         | kokoverse_protocol::Visual::Video { width, height, .. } => {
             let ratio = *width as f64 / *height as f64;
@@ -606,7 +628,9 @@ pub(crate) fn set_default_collider(object: &mut ObjectView) {
         half_extents,
         solid: !matches!(
             object.visual,
-            kokoverse_protocol::Visual::Image { .. } | kokoverse_protocol::Visual::Video { .. }
+            kokoverse_protocol::Visual::Image { .. }
+                | kokoverse_protocol::Visual::Video { .. }
+                | kokoverse_protocol::Visual::Panel
         ),
     });
     sync_object_fields(object);
@@ -627,6 +651,7 @@ pub(crate) fn sync_object_fields(object: &mut ObjectView) {
                 .push(field(id, label, kind, value, &Revisions::default()));
         }
     }
+    panels::append_fields(object, &Revisions::default());
 }
 
 pub(crate) fn initialize_playback(object: &mut ObjectView, now: f64) {
@@ -649,10 +674,20 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
     if snapshot.objects.len() > MAX_OBJECTS {
         return Err("Object limit exceeded".into());
     }
+    if snapshot
+        .objects
+        .iter()
+        .filter(|o| o.panel.is_some())
+        .count()
+        > panels::MAX_PANELS
+    {
+        return Err("Panel limit exceeded".into());
+    }
     let mut ids = HashSet::new();
     let mut image_bytes = 0;
     for object in &snapshot.objects {
         validate_visual(&object.visual)?;
+        panels::validate_object(object)?;
         if let kokoverse_protocol::Visual::Image {
             data_url,
             width,
@@ -677,7 +712,7 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
             .parse::<u64>()
             .map_err(|_| "Invalid object revision")?;
         if object_revision > revision
-            || object.fields.len() != 7
+            || object.fields.len() != if object.panel.is_some() { 11 } else { 7 }
             || matches!(object.visual, kokoverse_protocol::Visual::Video { .. })
                 != object.playback.is_some()
         {
@@ -697,6 +732,10 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
                 "scale" => "vec3",
                 "collider" => "collider",
                 "playback" => "playback",
+                "panel_size" => "panel_size",
+                "panel_pin" => "panel_pin",
+                "panel_scroll" => "panel_scroll",
+                "inspector_target" => "address",
                 _ => "color",
             };
             if field_revision > object_revision
@@ -739,7 +778,7 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
 
 pub fn validate_visual(visual: &kokoverse_protocol::Visual) -> Result<(), String> {
     match visual {
-        kokoverse_protocol::Visual::Cube => Ok(()),
+        kokoverse_protocol::Visual::Cube | kokoverse_protocol::Visual::Panel => Ok(()),
         kokoverse_protocol::Visual::Image { data_url, .. } => {
             if &validate_image(data_url)? == visual {
                 Ok(())
@@ -821,6 +860,9 @@ pub(crate) fn validate_image(data_url: &str) -> Result<kokoverse_protocol::Visua
 }
 
 pub(crate) fn validate_value(field: &str, value: &Value) -> Result<(), String> {
+    if panels::FIELDS.contains(&field) {
+        return panels::validate_field(field, value);
+    }
     let valid = match field {
         "name" => value
             .as_str()

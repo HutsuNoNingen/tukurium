@@ -3,6 +3,8 @@ use serde_json::Value;
 use std::io;
 mod scripts;
 pub use scripts::*;
+mod panels;
+pub use panels::*;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const MAX_FRAME: usize = 1024 * 1024;
@@ -170,6 +172,10 @@ pub struct ObjectView {
     pub playback: Option<VideoPlayback>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scripts: Vec<ScriptComponent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel: Option<WorldPanel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inspector: Option<InspectorView>,
     pub fields: Vec<Field>,
 }
 
@@ -178,6 +184,7 @@ pub struct ObjectView {
 pub enum Visual {
     #[default]
     Cube,
+    Panel,
     Image {
         data_url: String,
         width: u32,
@@ -234,6 +241,11 @@ pub struct StructuralCommand {
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum StructuralOperation {
     Create,
+    CreateInspector {
+        target: Option<Address>,
+        position: [f64; 3],
+        rotation: [f64; 4],
+    },
     CreateImage {
         data_url: String,
     },

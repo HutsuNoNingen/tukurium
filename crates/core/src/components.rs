@@ -39,6 +39,12 @@ pub struct MediaPlayback(pub kokoverse_protocol::VideoPlayback);
 #[derive(Component, Clone, Default)]
 pub struct ScriptComponents(pub Vec<kokoverse_protocol::ScriptComponent>);
 
+#[derive(Component, Clone)]
+pub struct WorldPanel(pub kokoverse_protocol::WorldPanel);
+
+#[derive(Component, Clone)]
+pub struct InspectorView(pub kokoverse_protocol::InspectorView);
+
 #[derive(Component)]
 pub struct MeshRenderer {
     pub host: Address,
