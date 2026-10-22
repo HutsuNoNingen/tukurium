@@ -30,6 +30,7 @@ PowerShellで、このフォルダーから実行する。
 - Inspectorから名前・色・位置・回転・各軸のスケールとColliderを編集できる。値を変えるとApplyなしで自動同期する（約160ms間隔）。`I`キーまたは上部のInspectorボタンで表示を切り替える。Colliderの有無が選択・把持、Solidがプレイヤーとの衝突を決める。画像の初期設定はColliderあり・Solidなし。保持中も位置・回転・スケールを同期し、離すとまとめて確定する。
 - `V`または上部メニューで三人称→一人称（FPS）→フリーカメラを切り替え。フリーカメラではQ/Eで上下移動。
 - アバター操作中はSpaceでジャンプ。箱に当たり、箱の上へ乗れる。乗っている箱を動かすと追従する。`F`で選択した物体を見に行く。アバター操作へ戻るには`V`。
+- SpaceはUIの決定操作に使わない。メイン画面のボタン・チェックボックスにフォーカスが残っていてもジャンプできる。文字・数値・コードの入力中はジャンプせず、入力欄として扱う。UIのキーボード決定はEnter。
 - `PEOPLE`の入力欄で表示名を変更し、Enterで確定。
 - `PEOPLE`の`Avatar texture…`でお絵描きアバター用の画像を選び、`Reset`で標準へ戻す。見た目は他の参加者と共有され、次回起動時にも引き継ぐ。
 - 物体を選び、Inspectorの`Script Systems…`からLuauの動作を追加する。`Rotator`は回転、`ClickColor`は左クリックで色を切り替える例。コードを書いて`Apply / restart`で反映し、公開パラメータは自動同期する。`Run on host`で停止・再開。コード・設定・明示的な状態も保存・複製できる。詳しくは[UGC Script Systems](docs/ugc-scripting.md)。
@@ -73,6 +74,7 @@ node tests/playback-integration.mjs --rendered
 node tests/avatar-integration.mjs
 node tests/persistence-integration.mjs
 node tests/ugc-integration.mjs --rendered
+node tests/ui-focus-integration.mjs --rendered
 ```
 
 統合テストは独立したローカル中継・Engine・アダプターを起動して後片付けする。双方向の編集、同一フィールドの競合、重複要求、再接続、不正値、生成・複製・削除、アバターの名前・姿勢同期と退出を確認する。Godotのフォーム・ボタン操作とモデルの読み込みも含む。強制切断では中継側の古い接続が失効するまで再参加を待つため、約1分かかる場合がある。

@@ -108,6 +108,10 @@ var frames := 0
 var avatar_restore_started := false
 
 func _ready() -> void:
+	# Space belongs to gameplay/text entry, not BaseButton's default UI accept.
+	for event in InputMap.action_get_events("ui_accept"):
+		if event is InputEventKey and (event.keycode == KEY_SPACE or event.physical_keycode == KEY_SPACE):
+			InputMap.action_erase_event("ui_accept", event)
 	var bindings := {"move_left":KEY_A, "move_right":KEY_D, "move_forward":KEY_W, "move_back":KEY_S, "jump":KEY_SPACE, "grab_rotate":KEY_E}
 	for action in bindings:
 		if not InputMap.has_action(action):
@@ -735,8 +739,9 @@ func disconnect_engine(message: String) -> void:
 func send_player_input() -> void:
 	if not connected: return
 	var movement := Vector2.ZERO
-	var jump_held: bool = Input.is_action_pressed("jump") and get_viewport().gui_get_focus_owner() == null
-	var active: bool = player_initialized and avatar_camera and not gizmo.dragging and (fps_active or look or jump_requested or jump_held)
+	var keyboard_blocked := gameplay_keyboard_blocked()
+	var jump_held: bool = Input.is_action_pressed("jump") and not keyboard_blocked
+	var active: bool = not keyboard_blocked and player_initialized and avatar_camera and not gizmo.dragging and (fps_active or look or jump_requested or jump_held)
 	if active and (look or fps_active):
 		movement = Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	queue_message({"kind":"player_input", "input":{
@@ -1250,8 +1255,15 @@ func set_view_mode(mode: int) -> void:
 	view_mode.select(mode)
 	view_mode.release_focus()
 
+func gameplay_keyboard_blocked() -> bool:
+	var focus := get_viewport().gui_get_focus_owner()
+	if focus is LineEdit or focus is TextEdit: return true
+	for window in get_tree().root.find_children("*", "Window", true, false):
+		if window.visible and window.has_focus(): return true
+	return false
+
 func try_jump() -> void:
-	if player_initialized and avatar_camera and not gizmo.dragging:
+	if not gameplay_keyboard_blocked() and player_initialized and avatar_camera and not gizmo.dragging:
 		jump_requested = true
 		send_player_input()
 
@@ -1278,6 +1290,10 @@ func refresh_fields() -> void:
 	filling = false
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventKey and (event.keycode == KEY_SPACE or event.physical_keycode == KEY_SPACE) and not gameplay_keyboard_blocked():
+		if event.pressed and not event.echo: try_jump()
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_I:
 		var focus := get_viewport().gui_get_focus_owner()
 		if fps_active or not (focus is LineEdit or focus is TextEdit):
