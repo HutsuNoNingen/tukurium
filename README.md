@@ -59,6 +59,8 @@ Godot :47010 ↔ Guest Engine :47011 ↔ Go adapter
 
 詳細は [現在の実装と通信仕様](docs/runtime.md)、設計全体は [design.md](docs/design.md)、KokoSyncの接続方針は [kokosync.md](docs/kokosync.md) を参照。
 
+複数の共有ワールド内インスペクタに向けた調査と実装案は [Resoniteのインスペクタ調査](docs/resonite-world-inspectors.md) を参照。ワールド内パネルはまだ未実装。
+
 ## 検証
 
 ```powershell
