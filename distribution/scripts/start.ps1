@@ -125,8 +125,17 @@ try {
         if ($reservationB) { $reservationB.Stop() }
     }
     Write-Startup "Local ports: renderer=$BasePort adapter=$transportPort"
-    $engineArgs = @('--role',$role,'--name',$Username,'--session',$settings.session,'--peer',$peer,'--host-peer',$settings.host_peer,'--port',"$BasePort",'--transport-port',"$transportPort")
-    if (Test-Path -LiteralPath (Join-Path $runDirectory 'world.json')) { $engineArgs += @('--load',(Join-Path $runDirectory 'world.json')) }
+    $assetRoot = Join-Path $runDirectory 'assets'
+    $sharedAssets = Join-Path $assetRoot 'shared'
+    New-Item -ItemType Directory -Path $sharedAssets -Force | Out-Null
+    # Preserve assets cached by older releases whose cache changed with the IPC port.
+    Get-ChildItem -LiteralPath $assetRoot -Directory | Where-Object { $_.Name -match '^\d+$' } | ForEach-Object {
+        Get-ChildItem -LiteralPath $_.FullName -File | Where-Object { $_.Name -match '^[a-f0-9]{64}\.(glb|ogv|png)$' } | ForEach-Object {
+            $destination = Join-Path $sharedAssets $_.Name
+            if (-not (Test-Path -LiteralPath $destination)) { Copy-Item -LiteralPath $_.FullName -Destination $destination }
+        }
+    }
+    $engineArgs = @('--role',$role,'--name',$Username,'--session',$settings.session,'--peer',$peer,'--host-peer',$settings.host_peer,'--port',"$BasePort",'--transport-port',"$transportPort",'--save',(Join-Path $runDirectory 'world.json'),'--asset-dir',$sharedAssets)
     Start-PackageProcess 'engine' 'bin/kokoverse-engine.exe' $engineArgs
     $listening = $false
     for ($attempt=0; $attempt -lt 50; $attempt++) {
@@ -157,10 +166,10 @@ try {
         $mediaScript = Join-Path $PSScriptRoot 'setup-media.ps1'
         Start-PackageProcess 'media-setup' "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$mediaScript)
     }
-    @{ui_port=$BasePort;transport_port=$transportPort;role=$role;peer=$peer;session=$settings.session} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runDirectory 'connection.json') -Encoding UTF8
+    @{ui_port=$BasePort;transport_port=$transportPort;role=$role;peer=$peer;session=$settings.session;autosave=$true} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runDirectory 'connection.json') -Encoding UTF8
     ConvertTo-Json -InputObject @($started.ToArray()) | Set-Content -LiteralPath $recordPath -Encoding UTF8
     Write-Startup "Kokoverse started as $role. Relay: $($settings.relay), room: kokoverse/$($settings.session)"
-    Write-Host 'Use Stop.bat when finished. The first participant hosts the world and must stay connected.'
+    Write-Host 'The host saves the world automatically. Use Stop.bat to save and exit. The host must stay connected while others edit.'
 } catch {
     foreach ($record in $started) { Stop-Process -Id $record.id -ErrorAction SilentlyContinue }
     throw

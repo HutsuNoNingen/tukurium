@@ -5,6 +5,8 @@ $PackageRoot = (Resolve-Path -LiteralPath $PackageRoot).Path
 $testRoot = Join-Path $workspaceRoot ('.run/launcher test 日本語 ' + [guid]::NewGuid().ToString('N'))
 $folders = @()
 $launchers = @()
+$sampleTexture = Join-Path $workspaceRoot 'client-godot/assets/oekaki/sample.png'
+$textureHash = (Get-FileHash -LiteralPath $sampleTexture -Algorithm SHA256).Hash.ToLowerInvariant()
 try {
     foreach ($name in @('first','second')) {
         $folder = Join-Path $testRoot $name
@@ -16,6 +18,9 @@ try {
         # Simulate copying an already-used installation, including its old identity.
         'guest-0123456789abcdef0123456789abcdef' | Set-Content -LiteralPath (Join-Path $folder '.run/peer-id.txt') -Encoding Ascii
         $PackageRoot.ToLowerInvariant() | Set-Content -LiteralPath (Join-Path $folder '.run/peer-folder.txt') -Encoding UTF8
+        $oldCache = Join-Path $folder '.run/assets/49999'
+        New-Item -ItemType Directory -Path $oldCache -Force | Out-Null
+        Copy-Item -LiteralPath $sampleTexture -Destination (Join-Path $oldCache ($textureHash+'.png'))
         $arguments = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',('"'+(Join-Path $folder 'scripts/start.ps1')+'"'),'-Mode','Join','-Username',('"'+$name+' Tester"'),'-Headless','-SkipMedia')
         $launchers += Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $folder 'startup-output.log') -RedirectStandardError (Join-Path $folder 'startup-error.log')
     }
@@ -28,6 +33,9 @@ try {
     if (@($ports | Sort-Object -Unique).Count -ne 4) { throw 'Concurrent copies reused local ports' }
     if ($connections[0].peer -eq $connections[1].peer) { throw 'Copied installations reused the same guest identity' }
     foreach ($folder in $folders) {
+        $migratedTexture = Join-Path $folder ('.run/assets/shared/'+$textureHash+'.png')
+        if (-not (Test-Path -LiteralPath $migratedTexture) -or (Get-FileHash -LiteralPath $migratedTexture -Algorithm SHA256).Hash.ToLowerInvariant() -ne $textureHash) { throw 'Legacy asset cache was not preserved' }
+        if (Test-Path -LiteralPath (Join-Path $folder '.run/world.json')) { throw 'Guest wrote a host checkpoint' }
         $records = Get-Content -LiteralPath (Join-Path $folder '.run/processes.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         if (@($records).Count -ne 2) { throw 'Expected an engine and adapter' }
         foreach ($record in $records) { if (-not (Get-Process -Id $record.id -ErrorAction SilentlyContinue)) { throw 'A runtime process exited' } }
@@ -35,7 +43,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Stop script failed' }
         foreach ($record in $records) { if (Get-Process -Id $record.id -ErrorAction SilentlyContinue) { throw 'Stop left a runtime process alive' } }
     }
-    Write-Output 'PASS: concurrent Windows PowerShell launches select four unique ports, copied guest IDs change, and Unicode process records stop both runtimes.'
+    Write-Output 'PASS: concurrent launches select unique ports, copied guest IDs change, legacy assets migrate, and Unicode process records stop both runtimes without saving guest worlds.'
 } finally {
     foreach ($folder in $folders) {
         if (Test-Path -LiteralPath (Join-Path $folder '.run/processes.json')) { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $folder 'scripts/stop.ps1') }

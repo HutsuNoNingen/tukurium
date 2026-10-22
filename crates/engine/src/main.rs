@@ -1,5 +1,6 @@
 mod assets;
 mod media_clock;
+mod persistence;
 mod previews;
 use kokoverse_core::WorldModel;
 use kokoverse_protocol::{
@@ -886,13 +887,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut model = WorldModel::new();
     model.set_media_time(clock.now());
     let load = arg("--load", "");
+    let save = arg("--save", "");
+    let save_path = (!save.is_empty()).then(|| std::path::PathBuf::from(&save));
     if !load.is_empty() {
-        let bytes = std::fs::read(load)?;
-        if bytes.len() > kokoverse_protocol::MAX_FRAME {
-            return Err("Saved world exceeds size limit".into());
-        }
-        model.restore(serde_json::from_slice::<Snapshot>(&bytes)?)?;
+        model.restore(persistence::read_snapshot(std::path::Path::new(&load))?)?;
+    } else if host
+        && let Some(path) = &save_path
+        && (path.exists() || persistence::backup_path(path).exists())
+    {
+        model.restore(persistence::load_checkpoint(path)?)?;
+        eprintln!("Restored world from {}", path.display());
     }
+    // Auto-role clients must wait for the relay's decision: a guest can join
+    // even if an unrelated checkpoint in its own installation is unreadable.
+    let mut auto_checkpoint = if role == "auto" && load.is_empty() {
+        save_path.clone()
+    } else {
+        None
+    };
+    let mut persistence = persistence::Persistence::new(save_path);
     let mut engine = Engine {
         clock,
         assets: assets::Assets::new(std::path::PathBuf::from(arg(
@@ -961,10 +974,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut retry = tokio::time::interval(Duration::from_secs(2));
     let mut simulation = tokio::time::interval(Duration::from_millis(16));
     let mut poses = tokio::time::interval(Duration::from_millis(50));
+    let mut autosave = tokio::time::interval(Duration::from_secs(2));
+    autosave.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     poses.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     simulation.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
+            _ = tokio::signal::ctrl_c() => break,
+            _ = autosave.tick() => {
+                if let Err(error) = persistence.poll().await {
+                    eprintln!("World autosave failed: {error}");
+                    engine.status(&format!("World autosave failed: {error}"));
+                }
+                if engine.host { persistence.schedule(engine.model.snapshot()); }
+            },
             _ = simulation.tick() => engine.tick(),
             _ = poses.tick() => engine.send_pose(),
             accepted = ui.accept() => { let (stream, _) = accepted?; if engine.clients.len() < 32 { next_id += 1; tokio::spawn(connection(stream, next_id, false, events.clone())); } },
@@ -992,7 +1015,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 Some(Event::Message(id, value)) => {
                     if !engine.clients.contains_key(&id) { continue; }
-                    if Some(id) == engine.adapter { engine.handle_network(value); } else { engine.handle_ui(id, value); }
+                    if Some(id) == engine.adapter {
+                        if value["type"] == "ready"
+                            && let Some(peer) = value["self_peer"].as_str()
+                            && let Some(path) = auto_checkpoint.take()
+                            && peer == engine.host_peer
+                            && (path.exists() || persistence::backup_path(&path).exists())
+                        {
+                            engine.model.restore(persistence::load_checkpoint(&path)?)?;
+                            eprintln!("Restored world from {}", path.display());
+                        }
+                        engine.handle_network(value);
+                    } else {
+                        let save_request = serde_json::from_value::<Envelope>(value.clone()).ok()
+                            .filter(|e| e.protocol_version == VERSION && e.session_id == engine.session && e.body["kind"] == "save_world");
+                        if let Some(request) = save_request {
+                            engine.tick();
+                            let result = if engine.host {
+                                persistence.flush(engine.model.snapshot()).await
+                            } else { Ok(false) };
+                            let response = match result {
+                                Ok(saved) => json!({"kind":"save_result","request_id":request.body["request_id"],"ok":true,"saved":saved,"world_revision":engine.model.snapshot().world_revision}),
+                                Err(error) => json!({"kind":"save_result","request_id":request.body["request_id"],"ok":false,"message":error}),
+                            };
+                            let envelope = engine.envelope(response);
+                            engine.send(id, envelope);
+                        } else { engine.handle_ui(id, value); }
+                    }
                 },
                 Some(Event::Closed(id)) => {
                     engine.close_asset_client(id);
@@ -1013,6 +1062,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None => break,
             },
         }
+    }
+    if engine.host {
+        persistence.flush(engine.model.snapshot()).await?;
     }
     Ok(())
 }
