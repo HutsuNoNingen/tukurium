@@ -85,4 +85,6 @@ Entityから読める値はその呼び出し開始時点のコピー。変更�
 
 `cargo test --workspace --locked`、`cargo clippy --workspace --all-targets --locked -- -D warnings` に加え、release Engineで `node tests/ugc-integration.mjs --rendered` を実行する。実際のGodot UIで追加・コード編集・パラメータ変更・停止・クリック・構文エラーの復旧を行い、ホスト・ゲスト・途中参加者、複製の状態、保存・再起動、無限ループ停止を検証する。描画テストの画像は `.run/ugc-*/script-editor.png`。
 
+`--relay=wss://45.77.130.146/ws` では認証付きの公開中継を使い、テスト専用のランダムルームで同じ一連の検証を実行できる。この経路でも3クライアントで確認済み。認証情報は環境変数で渡す。
+
 連続回転の検証で浮動小数点のJSON読み戻しに最下位桁の差が出たため、`serde_json` の `float_roundtrip` を有効にした。また、ゲストEngineが付け替えるネットワーク要求IDを元のUI要求IDへ戻して応答するようにし、複数編集UIの応答を識別できるようにした。

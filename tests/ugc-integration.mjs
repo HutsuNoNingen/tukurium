@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 
 const root=resolve(import.meta.dirname,'..'),session=`ugc-${randomUUID()}`;
 const base=52000+Math.floor(Math.random()*700),work=resolve(root,'.run',session),saved=resolve(work,'world.json');
+const relay=process.argv.find(arg=>arg.startsWith('--relay='))?.slice(8);
 mkdirSync(work,{recursive:true});const children=[],sockets=[];
 function start(file,args){const child=spawn(resolve(root,file),args,{cwd:root,windowsHide:true,stdio:['ignore','pipe','pipe']});child.logs='';child.stdout.on('data',d=>child.logs+=d);child.stderr.on('data',d=>child.logs+=d);children.push(child);return child;}
 async function until(test,message,ms=15000){const end=Date.now()+ms;while(Date.now()<end){const value=test();if(value)return value;await delay(20);}throw Error(message);}
@@ -20,10 +21,10 @@ async function connect(port){
     return {messages,latest:()=>messages.filter(m=>m.kind==='snapshot').at(-1),send(body){const data=Buffer.from(JSON.stringify({protocol_version:2,session_id:session,authority_epoch:epoch,sequence:'1',body}));const h=Buffer.alloc(4);h.writeUInt32BE(data.length);socket.write(Buffer.concat([h,data]));},wait(test){return until(()=>messages.find(test),'UGC response timed out');}};
   }throw Error('Engine did not start');
 }
-async function peer(role,index){const port=base+2+index*2;const child=start('target/release/kokoverse-engine.exe',['--role',role,'--session',session,'--port',String(port),'--transport-port',String(port+1),'--asset-dir',resolve(work,`assets-${index}`),...(role==='host'?['--save',saved]:[])]);const client=await connect(port);start('.run/build/kokosync-adapter.exe',['--session',session,'--peer',role==='host'?'host':`guest-${index}`,'--engine',`127.0.0.1:${port+1}`,'--address',`127.0.0.1:${base+1}`,'--insecure-development']);await until(()=>client.latest()?.editable,'Peer did not sync');return {child,client,port};}
+async function peer(role,index){const port=base+2+index*2;const child=start('target/release/kokoverse-engine.exe',['--role',role,'--session',session,'--port',String(port),'--transport-port',String(port+1),'--asset-dir',resolve(work,`assets-${index}`),...(role==='host'?['--save',saved]:[])]);const client=await connect(port);start('.run/build/kokosync-adapter.exe',['--session',session,'--peer',role==='host'?'host':`guest-${index}`,'--engine',`127.0.0.1:${port+1}`,'--address',relay||`127.0.0.1:${base+1}`,...(relay?[]:['--insecure-development'])]);await until(()=>client.latest()?.editable,'Peer did not sync');return {child,client,port};}
 async function command(client,action,target){const command_id=randomUUID();client.send({kind:'script',command:{command_id,target, ...action}});const result=await client.wait(m=>m.kind==='result'&&m.command_id===command_id);return result;}
 try {
-  start('.tools/kokosync-relay.exe',['--http',`127.0.0.1:${base}`,'--quic',`127.0.0.1:${base+1}`]);
+  if(!relay)start('.tools/kokosync-relay.exe',['--http',`127.0.0.1:${base}`,'--quic',`127.0.0.1:${base+1}`]);
   const host=await peer('host',0),guest=await peer('guest',1);
   const probe=await command(guest.client,{action:'attach',source:host.client.latest().script_templates[0].source},host.client.latest().snapshot.objects[0].address);
   assert.equal(probe.ok,true,JSON.stringify(probe));
