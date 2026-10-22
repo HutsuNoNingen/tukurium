@@ -334,7 +334,8 @@ mod tests {
     #[tokio::test]
     async fn partial_tcp_reads_preserve_message_boundaries() {
         let (mut writer, mut reader) = tokio::io::duplex(32);
-        let expected = json!({"label":"共同編集", "revision":"9007199254740993"});
+        let expected = json!({"label":"共同編集", "revision":"9007199254740993",
+            "rotation":[0.0,0.2657920358400604,0.0,0.9640303904359013]});
         let bytes = serde_json::to_vec(&expected).unwrap();
         let task = tokio::spawn(async move {
             let framed = [(bytes.len() as u32).to_be_bytes().as_slice(), &bytes].concat();

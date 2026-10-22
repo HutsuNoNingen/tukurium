@@ -89,7 +89,7 @@ struct Engine {
     synced: bool,
     adapter: Option<u64>,
     clients: HashMap<u64, mpsc::Sender<Value>>,
-    pending: HashMap<String, (u64, std::time::Instant)>,
+    pending: HashMap<String, (u64, std::time::Instant, String)>,
     deferred_results: HashMap<String, Value>,
     tickets: HashMap<u64, (String, String, Origin)>,
     inflight: HashSet<String>,
@@ -148,23 +148,24 @@ impl Engine {
         self.sync_grab();
     }
     fn dispatch_command(&mut self, id: u64, mut command: WorldCommand, grab: bool) {
+        let requested_id = command.command_id().to_string();
         if !self.host {
             command.set_command_id(Uuid::new_v4().to_string());
         }
         if grab {
-            self.grab_command = Some(command.command_id().to_string());
+            self.grab_command = Some(requested_id.clone());
         }
         if self.host {
             self.queue_command(&format!("local-{id}"), command, Origin::Local(id));
         } else if self.pending.len() < 128 {
             self.pending.insert(
                 command.command_id().to_string(),
-                (id, std::time::Instant::now()),
+                (id, std::time::Instant::now(), requested_id),
             );
             let peer = self.host_peer.clone();
             self.network(Some(&peer), serde_json::to_value(command).unwrap());
         } else {
-            self.reply(Origin::Local(id),json!({"kind":"result","command_id":command.command_id(),"ok":false,"message":"Too many pending edits"}));
+            self.reply(Origin::Local(id),json!({"kind":"result","command_id":requested_id,"ok":false,"message":"Too many pending edits"}));
         }
     }
     fn handle_grab(&mut self, id: u64, body: &Value) {
@@ -476,7 +477,8 @@ impl Engine {
             .collect();
         for command in ready {
             let mut result = self.deferred_results.remove(&command).unwrap();
-            if let Some((id, _)) = self.pending.remove(&command) {
+            if let Some((id, _, requested_id)) = self.pending.remove(&command) {
+                result["command_id"] = json!(requested_id);
                 if result.get("snapshot").is_some() {
                     result["snapshot"] = json!(self.model.snapshot());
                 }
@@ -1034,7 +1036,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ = retry.tick() => {
                 engine.expire_assets();
                 engine.clock.expire();
-                if engine.pending.values().any(|(_, time)| time.elapsed() > Duration::from_secs(10)) {
+                if engine.pending.values().any(|(_, time, _)| time.elapsed() > Duration::from_secs(10)) {
                     engine.pending.clear();
                     engine.deferred_results.clear();
                     engine.synced = false;
@@ -1090,7 +1092,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         engine.model.stop_player_input();
                     }
                     engine.previews.remove(&format!("local:{id}"));
-                    engine.clients.remove(&id); engine.pending.retain(|_, (client, _)| *client != id);
+                    engine.clients.remove(&id); engine.pending.retain(|_, (client, _, _)| *client != id);
                     if engine.adapter == Some(id) {
                         engine.clear_remote_presence();
                         engine.adapter = None;
