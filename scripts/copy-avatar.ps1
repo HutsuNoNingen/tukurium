@@ -13,5 +13,11 @@ $cachePaths = Get-ChildItem -LiteralPath (Join-Path $source 'assets/oekaki') -Fi
 } | Sort-Object -Unique
 foreach ($path in $cachePaths) {
     Copy-Item -LiteralPath (Join-Path $source $path) -Destination $cacheTarget -Force
+    # Keep the import checksum too, so packaging does not race re-importing the
+    # GLB and the texture that its importer generates beside it.
+    $checksum = [IO.Path]::ChangeExtension((Join-Path $source $path), '.md5')
+    if (Test-Path -LiteralPath $checksum) {
+        Copy-Item -LiteralPath $checksum -Destination $cacheTarget -Force
+    }
 }
 Copy-Item -LiteralPath (Join-Path $source '.godot/uid_cache.bin') -Destination (Join-Path $ClientDirectory '.godot/uid_cache.bin') -Force
