@@ -20,6 +20,23 @@ func mouse(position: Vector2, pressed: bool) -> void:
 	event.pressed = pressed
 	root.push_input(event, true)
 
+func fps_tab(scene, panel, index: int) -> bool:
+	var tabs: TabBar = panel.content.tabs
+	var point: Vector2 = tabs.get_global_transform() * tabs.get_tab_rect(index).get_center()
+	var local := Vector3((point.x/panel.viewport.size.x-0.5)*panel.mesh.size.x,(0.5-point.y/panel.viewport.size.y)*panel.mesh.size.y,0.025)
+	var direction: Vector3 = (panel.to_global(local)-scene.camera.global_position).normalized()
+	var aim := InputEventMouseMotion.new()
+	aim.position = root.size*0.5
+	aim.relative = Vector2(wrapf(scene.orbit_yaw-atan2(-direction.x,-direction.z),-PI,PI),scene.orbit_pitch-asin(direction.y))/0.003
+	root.push_input(aim,true)
+	await process_frame
+	await process_frame
+	mouse(root.size*0.5,true)
+	mouse(root.size*0.5,false)
+	if not scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_CAPTURED:
+		push_error("Inspector tab click released FPS mouse capture"); return false
+	return await wait_for(func(): return scene.objects[panel.panel_id].inspector.scripts_open==(index==1),"FPS gaze did not switch the inspector tab")
+
 func run() -> void:
 	var scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
@@ -92,6 +109,11 @@ func run() -> void:
 	scene.world_panels.edit(panel.panel_id, "position", [placement.x,placement.y,placement.z])
 	if not await wait_for(func(): return panel.position.distance_to(placement)<0.01, "Could not place panel for grab"): quit(1); return
 	await create_timer(0.1).timeout
+	if not await fps_tab(scene,panel,1): quit(1); return
+	if not await fps_tab(scene,panel,0): quit(1); return
+	scene.orbit_yaw = 0.0
+	scene.orbit_pitch = 0.0
+	await create_timer(0.1).timeout
 	var grab := InputEventMouseButton.new()
 	grab.button_index = MOUSE_BUTTON_RIGHT
 	grab.pressed = true
@@ -105,7 +127,7 @@ func run() -> void:
 	grab.pressed = false
 	root.push_input(grab, true)
 	if not await wait_for(func(): return not scene.pending and scene.hand_grab.is_empty() and scene.objects[panel.panel_id].world_scale[0] > 1.1, "Panel grab did not commit"): quit(1); return
-	print("WORLD PANELS SMOKE PASS: 3D pointer, text entry, independent targets, shared scroll and gizmos")
+	print("WORLD PANELS SMOKE PASS: 3D pointer, FPS gaze tabs, text entry, independent targets, shared scroll and gizmos")
 	scene.queue_free()
 	await process_frame
 	await process_frame

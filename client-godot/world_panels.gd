@@ -264,11 +264,11 @@ func route_input(event: InputEvent) -> bool:
 			if keyboard_id != hit.id: clear_focus()
 			keyboard_id = hit.id
 			capture_id = hit.id
-			if app.fps_active: app.release_cursor()
 		else: capture_id = ""
 	panels[hit.id].forward_pointer(event, hit.position)
-	# Hovering a panel must not stop FPS mouse-look; clicks and drags belong to the panel.
-	return not event is InputEventMouseMotion or not capture_id.is_empty() or not app.fps_active
+	# FPS aims the pointer with the view, including while dragging a UI control.
+	# Forward the same motion to mouse-look; only cursor-mode UI owns mouse motion.
+	return not event is InputEventMouseMotion or not app.fps_active
 
 func tick() -> void:
 	for view in views(): view.tick()

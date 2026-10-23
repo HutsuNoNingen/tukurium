@@ -26,10 +26,27 @@ func mouse(button: int, pressed: bool, shift: bool = false) -> void:
 	event.position=root.size*0.5
 	root.push_input(event,true)
 
-func click_control(scene, surface, control: Control) -> void:
+func aim_control(scene, surface, control: Control) -> Vector2:
 	var point := control.get_global_rect().get_center()
 	var local := Vector3((point.x/surface.viewport.size.x-0.5)*surface.mesh.size.x,(0.5-point.y/surface.viewport.size.y)*surface.mesh.size.y,0.025)
-	click(scene.camera.unproject_position(surface.to_global(local)))
+	var target: Vector3=surface.to_global(local)
+	if not scene.fps_active: return scene.camera.unproject_position(target)
+	var direction: Vector3=(target-scene.camera.global_position).normalized()
+	var yaw := atan2(-direction.x,-direction.z)
+	var pitch := asin(direction.y)
+	var motion := InputEventMouseMotion.new()
+	motion.position=root.size*0.5
+	motion.relative=Vector2(wrapf(scene.orbit_yaw-yaw,-PI,PI),scene.orbit_pitch-pitch)/0.003
+	root.push_input(motion,true)
+	await process_frame
+	await process_frame
+	return root.size*0.5
+
+func click_control(scene, surface, control: Control) -> void:
+	var captured: bool=scene.fps_active
+	click(await aim_control(scene,surface,control))
+	if captured and (not scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_CAPTURED):
+		push_error("FPS panel click released the mouse"); quit(1)
 
 func run() -> void:
 	var scene=load("res://main.tscn").instantiate()
@@ -73,7 +90,23 @@ func run() -> void:
 	Input.action_release("jump")
 	if not jumped: quit(1); return
 	if not await until(func(): return scene.grounded,"Player did not land after jump"): quit(1); return
-	scene.release_cursor()
+	# TPS uses the free pointer at the projected button position.
+	scene.set_view_mode(0)
+	await process_frame
+	await click_control(scene,surface,panel.cards[1])
+	if not await until(func(): return scene.objects[id].creation.shape=="sphere","TPS pointer did not select the button"): quit(1); return
+	if Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE: push_error("TPS panel click captured the mouse"); quit(1); return
+	scene.set_view_mode(1)
+	await process_frame
+	# Holding the UI button must still let relative mouse motion aim the view.
+	await aim_control(scene,surface,panel.cards[1])
+	mouse(MOUSE_BUTTON_LEFT,true)
+	var yaw_before: float=scene.orbit_yaw
+	motion=InputEventMouseMotion.new()
+	motion.position=root.size*0.5; motion.relative=Vector2(8,0)
+	root.push_input(motion,true)
+	mouse(MOUSE_BUTTON_LEFT,false)
+	if is_equal_approx(scene.orbit_yaw,yaw_before) or not scene.fps_active: push_error("FPS UI drag stopped mouse-look"); quit(1); return
 	var initial_count: int=scene.objects.values().filter(func(o): return o.visual.kind=="primitive").size()
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--screenshot="):
@@ -87,14 +120,15 @@ func run() -> void:
 			panel=surface.content
 			id=surface.panel_id
 			await create_timer(0.15).timeout
-		click_control(scene,surface,panel.cards[index])
+		await click_control(scene,surface,panel.cards[index])
 		if not await until(func(): return scene.objects[id].creation.shape==PRIMITIVES.SHAPES[index] and panel.selected==index,"3D selection was not shared"): quit(1); return
-		click_control(scene,surface,panel.create_button)
+		await click_control(scene,surface,panel.create_button)
 		if not await until(func(): return not scene.objects.has(id) and scene.objects.values().filter(func(o): return o.visual.kind=="primitive").size()==initial_count+index+1 and scene.current.visual.get("shape")==PRIMITIVES.SHAPES[index],"Primitive not created/selected: "+PRIMITIVES.NAMES[index]): quit(1); return
 		var object: Dictionary=scene.current
 		if object.visual.get("shape")!=PRIMITIVES.SHAPES[index] or scene.render_nodes[scene.selected_id].mesh.get_class()!=PRIMITIVES.create(PRIMITIVES.SHAPES[index]).get_class():
 			push_error("Wrong procedural mesh: expected "+PRIMITIVES.SHAPES[index]+", got "+str(object.visual)+", pending="+str(scene.pending)); quit(1); return
 		if not scene.first_person or scene.view_mode.selected!=1: push_error("Creation switched away from FPS"); quit(1); return
+		if not scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_CAPTURED: push_error("Creating an object released FPS mouse capture"); quit(1); return
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--screenshot="):
 			await RenderingServer.frame_post_draw
@@ -106,7 +140,7 @@ func run() -> void:
 	escape.keycode=KEY_ESCAPE; escape.pressed=true
 	root.push_input(escape,true)
 	if not scene.world_panels.panels.has(id) or Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE: push_error("Esc deleted world panel or captured cursor"); quit(1); return
-	print("CREATION SMOKE PASS: shared surface, move while open, grab/rotate/scale, shared selection, eight meshes, close after success, no camera switch")
+	print("CREATION SMOKE PASS: FPS gaze click/drag, TPS cursor, shared surface, move while open, grab/rotate/scale, eight meshes, close after success")
 	scene.queue_free()
 	await process_frame
 	await process_frame
