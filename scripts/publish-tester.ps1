@@ -73,6 +73,16 @@ try {
     $feedRoot = Join-Path $repo '.run/tester-feed'
     & (Join-Path $PSScriptRoot 'prepare-tester-feed.ps1') -PackageRoot $PackageRoot -OutputRoot $feedRoot
     if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw 'Feed preparation failed.' }
+    if ($PushTag) {
+        $branch = [string](& git symbolic-ref --quiet --short HEAD)
+        if ($LASTEXITCODE -ne 0 -or -not $branch) { throw 'Checkout a branch before pushing the release commit.' }
+        & git push origin ("HEAD:refs/heads/" + $branch)
+        if ($LASTEXITCODE -ne 0) { throw 'Could not push the release commit to origin. R2 was not changed.' }
+        $remoteBranch = [string](& git ls-remote origin ("refs/heads/" + $branch))
+        if ($LASTEXITCODE -ne 0 -or -not $remoteBranch -or ($remoteBranch -split "`t")[0] -ne $commit) {
+            throw 'The remote branch does not point to the release commit. R2 was not changed.'
+        }
+    }
     if ($existingTag.Count -eq 0) {
         & git tag -a $Tag -m "Kokoverse tester $Tag"
         if ($LASTEXITCODE -ne 0) { throw 'Could not create Git tag.' }

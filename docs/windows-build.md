@@ -165,6 +165,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Rust release build failed' }
 現在の管理API版には接続パスワードを同梱しない。旧版の `-RelayCredentialsFile` 引数や `relay-access.json` を持ち込まない。
 FFmpegの実行ファイルはZIPに入らず、利用者が `Install-Video-Tools.bat` で導入する。
 インストーラーはGyanDのGitHubリリースからSHA-256固定のZIPを取得し、接続できない場合は元の配布元へ切り替える。取得済みZIPは `%LOCALAPPDATA%/Kokoverse/tool-cache/` に保存され、次の版での導入に再利用する。
+配布版の `client-godot/version.txt` は梱包時にタグ由来の版名（例：`tester-v2026.10.24.4`）から生成する。アプリのホーム画面上部とウィンドウタイトルはこの版名を表示し、開発用のクライアントでは「開発版」と表示する。
 
 ## ZIPを展開して内容を照合する
 

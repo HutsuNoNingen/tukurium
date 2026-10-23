@@ -36,6 +36,10 @@ func run() -> void:
 	root.add_child(scene)
 	if not await wait_for(func(): return scene.connected and scene.service_panel.enabled, "Lobby not connected"): return
 	var panel = scene.service_panel
+	if panel.version_label.text != scene.app_version or not panel.version_label.is_visible_in_tree():
+		push_error("App version is missing from the visible header")
+		quit(1)
+		return
 	var owner_name := "UI Creator %s" % Time.get_unix_time_from_system()
 	panel.name_input.text = owner_name
 	click(panel,"Start")

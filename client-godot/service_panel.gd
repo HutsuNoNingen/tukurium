@@ -34,6 +34,7 @@ var page := "sessions"
 var pages := {}
 var nav := {}
 var heading: Label
+var version_label: Label
 var subtitle: Label
 var detail_box: VBoxContainer
 var detail_panel: PanelContainer
@@ -214,6 +215,10 @@ func setup(scene) -> void:
 	titles.add_child(heading)
 	subtitle=paragraph("一緒に作る場所を選ぶ。",13)
 	titles.add_child(subtitle)
+	version_label=text(app.app_version,12,MUTED)
+	version_label.name="AppVersion"
+	version_label.tooltip_text="このアプリの配布バージョン"
+	top.add_child(version_label)
 	back_button=button(top,"ワールドへ戻る",func(): if not current_session.is_empty(): shade.hide())
 	back_button.visible=false
 	var workspace := row(main,16)

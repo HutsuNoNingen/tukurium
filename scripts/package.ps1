@@ -52,6 +52,8 @@ try {
             Copy-Item -LiteralPath ($file.FullName + '.uid') -Destination (Join-Path $packageRoot 'client-godot')
         }
     }
+    $displayVersion = $name.Substring('Kokoverse-Windows-x64-'.Length)
+    $displayVersion | Set-Content -LiteralPath (Join-Path $packageRoot 'client-godot/version.txt') -Encoding Ascii -NoNewline
     $godotOutput = & .tools/godot/Godot_v4.7.2-stable_win64_console.exe --headless --path client-godot --editor --import --quit 2>&1
     if ($LASTEXITCODE -ne 0 -or ($godotOutput | Select-String -Pattern 'SCRIPT ERROR:|^ERROR:')) { throw 'Godot resource import failed' }
     & ./scripts/copy-avatar.ps1 -ClientDirectory (Join-Path $packageRoot 'client-godot')

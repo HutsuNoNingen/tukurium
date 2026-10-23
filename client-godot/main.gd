@@ -122,8 +122,13 @@ var frames := 0
 var avatar_restore_started := false
 const SERVICE_PANEL = preload("res://service_panel.gd")
 var service_panel = SERVICE_PANEL.new()
+var app_version := "開発版"
 
 func _ready() -> void:
+	if FileAccess.file_exists("res://version.txt"):
+		var packaged_version := FileAccess.get_file_as_string("res://version.txt").strip_edges()
+		if not packaged_version.is_empty(): app_version = packaged_version
+	DisplayServer.window_set_title("Kokoverse Workshop · " + app_version)
 	# Space belongs to gameplay/text entry, not BaseButton's default UI accept.
 	for event in InputMap.action_get_events("ui_accept"):
 		if event is InputEventKey and (event.keycode == KEY_SPACE or event.physical_keycode == KEY_SPACE):
@@ -1144,7 +1149,7 @@ func accept_message(message: Dictionary) -> void:
 			editable = body.editable
 			script_templates = body.get("script_templates", [])
 			script_statuses = body.get("script_statuses", [])
-			DisplayServer.window_set_title("Kokoverse Workshop — " + str(body.role).capitalize())
+			DisplayServer.window_set_title("Kokoverse Workshop · " + app_version + " — " + str(body.role).capitalize())
 			status_label.text = ("Host" if body.role == "host" else "Guest") + (" · Connected" if editable else " · Waiting for host")
 			apply_snapshot(body.snapshot)
 			apply_drive_frame(body.get("drive_frame", {}))
