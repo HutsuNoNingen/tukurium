@@ -1,5 +1,6 @@
 //! A renderer-independent ECS world with a scheduled command/transform/output pipeline.
 mod collision;
+mod drives;
 mod components;
 pub mod edit_sessions;
 mod grabbing;
@@ -32,6 +33,7 @@ pub struct WorldModel {
     simulation: Schedule,
     accumulator: f64,
     script_schedule: Schedule,
+    drive_schedule: Schedule,
     script_accumulator: f64,
     script_authority: bool,
     panel_schedule: Schedule,
@@ -62,6 +64,7 @@ impl WorldModel {
         world.init_resource::<collision::PreviewPositions>();
         world.init_resource::<grabbing::GrabState>();
         world.init_resource::<scripting::ScriptRuntime>();
+        world.init_resource::<drives::DriveRuntime>();
         world.insert_resource(SnapshotCache(Snapshot {
             world_revision: "0".into(),
             objects: vec![],
@@ -102,6 +105,8 @@ impl WorldModel {
             )
                 .chain(),
         );
+        let mut drive_schedule = Schedule::default();
+        drive_schedule.add_systems(drives::evaluate);
         let mut panel_schedule = Schedule::default();
         panel_schedule.add_systems(
             (
@@ -120,6 +125,7 @@ impl WorldModel {
             simulation,
             accumulator: 0.0,
             script_schedule,
+            drive_schedule,
             script_accumulator: 0.0,
             script_authority: false,
             panel_schedule,
@@ -168,11 +174,6 @@ impl WorldModel {
     /// Editing passes do not advance time. Character simulation has its own fixed steps.
     pub fn advance(&mut self, elapsed: std::time::Duration) -> Vec<CommandOutcome> {
         let mut outcomes = self.tick();
-        self.accumulator += elapsed.as_secs_f64().min(0.25);
-        while self.accumulator + 1e-9 >= locomotion::FIXED_STEP {
-            self.simulation.run(&mut self.world);
-            self.accumulator -= locomotion::FIXED_STEP;
-        }
         if self.script_authority {
             self.script_accumulator += elapsed.as_secs_f64().min(0.25);
             let interact = !self
@@ -197,7 +198,20 @@ impl WorldModel {
                 &mut self.world.resource_mut::<OutputQueue>().0,
             ));
         }
+        self.drive_schedule.run(&mut self.world);
+        self.accumulator += elapsed.as_secs_f64().min(0.25);
+        while self.accumulator + 1e-9 >= locomotion::FIXED_STEP {
+            self.simulation.run(&mut self.world);
+            self.accumulator -= locomotion::FIXED_STEP;
+        }
         outcomes
+    }
+
+    pub fn drive_frame(&self) -> kokoverse_protocol::DriveFrame {
+        self.world.resource::<drives::DriveRuntime>().frame.clone()
+    }
+    pub fn set_drive_clock_ready(&mut self, ready: bool) {
+        self.world.resource_mut::<drives::DriveRuntime>().ready = ready;
     }
 
     pub fn set_script_authority(&mut self, enabled: bool) {
@@ -412,6 +426,7 @@ impl WorldModel {
         validate_snapshot(&snapshot)?;
         let mut replacement = Self::empty();
         *replacement.world.resource_mut::<MediaClock>() = *self.world.resource::<MediaClock>();
+        replacement.world.resource_mut::<drives::DriveRuntime>().ready = self.world.resource::<drives::DriveRuntime>().ready;
         for participant in self.participants() {
             replacement.update_participant(participant)?;
         }

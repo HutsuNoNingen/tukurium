@@ -117,7 +117,7 @@ func setup(owner) -> void:
 	toolbar.add_child(selected_title)
 	run_button = Button.new()
 	run_button.text = "Run"
-	run_button.tooltip_text = "Run the saved script on the host. Saved state is preserved."
+	run_button.tooltip_text = "Run shared callbacks and local Drives. Saved state is preserved."
 	run_button.pressed.connect(func(): update_component(false, true))
 	toolbar.add_child(run_button)
 	pause_button = Button.new()
@@ -213,7 +213,7 @@ func select_script(index: int) -> void:
 	refresh()
 
 func script_error(id: String) -> String:
-	for status in app.script_statuses:
+	for status in app.local_script_statuses + app.script_statuses:
 		if status.script_id == id and status.get("error") is String: return status.error
 	return ""
 
@@ -242,7 +242,7 @@ func add_blank() -> void:
 	var names: Array = app.objects.get(target,{}).get("scripts",[]).map(func(c): return c.schema.name)
 	var number := 1
 	while names.has("Script%d" % number): number += 1
-	var source := "return {\n    name = \"Script%d\",\n    fields = {},\n    update = function(ctx, dt)\n        -- Write your behavior here. ctx.self is this object.\n    end\n}\n" % number
+	var source := "return {\n    name = \"Script%d\",\n    fields = {},\n    drive = function(ctx)\n        -- Derive values with ctx:drive. Use ctx.time or ctx.world_time.\n    end\n}\n" % number
 	send_action({"action":"attach", "source":source})
 
 func remove_component() -> void:
@@ -328,7 +328,7 @@ func refresh() -> void:
 		for template in app.script_templates: templates.add_item(template.name)
 	var component := current_script()
 	selected_title.text = str(component.get("schema", {}).get("name", "Select a script"))
-	run_status.text = "Add a template or a blank script from the left." if component.is_empty() else execution_label(component) + " · execution on host"
+	run_status.text = "Add a template or a blank script from the left." if component.is_empty() else execution_label(component) + (" · local Drive" if component.get("schema", {}).get("has_drive", false) else " · shared Write on host")
 	run_status.modulate = Color("ed9f93") if not script_error(selected).is_empty() else (Color("82d9d0") if component.get("enabled", false) else Color("d6bb87"))
 	if component.is_empty():
 		source_dirty = false
@@ -342,7 +342,7 @@ func refresh() -> void:
 			build_parameters(component)
 		elif component.revision != base_revision:
 			feedback.text = "Shared code changed while this draft was open. Reload before retrying."
-	for status in app.script_statuses:
+	for status in app.local_script_statuses + app.script_statuses:
 		if status.script_id == selected and status.get("error") is String and status.error != last_error:
 			last_error = status.error
 			feedback.text = "Script stopped: " + status.error

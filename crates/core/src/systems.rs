@@ -59,7 +59,7 @@ pub(crate) fn validate_commands(
                         if runtime.events.len()+handlers>128 {return Err("Too many pending script interactions".into());}
                         return Ok(Mutation::ScriptInteract{entity});
                     }
-                    let value=crate::scripting::prepare_edit(current,command.action)?;
+                    let value=crate::scripting::prepare_edit(current,command.action,clock.0)?;
                     crate::scripting::validate_world_scripts(snapshot.0.objects.iter().map(|o|if o.address==command.target {value.as_slice()} else {o.scripts.as_slice()}))?;
                     Ok(Mutation::SetScripts{entity,value})
                 }

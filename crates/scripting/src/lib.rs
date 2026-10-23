@@ -21,6 +21,7 @@ const MAX_COMMANDS: usize = 128;
 pub enum Event {
     Update,
     Interact,
+    Drive,
 }
 
 #[derive(Clone, Debug)]
@@ -30,6 +31,7 @@ pub struct Output {
     pub scale: [f64; 3],
     pub color: [f64; 4],
     pub state: BTreeMap<String, Value>,
+    pub drives: BTreeMap<String, Value>,
     commands: usize,
 }
 
@@ -133,7 +135,11 @@ pub fn parameters(
 }
 
 pub fn validate_component(component: &ScriptComponent) -> Result<(), String> {
-    if component.source.is_empty()
+    if !component.clock.anchor.is_finite()
+        || component.clock.anchor < 0.0
+        || !component.clock.elapsed.is_finite()
+        || component.clock.elapsed < 0.0
+        || component.source.is_empty()
         || component.source.len() > MAX_SOURCE
         || !identifier(&component.schema.name)
         || ["Transform", "Renderer", "Collider", "State"].contains(&component.schema.name.as_str())
@@ -286,7 +292,7 @@ impl Program {
             }
             fields.sort_by(|a, b| a.id.cmp(&b.id));
             let mut handlers = 0;
-            for name in ["update", "on_interact"] {
+            for name in ["update", "on_interact", "drive"] {
                 match module.get::<LuaValue>(name)? {
                     LuaValue::Function(_) => handlers += 1,
                     LuaValue::Nil => {}
@@ -294,10 +300,13 @@ impl Program {
                 }
             }
             if handlers == 0 {
-                return Err(error("Define update(ctx, dt) or on_interact(ctx)"));
+                return Err(error(
+                    "Define drive(ctx), update(ctx, dt) or on_interact(ctx)",
+                ));
             }
             let has_update = module.get::<Option<Function>>("update")?.is_some();
             let has_interact = module.get::<Option<Function>>("on_interact")?.is_some();
+            let has_drive = module.get::<Option<Function>>("drive")?.is_some();
             Ok(Self {
                 lua,
                 module,
@@ -306,6 +315,7 @@ impl Program {
                     name,
                     fields,
                     has_update,
+                    has_drive,
                     has_interact,
                 },
             })
@@ -319,6 +329,17 @@ impl Program {
         component: &ScriptComponent,
         event: Event,
         dt: f64,
+    ) -> Result<Output, String> {
+        self.run_at(object, component, event, dt, 0.0)
+    }
+
+    pub fn run_at(
+        &self,
+        object: &ObjectView,
+        component: &ScriptComponent,
+        event: Event,
+        dt: f64,
+        world_time: f64,
     ) -> Result<Output, String> {
         let run = || -> mlua::Result<Output> {
             let color: [f64; 4] = serde_json::from_value(
@@ -337,16 +358,24 @@ impl Program {
                 scale: object.world_scale,
                 color,
                 state: component.state.clone(),
+                drives: BTreeMap::new(),
                 commands: 0,
             }));
             let handler = match event {
                 Event::Update => "update",
                 Event::Interact => "on_interact",
+                Event::Drive => "drive",
             };
             let Some(function) = self.module.get::<Option<Function>>(handler)? else {
                 return Ok(output.lock().unwrap().clone());
             };
-            let ctx = self.context(object, component, output.clone())?;
+            let ctx = self.context(
+                object,
+                component,
+                output.clone(),
+                matches!(event, Event::Drive),
+                world_time,
+            )?;
             self.budget.reset();
             function.call::<()>((ctx, dt))?;
             let result = output.lock().unwrap().clone();
@@ -359,11 +388,33 @@ impl Program {
     fn context(
         &self,
         object: &ObjectView,
-        _component: &ScriptComponent,
+        component: &ScriptComponent,
         output: Arc<Mutex<Output>>,
+        local_drive: bool,
+        world_time: f64,
     ) -> mlua::Result<Table> {
         let lua = &self.lua;
         let ctx = lua.create_table()?;
+        ctx.set("world_time", world_time)?;
+        ctx.set("time", component.clock.time(world_time, component.enabled))?;
+        ctx.set(
+            "rotation_y",
+            lua.create_function(|lua, (_ctx, degrees, base): (Table, f64, Option<Table>)| {
+                if !degrees.is_finite() {
+                    return Err(error("Angle must be finite"));
+                }
+                let base = if let Some(base) = base {
+                    glam::DQuat::from_array(vector::<4>(base)?)
+                } else {
+                    glam::DQuat::IDENTITY
+                };
+                let q = (glam::DQuat::from_rotation_y(degrees.rem_euclid(360.0).to_radians())
+                    * base)
+                    .normalize();
+                lua.to_value(&q.to_array())
+            })?,
+        )?;
+
         let entity = lua.create_table()?;
         entity.set("id", object.address.instance_id.clone())?;
         for script in &object.scripts {
@@ -421,6 +472,11 @@ impl Program {
             ctx.set(
                 name,
                 lua.create_function(move |_, (_ctx, target, value): (Table, Table, LuaValue)| {
+                    if local_drive {
+                        return Err(error(
+                            "Shared writes are not allowed in drive(ctx); use ctx:drive",
+                        ));
+                    }
                     if target.raw_get::<String>("id")? != expected {
                         return Err(error("Target is outside this script's object"));
                     }
@@ -487,6 +543,36 @@ impl Program {
                 })?,
             )?;
         }
+        for name in ["write", "drive"] {
+            let output = output.clone();
+            let expected = object.address.instance_id.clone();
+            ctx.set(name, lua.create_function(move |_, (_ctx, target, field, value): (Table, Table, String, LuaValue)| {
+                if (name == "drive") != local_drive {
+                    return Err(error("Use ctx:drive only in drive(ctx), and ctx:write only in shared callbacks"));
+                }
+                if target.raw_get::<String>("id")? != expected { return Err(error("Target is outside this script's object")); }
+                let LuaValue::Table(value) = value else { return Err(error("Expected a numeric vector")); };
+                let value = match field.as_str() {
+                    "position" => { let v=vector::<3>(value)?; if v.iter().any(|n| n.abs()>1000.0) {return Err(error("Position outside world bounds"));} json!(v) },
+                    "scale" => { let v=vector::<3>(value)?; if v.iter().any(|n| !(0.05..=20.0).contains(n)) {return Err(error("Scale outside world bounds"));} json!(v) },
+                    "rotation" => { let v=vector::<4>(value)?; if (v.iter().map(|n|n*n).sum::<f64>()-1.0).abs()>0.0001 {return Err(error("Expected a unit quaternion"));} json!(v) },
+                    "color" => { let v=vector::<4>(value)?; if v.iter().any(|n| !(0.0..=1.0).contains(n)) {return Err(error("Color outside 0..1"));} json!(v) },
+                    _ => return Err(error("Writable fields: position, rotation, scale, color")),
+                };
+                let mut out=output.lock().unwrap();
+                out.commands+=1;
+                if out.commands>MAX_COMMANDS {return Err(error("Too many script writes"));}
+                if local_drive { out.drives.insert(field,value); }
+                else { match field.as_str() {
+                    "position" => out.position=serde_json::from_value(value).unwrap(),
+                    "rotation" => out.rotation=serde_json::from_value(value).unwrap(),
+                    "scale" => out.scale=serde_json::from_value(value).unwrap(),
+                    "color" => out.color=serde_json::from_value(value).unwrap(),
+                    _ => unreachable!(),
+                }}
+                Ok(())
+            })?)?;
+        }
         let get_output = output.clone();
         ctx.set(
             "get_state",
@@ -507,6 +593,9 @@ impl Program {
         ctx.set(
             "set_state",
             lua.create_function(move |_, (_ctx, key, value): (Table, String, LuaValue)| {
+                if local_drive {
+                    return Err(error("Shared state writes are not allowed in drive(ctx)"));
+                }
                 if !identifier(&key) {
                     return Err(error("Invalid state name"));
                 }
@@ -529,9 +618,9 @@ pub const ROTATOR: &str = r#"return {
     fields = {
         speed = { type = "number", default = 45, min = -720, max = 720, label = "Degrees / second" }
     },
-    update = function(ctx, dt)
+    drive = function(ctx)
         for entity in ctx:query("Rotator", "Transform") do
-            ctx:rotate_y(entity, entity.Rotator.speed * dt)
+            ctx:drive(entity, "rotation", ctx:rotation_y(entity.Rotator.speed * ctx.time, entity.Transform.rotation))
         end
     end
 }"#;
@@ -544,7 +633,7 @@ pub const CLICK_COLOR: &str = r#"return {
     on_interact = function(ctx)
         local active = not ctx:get_state("active", false)
         ctx:set_state("active", active)
-        ctx:set_color(ctx.self, active and ctx.self.ClickColor.color or {0.2, 0.65, 0.8, 1})
+        ctx:write(ctx.self, "color", active and ctx.self.ClickColor.color or {0.2, 0.65, 0.8, 1})
     end
 }"#;
 

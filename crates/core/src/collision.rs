@@ -135,13 +135,19 @@ pub(crate) fn preview_matches(p: &ObjectPreview, revisions: &Revisions) -> bool 
             .is_none_or(|r| matches("scale", r))
 }
 pub(crate) fn sync_colliders(
-    shapes: Query<(&Identity, &GlobalTransform, &Collider, &Revisions)>,
+    shapes: Query<(
+        &Identity,
+        &GlobalTransform,
+        &Collider,
+        &Revisions,
+        Option<&crate::drives::DrivenFields>,
+    )>,
     previews: Res<PreviewPositions>,
     grab: Res<crate::grabbing::GrabState>,
     mut colliders: ResMut<CollisionWorld>,
 ) {
     colliders.0.clear();
-    for (identity, transform, shape, revisions) in &shapes {
+    for (identity, transform, shape, revisions, driven) in &shapes {
         let preview = grab
             .0
             .as_ref()
@@ -149,11 +155,19 @@ pub(crate) fn sync_colliders(
             .filter(|p| p.target == identity.0)
             .or_else(|| previews.0.iter().find(|p| p.target == identity.0))
             .filter(|p| preview_matches(p, revisions));
-        let center = preview.map_or(transform.translation, |p| p.position);
-        let rotation = preview
-            .and_then(|p| p.rotation)
+        let read = |field: &str| driven.and_then(|d| d.0.get(field)).cloned();
+        let base_position = read("position")
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or(transform.translation);
+        let base_rotation = read("rotation")
+            .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or(transform.rotation);
-        let scale = preview.and_then(|p| p.scale).unwrap_or(transform.scale);
+        let base_scale = read("scale")
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or(transform.scale);
+        let center = preview.map_or(base_position, |p| p.position);
+        let rotation = preview.and_then(|p| p.rotation).unwrap_or(base_rotation);
+        let scale = preview.and_then(|p| p.scale).unwrap_or(base_scale);
         colliders.0.push(Bounds {
             address: identity.0.clone(),
             center,

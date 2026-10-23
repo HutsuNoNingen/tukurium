@@ -21,8 +21,8 @@ func run() -> void:
 	if not await check_until(func(): return scene.objects[id].get("scripts", []).size() == 1 and editor.pending_id.is_empty(), "Add script failed"):
 		print("EDITOR DEBUG ", editor.feedback.text, " pending=", editor.pending_id, " templates=", scene.script_templates.size(), " world=", scene.objects[id].get("scripts", []), " outgoing=",scene.outgoing.size()," frames=",scene.frames," connected=",scene.connected)
 		quit(1); return
-	var first_rotation: Array = scene.objects[id].world_rotation.duplicate()
-	if not await check_until(func(): return scene.objects[id].world_rotation != first_rotation, "Luau did not rotate object"): quit(1); return
+	var first_rotation: Quaternion = scene.render_nodes[id].quaternion
+	if not await check_until(func(): return scene.render_nodes[id].quaternion != first_rotation, "Luau did not rotate object"): quit(1); return
 	editor.code.text = editor.code.text.replace("default = 45", "default = 90")
 	editor.apply_button.pressed.emit()
 	if not await check_until(func(): return scene.objects[id].scripts[0].parameters.speed == 90 and editor.pending_id.is_empty(), "Edited Luau did not execute"):
@@ -33,15 +33,15 @@ func run() -> void:
 	editor.pause_button.pressed.emit()
 	if not await check_until(func(): return not scene.objects[id].scripts[0].enabled and editor.pending_id.is_empty(), "Pause script failed"): quit(1); return
 	await create_timer(0.15).timeout
-	first_rotation = scene.objects[id].world_rotation.duplicate()
+	first_rotation = scene.render_nodes[id].quaternion
 	await create_timer(0.2).timeout
-	if scene.objects[id].world_rotation != first_rotation: push_error("Disabled script still runs"); quit(1); return
+	if scene.render_nodes[id].quaternion != first_rotation: push_error("Disabled script still runs"); quit(1); return
 	if not editor.pause_button.disabled or editor.run_button.disabled or editor.run_status.text.find("Paused") < 0:
 		push_error("Paused execution controls do not match shared state"); quit(1); return
 	editor.run_button.pressed.emit()
 	if not await check_until(func(): return scene.objects[id].scripts[0].enabled and editor.pending_id.is_empty(), "Resume script failed"): quit(1); return
-	first_rotation = scene.objects[id].world_rotation.duplicate()
-	if not await check_until(func(): return scene.objects[id].world_rotation != first_rotation, "Resumed script did not move"): quit(1); return
+	first_rotation = scene.render_nodes[id].quaternion
+	if not await check_until(func(): return scene.render_nodes[id].quaternion != first_rotation, "Resumed script did not move"): quit(1); return
 	editor.pause_button.pressed.emit()
 	if not await check_until(func(): return not scene.objects[id].scripts[0].enabled and editor.pending_id.is_empty(), "Second pause failed"): quit(1); return
 	editor.add_template(1)

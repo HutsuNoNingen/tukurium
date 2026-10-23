@@ -33,9 +33,9 @@ RustにLuauを組み込む。ソースはComponent名・公開フィールド定
 
 SystemはComponentをqueryし、位置・回転・スケール・色と自身の明示的な状態を更新できる。最初は取り付け先の1オブジェクトを操作範囲とする。今のワールドに親子構造がないためで、ワールド全体の無制限queryやファイル・ネットワークアクセスは公開しない。箱・画像・動画・モデルで同じAPIを使う。
 
-現在のLuau共有動作は20Hzでホストが実行し、結果をまとめて検証・確定して既存のcommitで配信する。ゲストは結果を描画する。初版は任意のSystem順序変更、親子構造、複数物体のアイテム化、クラウドインベントリを含めない。
+Luauの共有Writeは20Hzのupdateまたは操作時のon_interactをホストが実行し、結果を検証・確定して既存のcommitで配信する。drive(ctx)は各クライアントのRust ECSで実行し、描画と衝突に使うローカル値を求める。RotatorテンプレートはこのDrive方式を使う。初版は任意のSystem順序変更、親子構造、複数物体のアイテム化、クラウドインベントリを含めない。
 
-これは現時点のKokoverseの実行方式であり、Resoniteと同じではない。Resoniteのローカル実行・Write・Driveの違いと今後の設計候補は [実行と同期の調査](resonite-execution-sync.md) を参照。
+WriteとDriveのAPI・WorldTime・ECSへの接続は [ローカルDrive](ugc-driving.md) を参照。操作のWriteをホストで実行する点など、Resoniteと同一ではない。Resoniteのローカル実行・Write・Driveの違いと今後の設計候補は [実行と同期の調査](resonite-execution-sync.md) を参照。
 
 参考API： [mlua](https://docs.rs/mlua/0.12.2/mlua/)、[Luauのサンドボックス](https://luau.org/sandbox/)。
 
@@ -59,9 +59,9 @@ return {
     fields = {
         speed = { type = "number", default = 45, min = -720, max = 720 }
     },
-    update = function(ctx, dt)
+    drive = function(ctx)
         for entity in ctx:query("Rotator", "Transform") do
-            ctx:rotate_y(entity, entity.Rotator.speed * dt)
+            ctx:drive(entity, "rotation", ctx:rotation_y(entity.Rotator.speed * ctx.time, entity.Transform.rotation))
         end
     end
 }
@@ -71,6 +71,10 @@ return {
 
 | API | 動作 |
 |---|---|
+| `ctx.world_time` / `ctx.time` | ホストに合わせた時刻 / 停止・再開可能なスクリプトの経過秒数 |
+| `ctx:write(entity, field, value)` | 共有Write。update / on_interact専用。対象はposition / rotation / scale / color |
+| `ctx:drive(entity, field, value)` | 同じ4フィールドのローカル値を導出。drive専用 |
+| `ctx:rotation_y(degrees, base?)` | Y軸回転を基準Quaternionへ加算して返す。基準省略時は単位回転 |
 | `ctx.self` | 取り付け先のEntity。各ScriptのパラメータとTransform、Renderer、存在すればColliderを読める |
 | `ctx:query("Component", ...)` | 条件を満たすEntityのイテレーター。現在の対象範囲は取り付け先だけ |
 | `ctx:set_position(entity, {x,y,z})` | 位置を設定 |
@@ -83,7 +87,9 @@ return {
 
 Entityから読める値はその呼び出し開始時点のコピー。変更はAPIで要求する。複数の書き込みはコールバック内で積み重ね、エラーならそのコールバックの変更を破棄する。通常のLua変数やクロージャーはVM内だけで生き、保存・複製に引き継がない。必要な状態は `get_state` / `set_state` を使う。
 
-各物体には4個、ワールド全体で32個まで。ソース8 KiB、フィールド16個、明示的状態4 KiB、全Scriptデータ128 KiBまで。VMごとに4 MiBのメモリ制限、1コールバックは最大5msと割り込み回数上限を設け、System処理をフレームごとの予算で分ける。組み込みAPIの処理時間やコンパイル時間まで含む厳密なリアルタイム保証ではない。例外・予算超過では診断を全員へ表示し、Apply codeや設定更新までそのScriptを止める。
+各物体には4個、ワールド全体で32個まで。ソース8 KiB、フィールド16個、明示的状態4 KiB、全Scriptデータ128 KiBまで。VMごとに4 MiBのメモリ制限、1コールバックは最大5msと割り込み回数上限を設け、System処理をフレームごとの予算で分ける。組み込みAPIの処理時間やコンパイル時間まで含む厳密なリアルタイム保証ではない。共有Writeの例外・予算超過はホストの診断を全員へ表示する。ローカルDriveの例外はその端末へ表示し、失敗した評価の結果を破棄する。Apply codeや設定更新で再評価する。
+
+既存のset_positionなどは共有Writeの省略形として残る。drive(ctx)からの共有Writeとset_state、および共有コールバックからのDriveはエラーになる。既存のupdateコードを自動的にDriveへ変換はしない。
 
 新しい実行器で使用できるライブラリはLuaの計算・文字列・テーブル等に限定する。ファイル・ネットワーク・モジュール読み込み、保護呼び出し、coroutineは公開しない。共有操作はホストでのみ実行し、通常の編集と同じTransform等の値域を検証する。
 

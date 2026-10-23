@@ -106,6 +106,7 @@ struct Engine {
     outcomes: HashMap<String, Value>,
     order: VecDeque<String>,
     last_script_status: Value,
+    last_drive_frame: Option<kokoverse_protocol::DriveFrame>,
     remote_script_status: Vec<kokoverse_protocol::ScriptStatus>,
 }
 
@@ -281,6 +282,7 @@ impl Engine {
         json!({"kind":"snapshot", "snapshot": self.model.snapshot(), "editable":self.synced,
             "role":if self.host {"host"} else {"guest"},
             "script_statuses":if self.host {self.model.script_statuses()} else {self.remote_script_status.clone()},
+            "drive_frame":self.model.drive_frame(),
             "component_schemas":REGISTRY.schemas(),
             "script_templates":[{"name":"Rotator","source":kokoverse_core::scripting::ROTATOR},
                 {"name":"ClickColor","source":kokoverse_core::scripting::CLICK_COLOR}]})
@@ -399,6 +401,8 @@ impl Engine {
         }
     }
     fn tick(&mut self) {
+        self.update_engine_clock();
+        self.model.set_drive_clock_ready(self.synced && (self.host || self.clock.ready()));
         self.model.set_script_authority(self.host);
         self.model.set_media_time(self.clock.now());
         let presence_revision = self.model.presence_revision();
@@ -419,6 +423,11 @@ impl Engine {
         self.model.set_collision_previews(self.previews.positions());
         let outcomes = self.model.advance(elapsed);
         self.sync_grab();
+        let frame = self.model.drive_frame();
+        if self.last_drive_frame.as_ref().is_none_or(|last| last.objects != frame.objects || last.statuses != frame.statuses) {
+            self.ui(json!({"kind":"drive_frame", "frame":frame}));
+            self.last_drive_frame = Some(frame);
+        }
         let mut replies = Vec::new();
         let mut changed = false;
         for outcome in outcomes {
@@ -1060,6 +1069,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         outcomes: HashMap::new(),
         order: VecDeque::new(),
         last_script_status: Value::Null,
+        last_drive_frame: None,
         remote_script_status: Vec::new(),
     };
     engine.model.update_participant(ParticipantView {

@@ -30,6 +30,23 @@ try {
   assert.equal(probe.ok,true,JSON.stringify(probe));
   await until(()=>host.client.latest().snapshot.objects[0].scripts?.length===1,'Probe script did not arrive');
   const probeScript=host.client.latest().snapshot.objects[0].scripts[0];
+  const driveFor=(client,id)=>client.messages.filter(m=>m.kind==='drive_frame'&&m.frame.objects.some(o=>o.target.instance_id===id));
+  const objectId=host.client.latest().snapshot.objects[0].address.instance_id;
+  await until(()=>driveFor(host.client,objectId).length>2&&driveFor(guest.client,objectId).length>2,'Both Engines must evaluate the local Drive after calibrating their clocks');
+  const baseRevision=host.client.latest().snapshot.world_revision;
+  await delay(250);
+  assert.equal(host.client.latest().snapshot.world_revision,baseRevision,'Local rotation must not produce shared world commits');
+  for(const client of [host.client,guest.client]) {
+    const frame=driveFor(client,objectId).at(-1).frame;
+    const q=frame.objects.find(o=>o.target.instance_id===objectId).values.rotation;
+    const seconds=probeScript.clock.elapsed+Math.max(0,frame.world_time-probeScript.clock.anchor);
+    const half=(seconds*probeScript.parameters.speed%360)*Math.PI/360;
+    assert.ok(Math.abs(q[1]*Math.sin(half)+q[3]*Math.cos(half))>1-1e-10,'Drive rotation must be derived from calibrated WorldTime');
+  }
+  const guestFrame=driveFor(guest.client,objectId).at(-1).frame;
+  assert.ok(driveFor(host.client,objectId).some(m=>Math.abs(m.frame.world_time-guestFrame.world_time)<0.1),'Host and guest clocks must share a timeline');
+  console.log('PASS: host and guest evaluate local Drives from a shared clock without changing the replicated world');
+
   assert.equal((await command(guest.client,{action:'remove',script_id:probeScript.id,expected_revision:probeScript.revision},host.client.latest().snapshot.objects[0].address)).ok,true);
   const rendered=process.argv.includes('--rendered');
   const godot=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(rendered?['--rendering-method','gl_compatibility']:['--headless']),'--path','client-godot','--script','res://script_smoke.gd','--',`--port=${guest.port}`,`--session=${session}`,...(rendered?[`--screenshot=${resolve(work,'script-editor.png')}`]:[])]);

@@ -49,6 +49,8 @@ var inspector_toggle: Button
 var filling := false
 var objects: Dictionary = {}
 var render_nodes: Dictionary = {}
+var driven_objects: Dictionary = {}
+var local_script_statuses: Array = []
 var selected_id := ""
 var tree_objects: VBoxContainer
 var object_count: Label
@@ -613,15 +615,40 @@ func valid_remote_preview(preview: Dictionary) -> bool:
 	return revisions.get("position") == preview.expected_revision and (preview.get("expected_rotation_revision") == null or revisions.get("rotation") == preview.expected_rotation_revision) and (preview.get("expected_scale_revision") == null or revisions.get("scale") == preview.expected_scale_revision)
 
 func object_quaternion(object: Dictionary) -> Quaternion:
-	var q: Array = object.get("world_rotation",[0,0,0,1])
+	var q: Array = driven_objects.get(object.address.instance_id, {}).get("rotation", object.get("world_rotation",[0,0,0,1]))
 	return Quaternion(q[0],q[1],q[2],q[3])
 
 func apply_object_transform(node: Node3D, object: Dictionary) -> void:
-	var p: Array = object.world_position
-	var s: Array = object.get("world_scale",[1,1,1])
+	var values: Dictionary = driven_objects.get(object.address.instance_id, {})
+	var p: Array = values.get("position", object.world_position)
+	var s: Array = values.get("scale", object.get("world_scale",[1,1,1]))
 	node.position = Vector3(p[0],p[1],p[2])
 	node.quaternion = object_quaternion(object)
 	node.scale = Vector3(s[0],s[1],s[2])
+
+func apply_drive_frame(frame: Dictionary) -> void:
+	var previous := driven_objects.keys()
+	driven_objects.clear()
+	for object in frame.get("objects", []):
+		if objects.has(object.target.instance_id) and objects[object.target.instance_id].address == object.target:
+			driven_objects[object.target.instance_id] = object["values"]
+	for id in driven_objects.keys():
+		if not previous.has(id): previous.append(id)
+	for id in previous:
+		if not objects.has(id) or not render_nodes.has(id): continue
+		if not remote_previews.has(id) and not (gizmo_preview_active and gizmo_target == id):
+			apply_object_transform(render_nodes[id], objects[id])
+		var c: Array = driven_objects.get(id, {}).get("color", [])
+		if c.is_empty():
+			for field in objects[id].fields:
+				if field.id == "color": c = field.value
+		if c.size() == 4:
+			render_nodes[id].material_override.albedo_color = Color(c[0], c[1], c[2], c[3])
+			if render_nodes[id].has_node("ImportedModel"): asset_importer.tint_model(render_nodes[id].get_node("ImportedModel"), render_nodes[id].material_override.albedo_color)
+	var statuses: Array = frame.get("statuses", [])
+	if statuses != local_script_statuses:
+		local_script_statuses = statuses
+		script_editor.refresh()
 
 func update_selection_outline() -> void:
 	if current.is_empty(): return
@@ -954,8 +981,8 @@ func _process(delta: float) -> void:
 		var node: MeshInstance3D = render_nodes[id]
 		var alpha := 1.0 - exp(-20.0 * delta)
 		node.position = node.position.lerp(Vector3(p[0], p[1], p[2]), alpha)
-		var q: Array = preview.rotation if preview.get("rotation") != null else objects[id].world_rotation
-		var s: Array = preview.scale if preview.get("scale") != null else objects[id].world_scale
+		var q: Array = preview.rotation if preview.get("rotation") != null else driven_objects.get(id, {}).get("rotation", objects[id].world_rotation)
+		var s: Array = preview.scale if preview.get("scale") != null else driven_objects.get(id, {}).get("scale", objects[id].world_scale)
 		node.quaternion = node.quaternion.slerp(Quaternion(q[0],q[1],q[2],q[3]),alpha)
 		node.scale = node.scale.lerp(Vector3(s[0],s[1],s[2]),alpha)
 	update_selection_outline()
@@ -1011,6 +1038,8 @@ func accept_message(message: Dictionary) -> void:
 		asset_importer.receive(body)
 		return
 	match body.get("kind"):
+		"drive_frame":
+			apply_drive_frame(body.frame)
 		"script_statuses":
 			script_statuses = body.statuses
 			script_editor.refresh()
@@ -1072,11 +1101,13 @@ func accept_message(message: Dictionary) -> void:
 			DisplayServer.window_set_title("Kokoverse Workshop — " + str(body.role).capitalize())
 			status_label.text = ("Host" if body.role == "host" else "Guest") + (" · Connected" if editable else " · Waiting for host")
 			apply_snapshot(body.snapshot)
+			apply_drive_frame(body.get("drive_frame", {}))
 			script_editor.refresh()
 		"status":
 			status_label.text = body.message
 			editable = body.editable
 			if not editable:
+				apply_drive_frame({})
 				requests.disconnected()
 				asset_importer.disconnected()
 				world_panels.disconnected()
@@ -1171,6 +1202,7 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 	update_selected()
 	rebuild_tree()
 	world_panels.sync()
+	apply_drive_frame({"objects":driven_objects.keys().filter(func(id): return objects.has(id)).map(func(id): return {"target":objects[id].address,"values":driven_objects[id]}), "statuses":local_script_statuses})
 
 func create_render_node(object: Dictionary) -> MeshInstance3D:
 	var node := MeshInstance3D.new()

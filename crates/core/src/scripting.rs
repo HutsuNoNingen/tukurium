@@ -69,6 +69,7 @@ pub(crate) fn validate_world_scripts<'a>(
 pub(crate) fn prepare_edit(
     current: &[ScriptComponent],
     action: ScriptAction,
+    now: f64,
 ) -> Result<Vec<ScriptComponent>, String> {
     let mut scripts = current.to_vec();
     match action {
@@ -85,6 +86,10 @@ pub(crate) fn prepare_edit(
                 schema: program.schema,
                 source,
                 state: BTreeMap::new(),
+                clock: kokoverse_protocol::ScriptClock {
+                    anchor: now,
+                    elapsed: 0.0,
+                },
             });
         }
         ScriptAction::Update {
@@ -110,6 +115,8 @@ pub(crate) fn prepare_edit(
                 .checked_add(1)
                 .ok_or("Script revision exhausted")?
                 .to_string();
+            script.clock.elapsed = script.clock.time(now, script.enabled);
+            script.clock.anchor = now;
             script.source = source;
             script.schema = program.schema;
             script.enabled = enabled;
@@ -222,7 +229,13 @@ pub(crate) fn prepare_frame(world: &mut World) {
                 if let Some(index) = event_index {
                     delivered.insert(index);
                 }
-                match program.run(&object, &object.scripts[index], event, dt) {
+                match program.run_at(
+                    &object,
+                    &object.scripts[index],
+                    event,
+                    dt,
+                    world.resource::<MediaClock>().0,
+                ) {
                     Ok(output) => {
                         let values = [
                             ("position", serde_json::json!(output.position)),
@@ -337,7 +350,7 @@ mod tests {
         command(
             &mut host,
             ScriptAction::Attach {
-                source: ROTATOR.into(),
+                source: r#"return {name="HostWriter",update=function(ctx,dt) ctx:rotate_y(ctx.self,45*dt) end}"#.into(),
             },
         )
         .unwrap();
@@ -489,12 +502,20 @@ mod tests {
 
     #[test]
     fn queued_interactions_are_bounded_and_delivered_once_across_frames() {
-        let mut model=WorldModel::new();model.set_script_authority(true);
+        let mut model = WorldModel::new();
+        model.set_script_authority(true);
         command(&mut model,ScriptAction::Attach{source:"return {name='Counter',on_interact=function(ctx) ctx:set_state('count',ctx:get_state('count',0)+1) end}".into()}).unwrap();
-        for _ in 0..128 {command(&mut model,ScriptAction::Interact).unwrap();}
-        assert!(command(&mut model,ScriptAction::Interact).is_err());
-        for _ in 0..128 {model.advance(Duration::ZERO);}
-        assert_eq!(model.snapshot().objects[0].scripts[0].state["count"],serde_json::json!(128));
+        for _ in 0..128 {
+            command(&mut model, ScriptAction::Interact).unwrap();
+        }
+        assert!(command(&mut model, ScriptAction::Interact).is_err());
+        for _ in 0..128 {
+            model.advance(Duration::ZERO);
+        }
+        assert_eq!(
+            model.snapshot().objects[0].scripts[0].state["count"],
+            serde_json::json!(128)
+        );
         assert!(model.world.resource::<ScriptRuntime>().events.is_empty());
     }
 }
