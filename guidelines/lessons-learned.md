@@ -155,3 +155,12 @@ Engineの保存前チェック、管理APIの各操作、公開・共有ボタ�
 - 確認日：2026-10-24。実配布物の全ファイルでマニフェスト生成とローカルHTTPからの取得を確認した。
 - 回帰テスト：[tester-updater-smoke.ps1](../tests/tester-updater-smoke.ps1)で初回取得、未変更ファイルの再利用、起動中の延期、失敗時の旧版保持を確認する。
 - コード：[prepare-tester-feed.ps1](../scripts/prepare-tester-feed.ps1)、[updater.ps1](../tester-launcher/updater.ps1)。
+
+## 差分ランチャーの一時展開パスを短くする
+
+実配信の初回取得で、版名とランダム値を連結した一時フォルダーにさらに配布ファイル名と `.download.gz` を加えると、Windowsのパス長制限を超えた。検証用の深い場所では `client-godot/.godot/editor/` のファイルで失敗し、通常のDownloads配下を想定した長さでも一部のインポート済み素材とライセンスが制限を超える。
+
+一時フォルダーは版名を含めず、短い名前とランダム値だけにする。最終版のフォルダー名とマニフェストの版名は維持する。実際の配布ファイル名を含めた最長パスで確認し、ランチャーのテストにも長い相対パスを含める。
+
+- 確認日：2026-10-24。`tester-v2026.10.24.1` のR2初回取得で再現。修正版は [tester-updater-smoke.ps1](../tests/tester-updater-smoke.ps1) で初回取得と更新を確認する。
+- コード：[updater.ps1](../tester-launcher/updater.ps1)。

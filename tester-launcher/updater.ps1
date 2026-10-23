@@ -140,7 +140,7 @@ try {
                 Write-Host 'An instance is running; update will wait until it exits.'
             } else {
                 $manifestFile = Join-Path $install 'manifest.download.json'
-                $staging = Join-Path $versions ($remote.version + '.partial-' + [guid]::NewGuid().ToString('N'))
+                $staging = Join-Path $versions ('.p-' + [guid]::NewGuid().ToString('N'))
                 try {
                     Download-File "$base/$($remote.manifest)" $manifestFile
                     if ((Get-Item -LiteralPath $manifestFile).Length -gt 4194304) { throw 'Manifest is too large.' }

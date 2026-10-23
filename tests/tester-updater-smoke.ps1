@@ -10,6 +10,9 @@ function New-TestPackage([string]$Version,[string]$Value) {
     New-Item -ItemType Directory -Force -Path (Join-Path $package 'scripts'),(Join-Path $package 'bin') | Out-Null
     Set-Content -LiteralPath (Join-Path $package 'scripts/start-instance.ps1') -Value 'Write-Output started' -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $package 'bin/example.txt') -Value $Value -Encoding UTF8
+    $longPath = Join-Path $package 'client-godot/.godot/editor/main.tscn-folding-3070c538c03ee49b7677ff960a3f5195.cfg'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $longPath) | Out-Null
+    Set-Content -LiteralPath $longPath -Value 'editor-cache' -Encoding UTF8
     $files = @(Get-ChildItem -LiteralPath $package -File -Recurse | ForEach-Object {
         @{path=$_.FullName.Substring($package.Length+1).Replace('\','/');size=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
     })
