@@ -399,6 +399,15 @@ mod tests {
         leases
             .apply("alice", request.clone(), &model.snapshot(), now)
             .unwrap();
+        let mut end_payload = serde_json::to_value(&request).unwrap();
+        end_payload["action"] = json!("end");
+        end_payload["draft"] = json!({});
+        let end: PanelInput = serde_json::from_value(end_payload).unwrap();
+        leases.apply("alice", end, &model.snapshot(), now).unwrap();
+        assert!(leases.views().is_empty());
+        leases
+            .apply("alice", request.clone(), &model.snapshot(), now)
+            .unwrap();
         let mut other = request.clone();
         other.panel = b;
         other.client_id = "b".into();

@@ -46,6 +46,7 @@ try {
   await until(()=>godot.exitCode!==null,'Godot panels test did not finish',60000);
   assert.equal(godot.exitCode,0,godot.logs);assert.doesNotMatch(godot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(godot.logs,/WORLD PANELS SMOKE PASS/);
   await until(()=>observer.exitCode!==null,'Observer did not finish');assert.equal(observer.exitCode,0,observer.logs);assert.doesNotMatch(observer.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(observer.logs,/PANEL OBSERVER PASS/);
+  await until(()=>host.client.sessions().length===0,'UI blur did not release the authoritative editing lease',1500);
   await until(()=>host.client.latest().snapshot.objects.some(o=>o.fields.find(f=>f.id==='name')?.value==='World panel edit '),'UI edit did not reach host');
   const late=await peer('guest',2);await until(()=>JSON.stringify(late.client.latest().snapshot)===JSON.stringify(host.client.latest().snapshot),'Late join panels differ');
   const pin=await edit(guest.client,panels[1],'panel_pin',{user_id:'$self',offset:[0,1.4,-2],rotation:[0,0,0,1]});assert.equal(pin.ok,true,JSON.stringify(pin));

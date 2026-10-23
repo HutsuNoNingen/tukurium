@@ -32,6 +32,7 @@ pub struct PanelEditSession {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct PanelDraft {
     pub part: String,
     pub text: String,
