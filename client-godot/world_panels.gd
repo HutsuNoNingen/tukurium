@@ -1,6 +1,6 @@
 extends Node
 const WORLD_PANEL = preload("res://world_panel.gd")
-const INSPECTOR = preload("res://inspector_view.gd")
+const DESKTOP_INSPECTOR = preload("res://desktop_inspector.gd")
 const GIZMO = preload("res://translation_gizmo.gd")
 var app
 var panels: Dictionary = {}
@@ -141,13 +141,19 @@ func open_window(id: String) -> void:
 	window.title = "Kokoverse · Inspector"
 	window.force_native = true
 	window.borderless = false
+	window.unresizable = false
+	window.extend_to_title = false
+	window.popup_window = false
+	window.content_scale_mode = Window.CONTENT_SCALE_MODE_DISABLED
+	window.content_scale_size = Vector2i.ZERO
+	window.initial_position = Window.WINDOW_INITIAL_POSITION_CENTER_MAIN_WINDOW_SCREEN
 	window.size = Vector2i(1100, 800)
 	window.min_size = Vector2i(900, 560)
 	window.transient = false
 	window.close_requested.connect(close_window.bind(id))
 	window.focus_entered.connect(func(): app.release_cursor())
 	app.add_child(window)
-	var view = INSPECTOR.new()
+	var view = DESKTOP_INSPECTOR.new()
 	window.add_child(view)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	view.setup(self, id, true)

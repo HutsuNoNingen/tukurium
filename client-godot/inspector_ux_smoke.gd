@@ -23,6 +23,28 @@ func run() -> void:
 	var world_view = panel.content
 	if window.get_window_id() == root.get_window_id() or view == world_view:
 		push_error("Inspector is not an independent native view"); quit(1); return
+	if view.get_script().resource_path != "res://desktop_inspector.gd" or window.is_embedded():
+		push_error("Desktop inspector is not using its native layout"); quit(1); return
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--window-probe="):
+			print("NATIVE_WINDOW=", DisplayServer.window_get_native_handle(DisplayServer.WINDOW_HANDLE, window.get_window_id()))
+			if not await until(func(): return FileAccess.file_exists(argument.trim_prefix("--window-probe=") + ".done"), "Windows frame probe timed out"): quit(1); return
+	var original_world_size: Vector2i = panel.viewport.size
+	var original_panel_revision: String = scene.objects[panel.panel_id].object_revision
+	window.size = Vector2i(950, 650)
+	await process_frame
+	await process_frame
+	if not view.size.is_equal_approx(Vector2(window.size)) or panel.viewport.size != original_world_size:
+		push_error("Desktop resize stretched the UI or changed world resolution"); quit(1); return
+	view.scroll.scroll_vertical = 100
+	await create_timer(0.25).timeout
+	if scene.objects[panel.panel_id].object_revision != original_panel_revision:
+		push_error("Desktop resize or scroll wrote shared panel data"); quit(1); return
+	scene.world_panels.edit(panel.panel_id, "panel_size", [1024, 768])
+	if not await until(func(): return panel.viewport.size == Vector2i(1024,768), "World resolution froze while desktop was open"): quit(1); return
+	if not is_equal_approx(panel.mesh.size.x / panel.mesh.size.y, 1024.0 / 768.0):
+		push_error("World panel pixels are stretched"); quit(1); return
+	window.size = Vector2i(1100,800)
 	if not await until(func(): return view.drive_labels.has("rotation") and view.drive_labels.rotation.visible, "Drive provenance is missing"): quit(1); return
 	if view.controls.rotation[0].editable: push_error("Driven output should not appear writable"); quit(1); return
 	if not view.controls.position[0].editable: push_error("Un-driven field should stay editable"); quit(1); return
@@ -69,7 +91,7 @@ func run() -> void:
 	# Remote deletion must close the local window and dispose its viewport safely.
 	scene.world_panels.close_panel(panel.panel_id)
 	if not await until(func(): return scene.world_panels.windows.is_empty() and scene.world_panels.panels.is_empty(), "Deleting panel leaked native window"): quit(1); return
-	print("INSPECTOR UX SMOKE PASS: component groups, local drive provenance, native input, driver navigation, restore and deletion")
+	print("INSPECTOR UX SMOKE PASS: independent desktop layout, native frame, resize, world aspect, shared editing, driver navigation and close")
 	scene.queue_free()
 	await process_frame
 	await process_frame

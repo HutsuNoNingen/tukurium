@@ -623,7 +623,9 @@ pub(crate) fn new_object(name: String, position: [f64; 3], color: [f64; 4]) -> O
 pub(crate) fn set_default_collider(object: &mut ObjectView) {
     let half_extents = match &object.visual {
         kokoverse_protocol::Visual::Cube => [0.75; 3],
-        kokoverse_protocol::Visual::Panel => [0.6, 0.8, 0.025],
+        kokoverse_protocol::Visual::Panel => crate::panels::half_extents(
+            object.panel.as_ref().map_or([720, 960], |panel| panel.size),
+        ),
         kokoverse_protocol::Visual::Image { width, height, .. }
         | kokoverse_protocol::Visual::Video { width, height, .. } => {
             let ratio = *width as f64 / *height as f64;

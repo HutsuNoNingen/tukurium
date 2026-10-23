@@ -34,7 +34,15 @@ try {
   const target=host.client.latest().snapshot.objects[0].address;
   assert.equal((await command(guest.client,{action:'attach',source:host.client.latest().script_templates[0].source},target)).ok,true);
   await until(()=>host.client.latest().snapshot.objects[0].scripts.length===1,'Script not shared');
-  const godot=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(process.argv.includes('--rendered')?['--rendering-method','gl_compatibility']:['--headless']),'--path','client-godot','--script','res://inspector_ux_smoke.gd','--',`--port=${guest.port}`,`--session=${session}`,...(process.argv.includes('--rendered')?[`--screenshot=${resolve(work,'inspector.png')}`]:[])]);
+  const probe=resolve(work,'native-window');
+  const godot=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(process.argv.includes('--rendered')?['--rendering-method','gl_compatibility']:['--headless']),'--path','client-godot','--script','res://inspector_ux_smoke.gd','--',`--port=${guest.port}`,`--session=${session}`,...(process.argv.includes('--rendered')?[`--screenshot=${resolve(work,'inspector.png')}`,`--window-probe=${probe}`]:[])]);
+  if(process.argv.includes('--rendered')) {
+    const match=await until(()=>godot.logs.match(/NATIVE_WINDOW=(\d+)/),'Native handle missing');
+    const check=spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',resolve(root,'tests/native-window-probe.ps1'),'-Handle',match[1]],{windowsHide:true});
+    let output='';check.stdout.on('data',d=>output+=d);check.stderr.on('data',d=>output+=d);
+    const code=await new Promise((resolve,reject)=>{check.on('error',reject);check.on('close',resolve);});
+    assert.equal(code,0,output);console.log(output.trim());writeFileSync(probe+'.done','ok');
+  }
   await until(()=>godot.exitCode!==null,'Inspector UI timed out',60000);
   assert.equal(godot.exitCode,0,godot.logs);assert.doesNotMatch(godot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(godot.logs,/INSPECTOR UX SMOKE PASS/);
   await until(()=>host.client.latest().snapshot.objects.some(o=>o.fields.some(f=>f.id==='name'&&f.value==='Native closed safely')),'Native edit did not reach host');

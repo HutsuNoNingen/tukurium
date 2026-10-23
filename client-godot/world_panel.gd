@@ -41,13 +41,14 @@ func setup(controller, id: String) -> void:
 	add_child(body)
 
 func refresh(object: Dictionary) -> void:
-	if not manager.windows.has(panel_id):
-		viewport.size = Vector2i(int(object.panel.size[0]), int(object.panel.size[1]))
+	viewport.size = Vector2i(int(object.panel.size[0]), int(object.panel.size[1]))
+	# Preserve square pixels on the world surface; the desktop window has its own layout.
+	mesh.size = Vector2(1.6 * float(viewport.size.x) / float(viewport.size.y), 1.6)
 	content.refresh(object)
 
 func canvas_point(global_point: Vector3) -> Vector2:
 	var local := to_local(global_point)
-	return Vector2((local.x / 1.2 + 0.5) * viewport.size.x, (0.5 - local.y / 1.6) * viewport.size.y)
+	return Vector2((local.x / mesh.size.x + 0.5) * viewport.size.x, (0.5 - local.y / mesh.size.y) * viewport.size.y)
 
 func forward_pointer(event: InputEventMouse, point: Vector2) -> void:
 	var copy: InputEventMouse = event.duplicate()

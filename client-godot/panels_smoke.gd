@@ -41,7 +41,7 @@ func run() -> void:
 	if target_id == other_target: push_error("Fixture targets should differ"); quit(1); return
 	var line: LineEdit = view.controls.name[0]
 	var canvas_point: Vector2 = line.get_global_rect().get_center()
-	var local_point := Vector3((canvas_point.x / panel.viewport.size.x - 0.5)*1.2, (0.5-canvas_point.y/panel.viewport.size.y)*1.6, 0.03)
+	var local_point := Vector3((canvas_point.x / panel.viewport.size.x - 0.5)*panel.mesh.size.x, (0.5-canvas_point.y/panel.viewport.size.y)*panel.mesh.size.y, 0.03)
 	var screen: Vector2 = scene.camera.unproject_position(panel.to_global(local_point))
 	# Exercise actual ray -> panel-local point -> SubViewport -> LineEdit routing.
 	mouse(screen, true)

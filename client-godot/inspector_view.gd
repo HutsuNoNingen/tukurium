@@ -56,6 +56,10 @@ func setup(controller, id: String, in_desktop: bool = false) -> void:
 	style.set_border_width_all(0 if desktop else 3)
 	style.set_corner_radius_all(0 if desktop else 10)
 	add_theme_stylebox_override("panel", style)
+	build_layout()
+	connect_view()
+
+func build_layout() -> void:
 	var margin := MarginContainer.new()
 	for side in ["left", "top", "right", "bottom"]: margin.add_theme_constant_override("margin_"+side, 16)
 	add_child(margin)
@@ -73,6 +77,16 @@ func setup(controller, id: String, in_desktop: bool = false) -> void:
 	pin_button = add_button(header, "Pin", func(): manager.pin_panel(panel_id))
 	add_button(header, "×", func(): manager.close_panel(panel_id)).tooltip_text = "Delete this shared inspector for everyone"
 	column.add_child(target_picker)
+	var actions := HBoxContainer.new()
+	column.add_child(actions)
+	build_actions(actions)
+	var body := HBoxContainer.new()
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(body)
+	build_body(body)
+	column.add_child(message)
+
+func connect_view() -> void:
 	target_picker.item_selected.connect(func(index: int):
 		if filling or index >= picker_ids.size(): return
 		finish_all()
@@ -80,8 +94,12 @@ func setup(controller, id: String, in_desktop: bool = false) -> void:
 		var target: Variant = manager.app.address_of(manager.app.objects[id_value]) if manager.app.objects.has(id_value) else null
 		pending_target = target
 		target_change_pending = true)
-	var actions := HBoxContainer.new()
-	column.add_child(actions)
+	scroll.get_v_scroll_bar().value_changed.connect(on_scroll)
+	message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	message.add_theme_font_size_override("font_size", 16 if desktop else 18)
+	message.text = "Changes are shared with everyone" if desktop else "Shared panel · FPS: RMB hold · Wheel distance · E rotate"
+
+func build_actions(actions: Container) -> void:
 	add_button(actions, "Select / Gizmo", func():
 		if not target_id.is_empty(): manager.app.select_object(target_id))
 	scripts_button = add_button(actions, "Scripts", func():
@@ -100,9 +118,8 @@ func setup(controller, id: String, in_desktop: bool = false) -> void:
 		choose_target(str(reference.target.instance_id))
 	receiver.tooltip_text = "Drop a Slot, component or field reference to inspect its object"
 	actions.add_child(receiver)
-	var body := HBoxContainer.new()
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	column.add_child(body)
+
+func build_body(body: Container) -> void:
 	hierarchy = INSPECTOR_TREE.new()
 	hierarchy.setup(self)
 	body.add_child(hierarchy)
@@ -121,11 +138,6 @@ func setup(controller, id: String, in_desktop: bool = false) -> void:
 	script_mount.hide()
 	script_view = SHARED_SCRIPT_VIEW.new()
 	script_view.setup(manager,panel_id,script_mount)
-	scroll.get_v_scroll_bar().value_changed.connect(on_scroll)
-	message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	message.add_theme_font_size_override("font_size", 18)
-	message.text = "Shared panel · FPS: RMB hold · Wheel distance · E rotate"
-	column.add_child(message)
 
 func add_button(parent: Node, text: String, action: Callable) -> Button:
 	var button := Button.new()
@@ -387,9 +399,7 @@ func refresh(object: Dictionary) -> void:
 	if hierarchy != null: hierarchy.refresh()
 	fill_values()
 	refresh_drives()
-	var bar := scroll.get_v_scroll_bar()
-	if scroll_pending < 0 and not scroll_inflight:
-		scroll.scroll_vertical = int(float(object.inspector.scroll[1]) * maxf(0.0, bar.max_value - bar.page))
+	restore_scroll(object)
 	filling = false
 	refresh_sessions()
 	if not pending_field.is_empty() and target_id == pending_reference_target and not target_change_pending and reference_chips.has(pending_field):
@@ -401,6 +411,11 @@ func refresh(object: Dictionary) -> void:
 	scripts_button.text = "Object fields" if show_scripts else "Scripts"
 	script_view.active = show_scripts
 	if show_scripts: script_view.refresh(target_id, object.inspector.get("script_id"))
+
+func restore_scroll(object: Dictionary) -> void:
+	var bar := scroll.get_v_scroll_bar()
+	if scroll_pending < 0 and not scroll_inflight:
+		scroll.scroll_vertical = int(float(object.inspector.scroll[1]) * maxf(0.0, bar.max_value - bar.page))
 
 func fill_values() -> void:
 	for field in reference_values:

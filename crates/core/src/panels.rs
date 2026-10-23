@@ -5,6 +5,10 @@ use kokoverse_protocol::{Address, ObjectView, PanelAttachment, Snapshot, Visual}
 use serde_json::{Value, json};
 
 pub const MAX_PANELS: usize = 16;
+
+pub(crate) fn half_extents(size: [u32; 2]) -> [f64; 3] {
+    [0.8 * size[0] as f64 / size[1] as f64, 0.8, 0.025]
+}
 pub const FIELDS: [&str; 7] = [
     "panel_size",
     "panel_pin",
@@ -202,8 +206,16 @@ pub(crate) fn write_field(world: &mut World, entity: Entity, field: &str, value:
     match field {
         "inspector_tree" => world.get_mut::<InspectorView>(entity).unwrap().0.tree = serde_json::from_value(value).unwrap(),
         "panel_size" => {
-            world.get_mut::<WorldPanel>(entity).unwrap().0.size =
-                serde_json::from_value(value).unwrap()
+            let old_size = world.get::<WorldPanel>(entity).unwrap().0.size;
+            let size = serde_json::from_value(value).unwrap();
+            world.get_mut::<WorldPanel>(entity).unwrap().0.size = size;
+            // Resize the default pick shape with the surface, preserving custom colliders.
+            if let Some(mut collider) = world.get_mut::<Collider>(entity)
+                && collider.0.half_extents == half_extents(old_size)
+            {
+                collider.0.half_extents = half_extents(size);
+                bump_field(world, entity, "collider");
+            }
         }
         "panel_pin" => {
             world.get_mut::<WorldPanel>(entity).unwrap().0.attachment =
@@ -352,6 +364,28 @@ mod tests {
         outcome.result.unwrap();
         outcome.selected.unwrap()
     }
+    #[test]
+    fn resizing_panel_keeps_pick_shape_and_saved_surface_in_agreement() {
+        let mut model = WorldModel::new();
+        let target = model.snapshot().objects[0].address.clone();
+        let id = panel(&mut model, target);
+        let before = model.snapshot().objects.iter().find(|o| o.address == id).unwrap().clone();
+        assert_eq!(before.collider.unwrap().half_extents, half_extents([1120, 960]));
+        model.enqueue(WorldCommand::Edit { edit: Edit {
+            command_id: "resize".into(),
+            target: crate::replication::REGISTRY.field_address(&id, "panel_size").unwrap(),
+            field_id: "panel_size".into(), expected_revision: "0".into(), value: json!([1024, 768]),
+        }}).unwrap();
+        model.tick()[0].result.as_ref().unwrap();
+        let snapshot = model.snapshot();
+        let resized = snapshot.objects.iter().find(|o| o.address == id).unwrap();
+        assert_eq!(resized.collider.as_ref().unwrap().half_extents, half_extents([1024, 768]));
+        assert_eq!(resized.fields.iter().find(|f| f.id == "collider").unwrap().revision, "1");
+        let mut restored = WorldModel::new();
+        restored.restore(snapshot.clone()).unwrap();
+        assert_eq!(restored.snapshot(), snapshot);
+    }
+
     #[test]
     fn panels_have_independent_state_and_survive_restore() {
         let mut model = WorldModel::new();
