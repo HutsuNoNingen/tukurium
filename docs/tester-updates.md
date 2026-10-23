@@ -38,7 +38,7 @@
 
 ## ランチャーの動作
 
-テスターはランチャーZIPを展開して `Start.bat` を使う。ランチャーは `latest.json` と版のマニフェストを取得し、SHA-256が一致するファイルを現在の版からコピーする。不足するファイルだけをダウンロードして展開し、全ファイルを照合してから `current.json` を切り替える。起動中のEngineやGodotがあれば更新を次回に延ばす。取得に失敗した場合は既存の版を起動する。
+テスターはランチャーZIPを展開して `Start.bat` を使う。ランチャーは `latest.json` と版のマニフェストを取得し、SHA-256が一致するファイルを現在の版からコピーする。不足するハッシュのファイルを重複なく最大40件並行してダウンロードし、展開・照合がすべて終わってから `current.json` を切り替える。起動中のEngineやGodotがあれば更新を次回に延ばす。取得に失敗した場合は既存の版を起動する。
 
 ```text
 Kokoverse-Tester-Launcher-<tag>/
@@ -69,4 +69,4 @@ blobs/<SHA-256>.gz
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./tests/tester-updater-smoke.ps1
 ```
 
-このテストはローカルHTTPを使い、初回取得、変更がないファイルの再利用、ワールドの保持、失敗した更新からの復帰を確認する。実際にR2へ公開する前には、`dist/` の通常ZIPも [Windows配布版のビルド手順](windows-build.md)に従って確認する。
+このテストはローカルHTTPを使い、40件の並行取得、変更がないファイルの再利用、ワールドの保持、失敗した更新からの復帰を確認する。実際にR2へ公開する前には、`dist/` の通常ZIPも [Windows配布版のビルド手順](windows-build.md)に従って確認する。

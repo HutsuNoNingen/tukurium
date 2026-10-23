@@ -164,6 +164,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Rust release build failed' }
 利用者の `.run/`、ワールド、インポートした画像・動画・モデル、個人の設定、秘密鍵を持ち込まない。
 現在の管理API版には接続パスワードを同梱しない。旧版の `-RelayCredentialsFile` 引数や `relay-access.json` を持ち込まない。
 FFmpegの実行ファイルはZIPに入らず、利用者が `Install-Video-Tools.bat` で導入する。
+インストーラーはGyanDのGitHubリリースからSHA-256固定のZIPを取得し、接続できない場合は元の配布元へ切り替える。取得済みZIPは `%LOCALAPPDATA%/Kokoverse/tool-cache/` に保存され、次の版での導入に再利用する。
 
 ## ZIPを展開して内容を照合する
 

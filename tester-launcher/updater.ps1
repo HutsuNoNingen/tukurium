@@ -51,6 +51,70 @@ function Download-File([string]$Url,[string]$Destination) {
         }
     }
 }
+function Download-Blobs([string]$BaseUrl,[object[]]$Entries,[string]$Directory) {
+    if ($Entries.Count -eq 0) { return }
+    if (-not ('KokoverseBlobDownloader' -as [type])) {
+        Add-Type -ReferencedAssemblies 'System.Net.Http' -TypeDefinition @'
+using System;
+using System.IO;
+using System.Net;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
+
+public static class KokoverseBlobDownloader {
+    public static void Download(string baseUrl, string[] blobs, string[] destinations) {
+        DownloadAsync(baseUrl, blobs, destinations).GetAwaiter().GetResult();
+    }
+
+    private static async Task DownloadAsync(string baseUrl, string[] blobs, string[] destinations) {
+        const int parallel = 40;
+        var point = ServicePointManager.FindServicePoint(new Uri(baseUrl));
+        point.ConnectionLimit = Math.Max(point.ConnectionLimit, parallel);
+        using (var handler = new HttpClientHandler { AutomaticDecompression = DecompressionMethods.None, MaxConnectionsPerServer = parallel })
+        using (var client = new HttpClient(handler))
+        using (var gate = new SemaphoreSlim(parallel)) {
+            client.Timeout = Timeout.InfiniteTimeSpan;
+            var tasks = new Task[blobs.Length];
+            for (int i = 0; i < blobs.Length; i++)
+                tasks[i] = DownloadOneAsync(client, gate, baseUrl + "/" + blobs[i], destinations[i]);
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task DownloadOneAsync(HttpClient client, SemaphoreSlim gate, string url, string destination) {
+        await gate.WaitAsync().ConfigureAwait(false);
+        try {
+            for (int attempt = 1; attempt <= 3; attempt++) {
+                Exception failure = null;
+                try {
+                    using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(120)))
+                    using (var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false)) {
+                        response.EnsureSuccessStatusCode();
+                        using (var input = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                        using (var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 65536, true))
+                            await input.CopyToAsync(output, 65536, timeout.Token).ConfigureAwait(false);
+                    }
+                    return;
+                } catch (Exception error) {
+                    failure = error;
+                    if (File.Exists(destination)) File.Delete(destination);
+                }
+                if (attempt == 3) throw new IOException("Blob download failed: " + url, failure);
+                await Task.Delay(attempt * 1000).ConfigureAwait(false);
+            }
+        } finally {
+            gate.Release();
+        }
+    }
+}
+'@
+    }
+    New-Item -ItemType Directory -Force -Path $Directory | Out-Null
+    $blobs = @($Entries | ForEach-Object { [string]$_.blob })
+    $destinations = @($Entries | ForEach-Object { Join-Path $Directory ([string]$_.sha256 + '.gz') })
+    [KokoverseBlobDownloader]::Download($BaseUrl,$blobs,$destinations)
+}
 function Test-File([string]$Path,[string]$Hash,[long]$Size) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
     $file = Get-Item -LiteralPath $Path
@@ -152,6 +216,8 @@ try {
                         New-Item -ItemType Directory -Path $staging | Out-Null
                         $oldRoot = if ($current) { Join-Path $versions $current.version } else { '' }
                         $reused = 0; $downloaded = 0
+                        $missing = @()
+                        $uniqueBlobs = @{}
                         foreach ($entry in @($manifest.files)) {
                             $relative = ([string]$entry.path).Replace('/',[IO.Path]::DirectorySeparatorChar)
                             $destination = Join-Path $staging $relative
@@ -161,17 +227,20 @@ try {
                                 Copy-Item -LiteralPath $oldFile -Destination $destination
                                 $reused++
                             } else {
-                                $compressed = $destination + '.download.gz'
-                                try {
-                                    Download-File "$base/$($entry.blob)" $compressed
-                                    Expand-Blob $compressed $destination ([long]$entry.size)
-                                } finally {
-                                    if (Test-Path -LiteralPath $compressed) { Remove-Item -LiteralPath $compressed }
-                                }
-                                $downloaded++
+                                $missing += $entry
+                                $uniqueBlobs[[string]$entry.sha256] = $entry
                             }
-                            if (-not (Test-File $destination $entry.sha256 ([long]$entry.size))) { throw "File checksum mismatch: $($entry.path)" }
                         }
+                        $blobDirectory = Join-Path $staging '.blobs'
+                        Download-Blobs $base @($uniqueBlobs.Values) $blobDirectory
+                        foreach ($entry in $missing) {
+                            $relative = ([string]$entry.path).Replace('/',[IO.Path]::DirectorySeparatorChar)
+                            $destination = Join-Path $staging $relative
+                            Expand-Blob (Join-Path $blobDirectory ([string]$entry.sha256 + '.gz')) $destination ([long]$entry.size)
+                            if (-not (Test-File $destination $entry.sha256 ([long]$entry.size))) { throw "File checksum mismatch: $($entry.path)" }
+                            $downloaded++
+                        }
+                        if (Test-Path -LiteralPath $blobDirectory) { Remove-Item -LiteralPath $blobDirectory -Recurse -Force }
                         Move-Item -LiteralPath $staging -Destination $target
                         Write-Host "Update ready: reused $reused files; downloaded $downloaded files."
                     }

@@ -10,6 +10,10 @@ function New-TestPackage([string]$Version,[string]$Value) {
     New-Item -ItemType Directory -Force -Path (Join-Path $package 'scripts'),(Join-Path $package 'bin') | Out-Null
     Set-Content -LiteralPath (Join-Path $package 'scripts/start-instance.ps1') -Value 'Write-Output started' -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $package 'bin/example.txt') -Value $Value -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $package 'bin/duplicate.txt') -Value $Value -Encoding UTF8
+    for ($index = 0; $index -lt 50; $index++) {
+        Set-Content -LiteralPath (Join-Path $package "bin/parallel-$index.txt") -Value "$Value-$index" -Encoding UTF8
+    }
     $longPath = Join-Path $package 'client-godot/.godot/editor/main.tscn-folding-3070c538c03ee49b7677ff960a3f5195.cfg'
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $longPath) | Out-Null
     Set-Content -LiteralPath $longPath -Value 'editor-cache' -Encoding UTF8
@@ -27,11 +31,16 @@ $null = New-TestPackage 'tester-v0.0.1' 'first'
 $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback,0)
 $listener.Start(); $port = $listener.LocalEndpoint.Port; $listener.Stop()
 $node = (Get-Command node).Source
-$server = Start-Process -FilePath $node -ArgumentList @((Join-Path $PSScriptRoot 'tester-feed-server.mjs'),$feed,"$port") -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $work 'server-out.log') -RedirectStandardError (Join-Path $work 'server-error.log')
+$server = Start-Process -FilePath $node -ArgumentList @((Join-Path $PSScriptRoot 'tester-feed-server.mjs'),$feed,"$port",'250') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $work 'server-out.log') -RedirectStandardError (Join-Path $work 'server-error.log')
 try {
     $url = "http://127.0.0.1:$port"
     & (Join-Path $repo 'tester-launcher/updater.ps1') -InstallRoot $install -FeedUrl $url -NoLaunch
     Assert ((Get-Content -LiteralPath (Join-Path $install 'current.json') -Raw | ConvertFrom-Json).version -eq 'Kokoverse-Windows-x64-tester-v0.0.1') 'Initial install failed.'
+    $stats = Invoke-RestMethod -Uri "$url/__stats"
+    Assert ($stats.peakBlobs -eq 40) "Expected 40 concurrent blob downloads, got $($stats.peakBlobs)."
+    $firstManifest = Get-Content -LiteralPath (Join-Path $feed 'manifests/Kokoverse-Windows-x64-tester-v0.0.1.json') -Raw | ConvertFrom-Json
+    Assert ($stats.blobRequests -eq ($firstManifest.files.Count - 1)) 'Identical files were downloaded more than once.'
+    Write-Output "PASS: peak parallel blob downloads = $($stats.peakBlobs)"
     $world = Join-Path $install 'data/.run/online/default/worlds/save.json'
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $world) | Out-Null
     Set-Content -LiteralPath $world -Value '{"saved":true}' -Encoding UTF8

@@ -164,3 +164,12 @@ Engineの保存前チェック、管理APIの各操作、公開・共有ボタ�
 
 - 確認日：2026-10-24。`tester-v2026.10.24.1` のR2初回取得で再現。修正版は [tester-updater-smoke.ps1](../tests/tester-updater-smoke.ps1) で初回取得と更新を確認する。
 - コード：[updater.ps1](../tester-launcher/updater.ps1)。
+
+## 動画ツール導入時にZIP全体を展開しない
+
+`Install-Video-Tools.bat` の導入画面が `Web 要求を書き込んでいます` で長く止まる。約115MBのFFmpeg ZIPを `Invoke-WebRequest` で単一配布元から取り、49項目を全部展開していた。実際に必要なのは `ffmpeg.exe`、`ffprobe.exe`、`LICENSE` の3項目だけだった。
+
+同じSHA-256のGyanD公式GitHubリリースを第一候補とし、元の配布元を予備にする。`curl.exe` で取得し、ZIPと実行ファイルのハッシュを照合する。ZIPはユーザーのローカルキャッシュに置いて版をまたいで再利用し、必要な3項目だけを展開する。導入済みでハッシュが合う場合は再取得しない。配布ZIPにはFFmpeg本体もキャッシュも入れない。
+
+- 再現・確認：旧スクリプトの取得処理とZIP内49項目を確認。GitHubミラーのZIPのSHA-256が元の固定値と一致することを確認。隔離フォルダーへの初回導入、再実行、別フォルダーへのキャッシュ再利用でファイルのハッシュを確認する。
+- コード：[setup-media.ps1](../scripts/setup-media.ps1)、[package.ps1](../scripts/package.ps1)。確認日：2026-10-24。

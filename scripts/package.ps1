@@ -98,8 +98,9 @@ Godot 4.7.2 and its third-party notices are included in Godot-*.txt/AUTHORS.md.
 The KokoSync protocol and SDK are from:
 https://github.com/katteni-kaihatu/kokosync/tree/5a171af078d3cf85cc3364c9358e1b993f4f9835
 FFmpeg is NOT included in this archive. Optional video tools are downloaded
-directly from https://www.gyan.dev/ffmpeg/builds/ by setup-media.ps1 with a
-pinned SHA-256; the downloaded license is preserved alongside those tools.
+from GyanD's GitHub release mirror, with https://www.gyan.dev/ffmpeg/builds/
+as fallback. setup-media.ps1 verifies a pinned SHA-256 and preserves the
+downloaded license alongside those tools.
 Oekaki avatar source attribution: client-godot/assets/oekaki/README.md.
 User-imported world assets are NOT included in this archive.
 '@ | Set-Content -LiteralPath (Join-Path $licenseRoot 'NOTICE.txt') -Encoding UTF8
