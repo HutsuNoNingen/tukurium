@@ -29,6 +29,9 @@ async function doc(client, input) {
   return client.wait(m=>m.kind==='script_document_result'&&m.request_id===request_id);
 }
 try {
+  const presentation=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',['--headless','--path','client-godot','--script','res://render_hierarchy_smoke.gd']);
+  await until(()=>presentation.exitCode!==null,'Presentation hierarchy test timed out');
+  assert.equal(presentation.exitCode,0,presentation.logs);assert.doesNotMatch(presentation.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(presentation.logs,/RENDER HIERARCHY SMOKE PASS/);
   start('.tools/kokosync-relay.exe',['--http',`127.0.0.1:${base}`,'--quic',`127.0.0.1:${base+1}`]);
   const host=await peer('host',0),guest=await peer('guest',1);
   const target=host.client.latest().snapshot.objects[0].address;
@@ -37,6 +40,7 @@ try {
   const godot=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(process.argv.includes('--rendered')?['--rendering-method','gl_compatibility']:['--headless']),'--path','client-godot','--script','res://hierarchy_smoke.gd','--',`--port=${guest.port}`,`--session=${session}`,...(process.argv.includes('--rendered')?[`--screenshot=${resolve(work,'hierarchy.png')}`]:[])]);
   await until(()=>godot.exitCode!==null,'Inspector UI timed out',60000);
   assert.equal(godot.exitCode,0,godot.logs);assert.doesNotMatch(godot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(godot.logs,/HIERARCHY SMOKE PASS/);
+  assert.ok(host.client.messages.some(m=>m.kind==='object_previews'&&m.previews.some(p=>p.preview.target.instance_id===target.instance_id)),'Guest parent preview did not reach host');
   await until(()=>host.client.latest().snapshot.objects.some(o=>o.parent?.instance_id===target.instance_id),'Child parent did not reach host');
   const late=await peer('guest',2);
   await until(()=>JSON.stringify(late.client.latest().snapshot)===JSON.stringify(host.client.latest().snapshot),'Late join hierarchy differs');

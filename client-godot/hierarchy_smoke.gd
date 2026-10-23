@@ -26,6 +26,17 @@ func run() -> void:
 	var expected: Dictionary = scene.world_panels.evaluated_transforms.get(child,{})
 	if expected.is_empty(): push_error("No inherited transform"); quit(1); return
 	if scene.render_nodes[child].position.distance_to(Vector3(expected.position[0],expected.position[1],expected.position[2]))>0.02: push_error("Renderer disagrees with Rust"); quit(1); return
+	# Send a real preview through the engine while the parent also has a local Drive.
+	var revision: String = scene.world_panels.field_data(parent,"position").revision
+	scene.queue_message({"kind":"drag_preview","preview":{"target":scene.address_of(scene.objects[parent]),"expected_revision":revision,"position":[5,2,1]}})
+	if not await until(func(): return scene.remote_previews.has(parent),"Parent preview not received"): quit(1); return
+	for _frame in 12:
+		await process_frame
+		var parent_node: Node3D = scene.render_nodes[parent]
+		var expected_child: Vector3 = parent_node.position + parent_node.quaternion * (parent_node.scale * Vector3(2,0,0))
+		if scene.render_nodes[child].position.distance_to(expected_child)>0.001: push_error("Child does not follow displayed parent during preview"); quit(1); return
+	scene.queue_message({"kind":"drag_preview","preview":null})
+	if not await until(func(): return not scene.remote_previews.has(parent),"Preview not released"): quit(1); return
 	view.hierarchy.set_root(scene.objects[parent].address)
 	if not await until(func(): return view.panel_state.inspector.tree.root!=null,"Local hierarchy root did not change"): quit(1); return
 	if not scene.world_panels.panels.is_empty(): push_error("Local hierarchy created a world panel"); quit(1); return

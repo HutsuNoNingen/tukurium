@@ -101,6 +101,13 @@ pub struct DriveFrame {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct EvaluatedTransform {
     pub target: Address,
+    pub parent: Option<Address>,
+    pub object_revision: String,
+    /// Evaluated local fields, before world-space grab/drag previews.
+    pub local_position: [f64; 3],
+    pub local_rotation: [f64; 4],
+    pub local_scale: [f64; 3],
+    /// Evaluated world pose for inspectors and simulation diagnostics.
     pub position: [f64; 3],
     pub rotation: [f64; 4],
     pub scale: [f64; 3],

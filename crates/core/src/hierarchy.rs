@@ -405,19 +405,24 @@ pub(crate) fn evaluate(world: &mut World) -> Vec<kokoverse_protocol::EvaluatedTr
         }
     }
     let mut output = Vec::new();
-    for (address, (entity, parent, _)) in nodes {
+    for (address, (entity, parent, local)) in nodes {
         let global = resolved[&address];
         if parent.is_some() {
             world.entity_mut(entity).insert(EvaluatedGlobal(global));
-            output.push(kokoverse_protocol::EvaluatedTransform {
-                target: address,
-                position: global.translation,
-                rotation: global.rotation,
-                scale: global.scale,
-            });
         } else {
             world.entity_mut(entity).remove::<EvaluatedGlobal>();
         }
+        output.push(kokoverse_protocol::EvaluatedTransform {
+            target: address,
+            parent,
+            object_revision: world.get::<ObjectRoot>(entity).unwrap().revision.to_string(),
+            local_position: local.translation,
+            local_rotation: local.rotation,
+            local_scale: local.scale,
+            position: global.translation,
+            rotation: global.rotation,
+            scale: global.scale,
+        });
     }
     output.sort_by(|a, b| a.target.instance_id.cmp(&b.target.instance_id));
     output
@@ -644,13 +649,23 @@ mod tests {
             "position",
             serde_json::json!([2.0, 0.0, 0.0]),
         );
-        model.enqueue(WorldCommand::Script{command:ScriptCommand{command_id:"drive".into(),target:root,action:ScriptAction::Attach{source:"return {name='QuarterTurn',drive=function(ctx) ctx:drive(ctx.self,'rotation',ctx:rotation_y(90)) end}".into()}}}).unwrap();
+        model.enqueue(WorldCommand::Script{command:ScriptCommand{command_id:"drive".into(),target:root.clone(),action:ScriptAction::Attach{source:"return {name='QuarterTurn',drive=function(ctx) ctx:drive(ctx.self,'rotation',ctx:rotation_y(90)) end}".into()}}}).unwrap();
         model.tick()[0].result.as_ref().unwrap();
         let before = model.snapshot();
         model.advance(Duration::from_secs_f64(1.0 / 60.0));
         let frame = model.drive_frame();
         let transform = frame.transforms.iter().find(|t| t.target == child).unwrap();
         assert!((transform.position[2] + 2.0).abs() < 1e-8);
+        assert_eq!(transform.parent.as_ref(), Some(&root));
+        assert_eq!(transform.local_position, [2.0, 0.0, 0.0]);
+        let root_pose = frame
+            .transforms
+            .iter()
+            .find(|t| t.parent.is_none())
+            .unwrap();
+        assert_eq!(root_pose.local_rotation, root_pose.rotation);
+        let root_object = before.objects.iter().find(|o| o.address == root).unwrap();
+        assert_eq!(root_pose.object_revision, root_object.object_revision);
         let collision = &model.world.resource::<crate::collision::CollisionWorld>().0;
         assert_eq!(
             collision
@@ -660,6 +675,21 @@ mod tests {
                 .center,
             transform.position
         );
+        assert_eq!(model.snapshot(), before);
+        model.set_collision_previews(vec![kokoverse_protocol::ObjectPreview {
+            target: root.clone(),
+            expected_revision: root_object.fields.iter().find(|f| f.id == "position").unwrap().revision.clone(),
+            position: [8.0, 2.0, 3.0],
+            ..Default::default()
+        }]);
+        model.advance(Duration::from_secs_f64(1.0 / 60.0));
+        let frame = model.drive_frame();
+        let root_pose = frame.transforms.iter().find(|t| t.target == root).unwrap();
+        let child_pose = frame.transforms.iter().find(|t| t.target == child).unwrap();
+        assert_eq!(root_pose.position, [8.0, 2.0, 3.0]);
+        assert_eq!(root_pose.local_position, root_object.world_position);
+        assert_eq!(child_pose.local_position, [2.0, 0.0, 0.0]);
+        assert!((child_pose.position[2] - 1.0).abs() < 1e-8);
         assert_eq!(model.snapshot(), before);
     }
 }

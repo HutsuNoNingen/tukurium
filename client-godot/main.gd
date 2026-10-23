@@ -11,6 +11,8 @@ const WORLD_PANELS = preload("res://world_panels.gd")
 const REQUEST_BROKER = preload("res://request_broker.gd")
 const WORLD_HUD = preload("res://world_hud.gd")
 const PRIMITIVE_MESH = preload("res://primitive_mesh.gd")
+const RENDER_HIERARCHY = preload("res://render_hierarchy.gd")
+var render_hierarchy = RENDER_HIERARCHY.new()
 var hud = WORLD_HUD.new()
 var requests = REQUEST_BROKER.new()
 var world_panels = WORLD_PANELS.new()
@@ -600,6 +602,7 @@ func preview_gizmo_drag(position: Vector3) -> void:
 	gizmo_preview = position
 	if not render_nodes.has(gizmo_target): return
 	render_nodes[gizmo_target].position = position
+	draw_render_hierarchy()
 	selection_outline.position = position
 	filling = true
 	for i in range(3): position_inputs[i].value = position[i]
@@ -612,6 +615,7 @@ func restore_gizmo_visual() -> void:
 		render_nodes[gizmo_target].position = Vector3(p[0], p[1], p[2])
 	gizmo_preview_active = false
 	gizmo_target = ""
+	draw_render_hierarchy()
 	update_selected()
 
 func send_gizmo_preview() -> void:
@@ -627,18 +631,12 @@ func valid_remote_preview(preview: Dictionary) -> bool:
 	for field in objects[id].fields: revisions[field.id] = field.revision
 	return revisions.get("position") == preview.expected_revision and (preview.get("expected_rotation_revision") == null or revisions.get("rotation") == preview.expected_rotation_revision) and (preview.get("expected_scale_revision") == null or revisions.get("scale") == preview.expected_scale_revision)
 
-func object_quaternion(object: Dictionary) -> Quaternion:
-	var values: Dictionary = world_panels.evaluated_transforms.get(object.address.instance_id, {}) if object.get("parent") != null else driven_objects.get(object.address.instance_id, {})
-	var q: Array = values.get("rotation", object.get("world_rotation",[0,0,0,1]))
-	return Quaternion(q[0],q[1],q[2],q[3])
+func draw_render_hierarchy(delta: float = 0.0) -> void:
+	render_hierarchy.draw(render_nodes, remote_previews, gizmo_target if gizmo_preview_active else "", gizmo_preview, delta)
 
-func apply_object_transform(node: Node3D, object: Dictionary) -> void:
-	var values: Dictionary = world_panels.evaluated_transforms.get(object.address.instance_id, {}) if object.get("parent") != null else driven_objects.get(object.address.instance_id, {})
-	var p: Array = values.get("position", object.world_position)
-	var s: Array = values.get("scale", object.get("world_scale",[1,1,1]))
-	node.position = Vector3(p[0],p[1],p[2])
-	node.quaternion = object_quaternion(object)
-	node.scale = Vector3(s[0],s[1],s[2])
+func sync_render_hierarchy() -> void:
+	render_hierarchy.sync(objects, world_panels.evaluated_transforms)
+	draw_render_hierarchy()
 
 func apply_drive_frame(frame: Dictionary) -> void:
 	var previous := driven_objects.keys()
@@ -652,8 +650,6 @@ func apply_drive_frame(frame: Dictionary) -> void:
 		if not previous.has(id): previous.append(id)
 	for id in previous:
 		if not objects.has(id) or not render_nodes.has(id): continue
-		if not remote_previews.has(id) and not (gizmo_preview_active and gizmo_target == id):
-			apply_object_transform(render_nodes[id], objects[id])
 		var c: Array = driven_objects.get(id, {}).get("color", [])
 		if c.is_empty():
 			for field in objects[id].fields:
@@ -661,6 +657,7 @@ func apply_drive_frame(frame: Dictionary) -> void:
 		if c.size() == 4:
 			render_nodes[id].material_override.albedo_color = Color(c[0], c[1], c[2], c[3])
 			if render_nodes[id].has_node("ImportedModel"): asset_importer.tint_model(render_nodes[id].get_node("ImportedModel"), render_nodes[id].material_override.albedo_color)
+	sync_render_hierarchy()
 	var statuses: Array = frame.get("statuses", [])
 	if statuses != local_script_statuses:
 		local_script_statuses = statuses
@@ -681,11 +678,8 @@ func set_remote_previews(entries: Array) -> void:
 		var preview: Dictionary = entry.preview
 		if valid_remote_preview(preview) and not next.has(preview.target.instance_id):
 			next[preview.target.instance_id] = preview
-	for id in remote_previews:
-		if not next.has(id) and render_nodes.has(id) and objects.has(id):
-			if gizmo_preview_active and gizmo_target == id: continue
-			apply_object_transform(render_nodes[id],objects[id])
 	remote_previews = next
+	draw_render_hierarchy()
 
 func cancel_gizmo_drag() -> void:
 	dirty.erase("position")
@@ -992,15 +986,7 @@ func _process(delta: float) -> void:
 		if not valid_remote_preview(preview):
 			remote_previews.erase(id)
 			continue
-		if gizmo_preview_active and gizmo_target == id: continue
-		var p: Array = preview.position
-		var node: MeshInstance3D = render_nodes[id]
-		var alpha := 1.0 - exp(-20.0 * delta)
-		node.position = node.position.lerp(Vector3(p[0], p[1], p[2]), alpha)
-		var q: Array = preview.rotation if preview.get("rotation") != null else driven_objects.get(id, {}).get("rotation", objects[id].world_rotation)
-		var s: Array = preview.scale if preview.get("scale") != null else driven_objects.get(id, {}).get("scale", objects[id].world_scale)
-		node.quaternion = node.quaternion.slerp(Quaternion(q[0],q[1],q[2],q[3]),alpha)
-		node.scale = node.scale.lerp(Vector3(s[0],s[1],s[2]),alpha)
+	draw_render_hierarchy(delta)
 	update_selection_outline()
 	world_panels.tick()
 	if not current.is_empty() and not hud.blocking(): gizmo.set_target(cube.position, editable and not busy and not look and not fps_active)
@@ -1195,8 +1181,6 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 				var error := image.load_png_from_buffer(bytes) if source.begins_with("data:image/png") else image.load_jpg_from_buffer(bytes)
 				if error == OK: image_textures[source] = ImageTexture.create_from_image(image)
 			node.material_override.albedo_texture = image_textures.get(source)
-		apply_object_transform(node,object)
-		if gizmo_preview_active and id == gizmo_target: node.position = gizmo_preview
 		for field in object.fields:
 			if field.id == "color":
 				var c: Array = field.value
