@@ -39,6 +39,9 @@ func session_input(panel_id: String, target_id: String, field: String, action: S
 	command({"kind":"edit_session","request":{"client_id":client_id,"context":{"source":app.field_address(panel_id,"inspector_target"),"field_id":"inspector_target"},"target":app.field_address(target_id,field),"field_id":field,"action":action,"draft":draft}}, callback)
 
 func receive(body: Dictionary) -> bool:
+	if body.get("kind") == "script_document_state":
+		for panel in panels.values(): panel.content.script_view.receive(body.document)
+		return true
 	if body.get("kind") == "edit_sessions":
 		sessions = body.get("sessions", [])
 		for panel in panels.values(): panel.content.refresh_sessions()
@@ -56,7 +59,7 @@ func open_inspector(target_id: String = "") -> void:
 func close_panel(id: String) -> void:
 	if not app.objects.has(id): return
 	panels[id].clear_focus()
-	if not panels[id].content.edits.is_empty():
+	if panels[id].content.has_active_edits():
 		panels[id].content.close_when_ready = true
 		return
 	command({"kind":"structure","command":{"action":"delete","target":app.address_of(app.objects[id]),"expected_revision":app.objects[id].object_revision}})

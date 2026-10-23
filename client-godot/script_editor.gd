@@ -1,6 +1,13 @@
 extends RefCounted
 
 var app
+var action_guard: Callable
+var reload_guard: Callable
+var selection_guard: Callable
+var selection_changed: Callable
+var draft_changed: Callable
+var external_readonly := false
+var shared_document_mode := false
 var window: Window
 var object_title: Label
 var component_count: Label
@@ -35,18 +42,24 @@ var queued_parameters: Dictionary = {}
 var flush_at := 0
 var last_error := ""
 
-func setup(owner) -> void:
+func setup(owner, mount: Control = null) -> void:
 	app = owner
-	window = Window.new()
-	window.title = "Script Systems · Luau"
-	window.min_size = Vector2i(900, 640)
-	window.size = Vector2i(1080, 760)
-	window.close_requested.connect(window.hide)
-	app.add_child(window)
+	var surface: Node = mount
+	if mount == null:
+		window = Window.new()
+		window.title = "Script Systems · Luau"
+		window.min_size = Vector2i(900, 640)
+		window.size = Vector2i(1080, 760)
+		window.close_requested.connect(window.hide)
+		app.add_child(window)
+		surface = window
+	else:
+		mount.theme = Theme.new()
+		mount.theme.default_font_size = 16
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for edge in ["left", "top", "right", "bottom"]: margin.add_theme_constant_override("margin_" + edge, 16)
-	window.add_child(margin)
+	surface.add_child(margin)
 	var stack := VBoxContainer.new()
 	stack.add_theme_constant_override("separation", 10)
 	margin.add_child(stack)
@@ -55,10 +68,10 @@ func setup(owner) -> void:
 	stack.add_child(object_title)
 	var split := HSplitContainer.new()
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	split.split_offset = 260
+	split.split_offset = 260 if mount == null else 170
 	stack.add_child(split)
 	var sidebar := VBoxContainer.new()
-	sidebar.custom_minimum_size.x = 240
+	sidebar.custom_minimum_size.x = 240 if mount == null else 160
 	sidebar.add_theme_constant_override("separation", 10)
 	split.add_child(sidebar)
 	component_count = Label.new()
@@ -82,7 +95,7 @@ func setup(owner) -> void:
 	remove_dialog.title = "Remove script"
 	remove_dialog.ok_button_text = "Remove script"
 	remove_dialog.confirmed.connect(remove_component)
-	window.add_child(remove_dialog)
+	surface.add_child(remove_dialog)
 	sidebar.add_child(HSeparator.new())
 	var add_heading := Label.new()
 	add_heading.text = "Add a script"
@@ -106,7 +119,7 @@ func setup(owner) -> void:
 	sidebar.add_child(add_hint)
 	var editor := VBoxContainer.new()
 	editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	editor.custom_minimum_size.x = 570
+	editor.custom_minimum_size.x = 570 if mount == null else 0
 	editor.add_theme_constant_override("separation", 10)
 	split.add_child(editor)
 	var toolbar := HBoxContainer.new()
@@ -150,7 +163,8 @@ func setup(owner) -> void:
 		if not filling:
 			source_dirty = true
 			feedback.text = "Draft · Apply code to save; Run / Pause stays as shown above. Fields reset when code changes."
-			refresh_buttons())
+			refresh_buttons()
+			if draft_changed.is_valid(): draft_changed.call())
 	editor.add_child(code)
 	var parameters_heading := Label.new()
 	parameters_heading.text = "Public parameters · changes save automatically"
@@ -174,6 +188,9 @@ func setup(owner) -> void:
 	reload_button = Button.new()
 	reload_button.text = "Reload shared code"
 	reload_button.pressed.connect(func():
+		if reload_guard.is_valid():
+			reload_guard.call()
+			return
 		source_dirty = false
 		queued_parameters.clear()
 		config_signature = ""
@@ -185,7 +202,7 @@ func setup(owner) -> void:
 	click_button.text = "Test click"
 	click_button.pressed.connect(func(): interact(target))
 	actions.add_child(click_button)
-	window.hide()
+	if window != null: window.hide()
 
 func open(id: String) -> void:
 	if target != id:
@@ -196,21 +213,24 @@ func open(id: String) -> void:
 		list_signature = ""
 		queued_parameters.clear()
 	refresh()
-	window.popup_centered(Vector2i(1080, 760))
+	if window != null: window.popup_centered(Vector2i(1080, 760))
 
 func select_script(index: int) -> void:
 	if index < 0 or index >= scripts.item_count: return
-	if source_dirty or not queued_parameters.is_empty() or not pending_id.is_empty():
+	if selection_guard.is_valid() and not selection_guard.call(): return
+	if (source_dirty and not shared_document_mode) or not queued_parameters.is_empty() or not pending_id.is_empty():
 		feedback.text = "Apply or Reload the code draft before switching scripts." if source_dirty else "Wait for the parameter changes to save before switching scripts."
 		for i in scripts.item_count:
 			if scripts.get_item_metadata(i) == selected: scripts.select(i)
 		return
+	if shared_document_mode: source_dirty = false
 	selected = str(scripts.get_item_metadata(index))
 	scripts.select(index)
 	config_signature = ""
 	last_error = ""
 	feedback.text = ""
 	refresh()
+	if selection_changed.is_valid(): selection_changed.call(selected)
 
 func script_error(id: String) -> String:
 	for status in app.local_script_statuses + app.script_statuses:
@@ -227,6 +247,12 @@ func current_script() -> Dictionary:
 	return {}
 
 func send_action(action: Dictionary) -> void:
+	if action_guard.is_valid():
+		action_guard.call(action)
+		return
+	dispatch_action(action)
+
+func dispatch_action(action: Dictionary) -> void:
 	if not app.editable or not pending_id.is_empty() or not app.objects.has(target): return
 	pending_action = action.action
 	action.target = app.address_of(app.objects[target])
@@ -281,23 +307,26 @@ func disconnected() -> void:
 	refresh_buttons()
 
 func receive_result(body: Dictionary) -> bool:
+	var action := pending_action
 	pending_id = ""
 	if body.ok:
 		if pending_action == "attach":
 			selected = ""
 			list_signature = ""
-		source_dirty = false
-		config_signature = ""
+		if not shared_document_mode or pending_action in ["attach", "remove"]:
+			source_dirty = false
+			config_signature = ""
 		last_error = ""
 		feedback.text = "Shared component updated."
 	else:
 		feedback.text = body.get("message", "Script edit rejected.")
 	pending_action = ""
 	refresh()
+	if body.ok and shared_document_mode and action in ["attach", "remove"] and selection_changed.is_valid(): selection_changed.call(selected)
 	return true
 
 func refresh() -> void:
-	if window == null: return
+	if object_title == null: return
 	var object: Dictionary = app.objects.get(target, {})
 	object_title.text = "No object selected"
 	if not object.is_empty():
@@ -411,7 +440,7 @@ func build_parameters(component: Dictionary) -> void:
 				parameter_controls[field.id] = values
 
 func refresh_buttons() -> void:
-	var ready: bool = app.editable and pending_id.is_empty() and app.objects.has(target)
+	var ready: bool = app.editable and not external_readonly and pending_id.is_empty() and app.objects.has(target)
 	var component := current_script()
 	var components: Array = app.objects.get(target,{}).get("scripts",[])
 	var full := components.size() >= 4
@@ -431,7 +460,7 @@ func refresh_buttons() -> void:
 	var can_control := ready and not component.is_empty() and not source_dirty
 	run_button.disabled = not can_control or (component.get("enabled", false) and script_error(selected).is_empty())
 	pause_button.disabled = not can_control or not component.get("enabled", false)
-	reload_button.disabled = not ready or component.is_empty()
+	reload_button.disabled = not app.editable or not pending_id.is_empty() or component.is_empty()
 	code.editable = ready and not component.is_empty()
 	parameters.mouse_filter = Control.MOUSE_FILTER_STOP if source_dirty else Control.MOUSE_FILTER_PASS
 	parameters.modulate.a = 0.5 if source_dirty else 1.0

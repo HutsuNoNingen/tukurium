@@ -18,4 +18,8 @@ pub struct WorldPanel {
 pub struct InspectorView {
     pub target: Option<Address>,
     pub scroll: [f64; 2],
+    #[serde(default)]
+    pub scripts_open: bool,
+    #[serde(default)]
+    pub script_id: Option<String>,
 }

@@ -1,5 +1,6 @@
 mod assets;
 mod edit_sessions;
+mod script_documents;
 mod media_clock;
 mod persistence;
 mod previews;
@@ -72,6 +73,7 @@ enum Origin {
 
 struct Engine {
     edit_sessions: kokoverse_core::edit_sessions::EditSessions,
+    documents: script_documents::Bridge,
     remote_edit_sessions: Vec<kokoverse_protocol::EditSession>,
     last_edit_sessions: Value,
     clock: media_clock::ClockSync,
@@ -539,6 +541,10 @@ impl Engine {
             self.send(id, envelope);
             return;
         }
+        if envelope.body["kind"].as_str().is_some_and(|kind|kind.starts_with("script_document")) {
+            if self.synced && envelope.authority_epoch == self.epoch { self.script_document_message(Origin::Local(id), &envelope.body); }
+            return;
+        }
         if envelope.body["kind"] == "edit_session" {
             if self.synced && envelope.authority_epoch == self.epoch {
                 self.edit_session(id, &envelope.body);
@@ -835,6 +841,10 @@ impl Engine {
                 if e.protocol_version != VERSION || e.session_id != self.session {
                     return;
                 }
+                if e.body["kind"].as_str().is_some_and(|kind|kind.starts_with("script_document")) {
+                    if (self.host || peer == self.host_peer) && e.authority_epoch == self.epoch { self.script_document_message(Origin::Peer(peer.into()), &e.body); }
+                    return;
+                }
                 if e.body["kind"] == "clock_ping" || e.body["kind"] == "clock_pong" {
                     if (self.host || peer == self.host_peer) && e.authority_epoch == self.epoch {
                         self.clock_message(Origin::Peer(peer.into()), &e.body);
@@ -1041,6 +1051,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         previews: previews::Previews::default(),
         model,
         edit_sessions: Default::default(),
+        documents: Default::default(),
         remote_edit_sessions: Vec::new(),
         last_edit_sessions: Value::Null,
         host,

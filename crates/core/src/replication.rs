@@ -134,6 +134,8 @@ fn panel_pin(v: &Value) -> Result<(), String> {
 fn panel_scroll(v: &Value) -> Result<(), String> {
     crate::panels::validate_field("panel_scroll", v)
 }
+fn inspector_scripts_open(v: &Value) -> Result<(), String> { crate::panels::validate_field("inspector_scripts_open", v) }
+fn inspector_script_id(v: &Value) -> Result<(), String> { crate::panels::validate_field("inspector_script_id", v) }
 fn inspector_target(v: &Value) -> Result<(), String> {
     crate::panels::validate_field("inspector_target", v)
 }
@@ -293,16 +295,20 @@ pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
                     inspector_target,
                 ),
                 editable("panel_scroll", "Scroll", "panel_scroll", 10, panel_scroll),
+                editable("inspector_scripts_open", "Script editor", "bool", 11, inspector_scripts_open),
+                editable("inspector_script_id", "Selected script", "script_id", 12, inspector_script_id),
             ],
             present: |o| o.inspector.is_some(),
             project: |o| {
                 let i = o.inspector.as_ref().unwrap();
-                json!({"inspector_target":i.target,"panel_scroll":i.scroll})
+                json!({"inspector_target":i.target,"panel_scroll":i.scroll,"inspector_scripts_open":i.scripts_open,"inspector_script_id":i.script_id})
             },
             restore: |o, v| {
                 o.inspector = Some(kokoverse_protocol::InspectorView {
                     target: parse(&v["inspector_target"])?,
                     scroll: parse(&v["panel_scroll"])?,
+                    scripts_open: parse(&v["inspector_scripts_open"])?,
+                    script_id: parse(&v["inspector_script_id"])?,
                 });
                 Ok(())
             },
@@ -445,7 +451,7 @@ impl Registry {
         result.fields.clear();
         let mut seen = HashSet::new();
         let mut ui = Vec::new();
-        for component in o.components {
+        for mut component in o.components {
             if component.address.instance_id != o.address.instance_id
                 || !seen.insert(component.address.local_id)
             {
@@ -458,6 +464,13 @@ impl Registry {
                     c.local_id == component.address.local_id && c.type_id == component.type_id
                 })
                 .ok_or("Unknown component type")?;
+            // Existing panels open in the Object tab when the new optional view state is absent.
+            if c.type_id == "InspectorView" && component.version == 1 && component.fields.len() == 2
+                && component.fields.iter().all(|f| matches!(f.id.as_str(), "inspector_target" | "panel_scroll")) {
+                for (id, value) in [("inspector_scripts_open", json!(false)), ("inspector_script_id", Value::Null)] {
+                    component.fields.push(ReplicatedField {id:id.into(),revision:result.object_revision.clone(),value});
+                }
+            }
             if component.version != 1 || component.fields.len() != c.fields.len() {
                 return Err("Unsupported component schema".into());
             }

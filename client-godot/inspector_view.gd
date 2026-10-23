@@ -1,6 +1,10 @@
 extends PanelContainer
+const SHARED_SCRIPT_VIEW = preload("res://shared_script_view.gd")
 ## One inspector instance. Selection, drafts and requests never use the HUD's singleton state.
 var manager
+var script_view
+var script_mount: MarginContainer
+var scripts_button: Button
 var panel_id := ""
 var target_id := ""
 var panel_state: Dictionary = {}
@@ -62,10 +66,9 @@ func setup(controller, id: String) -> void:
 	column.add_child(actions)
 	add_button(actions, "Select / Gizmo", func():
 		if not target_id.is_empty(): manager.app.select_object(target_id))
-	add_button(actions, "Scripts…", func():
-		if not target_id.is_empty():
-			manager.app.release_cursor()
-			manager.app.script_editor.open(target_id))
+	scripts_button = add_button(actions, "Scripts", func():
+		if not script_view.busy():
+			manager.edit(panel_id,"inspector_scripts_open",not bool(panel_state.inspector.get("scripts_open",false))))
 	add_button(actions, "New inspector", func(): manager.open_inspector(target_id))
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -73,6 +76,12 @@ func setup(controller, id: String) -> void:
 	fields_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	fields_box.add_theme_constant_override("separation", 10)
 	scroll.add_child(fields_box)
+	script_mount = MarginContainer.new()
+	script_mount.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(script_mount)
+	script_mount.hide()
+	script_view = SHARED_SCRIPT_VIEW.new()
+	script_view.setup(manager,panel_id,script_mount)
 	scroll.get_v_scroll_bar().value_changed.connect(on_scroll)
 	message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	message.add_theme_font_size_override("font_size", 18)
@@ -204,6 +213,12 @@ func refresh(object: Dictionary) -> void:
 		scroll.scroll_vertical = int(float(object.inspector.scroll[1]) * maxf(0.0, bar.max_value - bar.page))
 	filling = false
 	refresh_sessions()
+	var show_scripts: bool = object.inspector.get("scripts_open",false)
+	script_mount.visible = show_scripts
+	scroll.visible = not show_scripts
+	scripts_button.text = "Object fields" if show_scripts else "Scripts"
+	script_view.active = show_scripts
+	if show_scripts: script_view.refresh(target_id, object.inspector.get("script_id"))
 
 func fill_values() -> void:
 	for field in controls:
@@ -287,6 +302,7 @@ func edit_result(result: Dictionary, field: String) -> void:
 		message.text = str(result.get("message", "Edit rejected"))
 
 func tick() -> void:
+	script_view.tick()
 	if not manager.app.editable: return
 	var now := Time.get_ticks_msec()
 	if scroll_pending >= 0 and not scroll_inflight and now >= scroll_due:
@@ -313,19 +329,24 @@ func tick() -> void:
 				if not result.ok and edits.has(field):
 					edits.erase(field)
 					message.text = str(result.get("message", "Editing expired")))
-	if edits.is_empty() and close_when_ready:
+	if edits.is_empty() and not script_view.busy() and close_when_ready:
 		close_when_ready = false
 		manager.close_panel(panel_id)
 		return
-	if edits.is_empty() and target_change_pending:
+	if edits.is_empty() and not script_view.busy() and target_change_pending:
 		target_change_pending = false
 		manager.edit(panel_id, "inspector_target", pending_target)
 	refresh_sessions()
 
+func has_active_edits() -> bool:
+	return not edits.is_empty() or script_view.busy()
+
 func finish_all() -> void:
+	if not script_view.busy(): script_view.leave()
 	for field in edits: edits[field].release = true
 
 func disconnected() -> void:
+	script_view.disconnected()
 	edits.clear()
 	scroll_pending = -1.0
 	scroll_inflight = false
@@ -370,3 +391,7 @@ func on_scroll(_value: float) -> void:
 	var ratio: float = float(scroll.scroll_vertical) / maxf(1.0, bar.max_value - bar.page)
 	scroll_pending = clampf(ratio,0.0,1.0)
 	scroll_due = Time.get_ticks_msec() + 80
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE and script_view != null:
+		script_view.dispose()

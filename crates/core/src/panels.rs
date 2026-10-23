@@ -5,11 +5,13 @@ use kokoverse_protocol::{Address, ObjectView, PanelAttachment, Snapshot, Visual}
 use serde_json::{Value, json};
 
 pub const MAX_PANELS: usize = 16;
-pub const FIELDS: [&str; 4] = [
+pub const FIELDS: [&str; 6] = [
     "panel_size",
     "panel_pin",
     "inspector_target",
     "panel_scroll",
+    "inspector_scripts_open",
+    "inspector_script_id",
 ];
 
 pub fn valid_address(value: &Value) -> bool {
@@ -23,6 +25,13 @@ pub(crate) fn validate_field(id: &str, value: &Value) -> Result<(), String> {
         "panel_size" => serde_json::from_value::<[u32; 2]>(value.clone())
             .is_ok_and(|v| v.iter().all(|x| (256..=1536).contains(x))),
         "inspector_target" => valid_address(value),
+        "inspector_scripts_open" => value.is_boolean(),
+        "inspector_script_id" => {
+            value.is_null()
+                || value
+                    .as_str()
+                    .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
+        }
         "panel_scroll" => serde_json::from_value::<[f64; 2]>(value.clone())
             .is_ok_and(|v| v.iter().all(|x| x.is_finite() && (0.0..=1.0).contains(x))),
         "panel_pin" => {
@@ -72,6 +81,18 @@ pub(crate) fn append_fields(object: &mut ObjectView, revisions: &Revisions) {
             "panel_scroll",
             json!(inspector.scroll),
         ),
+        (
+            "inspector_scripts_open",
+            "Script editor",
+            "bool",
+            json!(inspector.scripts_open),
+        ),
+        (
+            "inspector_script_id",
+            "Selected script",
+            "script_id",
+            json!(inspector.script_id),
+        ),
     ] {
         if let Some(f) = object.fields.iter_mut().find(|f| f.id == id) {
             f.value = value;
@@ -117,6 +138,8 @@ pub(crate) fn validate_object(object: &ObjectView) -> Result<(), String> {
                     serde_json::from_value::<Option<Address>>(actual.value.clone()).ok()
                         == Some(inspector.target.clone())
                 }
+                "inspector_scripts_open" => actual.value == json!(inspector.scripts_open),
+                "inspector_script_id" => actual.value == json!(inspector.script_id),
                 _ => false,
             };
             if !matches || actual.value_type != field.value_type {
@@ -161,6 +184,8 @@ pub(crate) fn create(
     object.inspector = Some(kokoverse_protocol::InspectorView {
         target,
         scroll: [0.0; 2],
+        scripts_open: false,
+        script_id: None,
     });
     crate::set_default_collider(&mut object);
     Ok(object)
@@ -180,12 +205,26 @@ pub(crate) fn write_field(world: &mut World, entity: Entity, field: &str, value:
             let mut inspector = world.get_mut::<InspectorView>(entity).unwrap();
             inspector.0.target = serde_json::from_value(value).unwrap();
             inspector.0.scroll = [0.0; 2];
-            *world
-                .get_mut::<Revisions>(entity)
+            inspector.0.script_id = None;
+            for field in ["panel_scroll", "inspector_script_id"] {
+                *world
+                    .get_mut::<Revisions>(entity)
+                    .unwrap()
+                    .0
+                    .entry(field.into())
+                    .or_default() += 1;
+            }
+        }
+        "inspector_scripts_open" => {
+            world
+                .get_mut::<InspectorView>(entity)
                 .unwrap()
                 .0
-                .entry("panel_scroll".into())
-                .or_default() += 1;
+                .scripts_open = serde_json::from_value(value).unwrap()
+        }
+        "inspector_script_id" => {
+            world.get_mut::<InspectorView>(entity).unwrap().0.script_id =
+                serde_json::from_value(value).unwrap()
         }
         "panel_scroll" => {
             world.get_mut::<InspectorView>(entity).unwrap().0.scroll =

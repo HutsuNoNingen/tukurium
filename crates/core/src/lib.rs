@@ -10,6 +10,7 @@ pub mod presence;
 pub mod replication;
 mod resources;
 pub mod scripting;
+pub mod script_documents;
 pub mod systems;
 
 use bevy_ecs::prelude::*;
