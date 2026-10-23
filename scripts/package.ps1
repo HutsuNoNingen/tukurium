@@ -42,12 +42,24 @@ try {
     foreach ($file in @('Godot_v4.7.2-stable_win64.exe','Godot_v4.7.2-stable_win64_console.exe')) {
         Copy-Item -LiteralPath (Join-Path '.tools/godot' $file) -Destination (Join-Path $packageRoot '.tools/godot')
     }
-    foreach ($file in @('main.gd','main.tscn','project.godot','avatar.gd','translation_gizmo.gd','asset_importer.gd','asset_status.gd','script_editor.gd','world_panel.gd','world_panels.gd','inspector_view.gd','request_broker.gd')) {
-        Copy-Item -LiteralPath (Join-Path 'client-godot' $file) -Destination (Join-Path $packageRoot 'client-godot')
+    # Include the complete runtime so newly added inspector dependencies cannot be omitted.
+    $clientFiles = @(Get-ChildItem -LiteralPath 'client-godot' -File | Where-Object {
+        ($_.Extension -in @('.gd','.tscn','.tres','.gdshader') -or $_.Name -eq 'project.godot') -and $_.BaseName -notmatch '(^|_)smoke$'
+    })
+    foreach ($file in $clientFiles) {
+        Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $packageRoot 'client-godot')
+        if (Test-Path -LiteralPath ($file.FullName + '.uid')) {
+            Copy-Item -LiteralPath ($file.FullName + '.uid') -Destination (Join-Path $packageRoot 'client-godot')
+        }
     }
-    $godotOutput = & .tools/godot/Godot_v4.7.2-stable_win64_console.exe --headless --path client-godot --editor --import 2>&1
+    $godotOutput = & .tools/godot/Godot_v4.7.2-stable_win64_console.exe --headless --path client-godot --editor --import --quit 2>&1
     if ($LASTEXITCODE -ne 0 -or ($godotOutput | Select-String -Pattern 'SCRIPT ERROR:|^ERROR:')) { throw 'Godot resource import failed' }
     & ./scripts/copy-avatar.ps1 -ClientDirectory (Join-Path $packageRoot 'client-godot')
+    $packageImport = & (Join-Path $packageRoot '.tools/godot/Godot_v4.7.2-stable_win64_console.exe') --headless --path (Join-Path $packageRoot 'client-godot') --editor --import --quit 2>&1
+    if ($LASTEXITCODE -ne 0 -or ($packageImport | Select-String -Pattern 'SCRIPT ERROR:|^ERROR:')) {
+        $packageImport | Write-Output
+        throw 'Packaged Godot project did not import successfully'
+    }
     Get-ChildItem -LiteralPath 'distribution' -File | Copy-Item -Destination $packageRoot
     if ($includeLogin) { $bundledAccess | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $packageRoot 'relay-access.json') -Encoding UTF8 }
     Get-ChildItem -LiteralPath 'distribution/scripts' -File | Copy-Item -Destination (Join-Path $packageRoot 'scripts')
