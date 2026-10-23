@@ -236,8 +236,11 @@ func route_input(event: InputEvent) -> bool:
 		return true
 	if not event is InputEventMouse: return false
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT:
+		# Plain RMB and every in-progress grab release belong to world manipulation.
+		if not event.pressed or not event.ctrl_pressed or not app.hand_grab.is_empty() or app.grab_waiting: return false
 		var reference_hit := pick(app.get_viewport().get_visible_rect().size * 0.5 if app.fps_active else event.position)
 		if not reference_hit.is_empty():
+			panels[reference_hit.id].forward_pointer(InputEventMouseMotion.new(),reference_hit.position)
 			var control: Control = panels[reference_hit.id].viewport.gui_get_hovered_control()
 			if control != null and control.has_method("is_reference_chip"):
 				panels[reference_hit.id].forward_pointer(event,reference_hit.position)

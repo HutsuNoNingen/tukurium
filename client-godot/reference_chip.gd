@@ -10,7 +10,7 @@ func is_reference_chip() -> bool: return true
 
 func _gui_input(event: InputEvent) -> void:
 	if manager == null or disabled or not event is InputEventMouseButton or not event.pressed: return
-	if event.button_index == MOUSE_BUTTON_RIGHT:
+	if event.button_index == MOUSE_BUTTON_RIGHT and event.ctrl_pressed:
 		if not manager.carried_reference.is_empty(): manager.carried_reference = {}
 		else:
 			var source := value_payload if event.shift_pressed and value_payload.is_valid() else payload

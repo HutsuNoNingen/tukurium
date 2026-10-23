@@ -150,20 +150,34 @@ func run() -> void:
 	await create_timer(0.1).timeout
 	if not await fps_tab(scene,panel,1): quit(1); return
 	if not await fps_tab(scene,panel,0): quit(1); return
-	scene.orbit_yaw = 0.0
-	scene.orbit_pitch = 0.0
-	await create_timer(0.1).timeout
+	view.scroll.ensure_control_visible(view.reference_chips.name)
+	if not await wait_for(func(): return view.scroll_pending<0 and not view.scroll_inflight,"Scroll did not settle before header grab"): quit(1); return
+	await fps_point(scene,panel,view.reference_chips.name.get_global_rect().get_center())
 	var grab := InputEventMouseButton.new()
 	grab.button_index = MOUSE_BUTTON_RIGHT
 	grab.pressed = true
 	grab.position = root.get_visible_rect().size * 0.5
+	grab.ctrl_pressed = true
+	root.push_input(grab, true)
+	if scene.world_panels.carried_reference.get("kind")!="kokoverse_reference": push_error("Ctrl+RMB did not take the field reference"); quit(1); return
+	grab.pressed = false
+	root.push_input(grab, true)
+	grab.pressed = true
+	root.push_input(grab, true)
+	if not scene.world_panels.carried_reference.is_empty(): push_error("Ctrl+RMB did not clear the reference"); quit(1); return
+	grab.pressed = false
+	root.push_input(grab, true)
+	grab.pressed = true
+	grab.ctrl_pressed = false
 	root.push_input(grab, true)
 	if not await wait_for(func(): return not scene.hand_grab.is_empty() and scene.hand_grab.preview.target.instance_id == panel.panel_id, "RMB did not grab the panel"): quit(1); return
+	if not scene.world_panels.carried_reference.is_empty(): push_error("Plain RMB copied a reference instead of grabbing"); quit(1); return
 	scene.queue_message({"kind":"grab","action":"scale","factor":1.2})
 	scene.queue_message({"kind":"grab","action":"rotate","delta":[0.2,0.1],"vertical":false})
 	if not await wait_for(func(): return scene.hand_grab.preview.scale[0] > 1.1, "Panel scale preview missing"): quit(1); return
 	grab = grab.duplicate()
 	grab.pressed = false
+	grab.ctrl_pressed = true
 	root.push_input(grab, true)
 	if not await wait_for(func(): return not scene.pending and scene.hand_grab.is_empty() and scene.objects[panel.panel_id].world_scale[0] > 1.1, "Panel grab did not commit"): quit(1); return
 	print("WORLD PANELS SMOKE PASS: 3D pointer, FPS gaze tabs, text entry, independent targets, shared scroll and gizmos")

@@ -162,7 +162,7 @@ func heading(text: String) -> void:
 			return {"kind":"kokoverse_value","value_type":data.value_type,"value":data.value}
 		label.accepts = func(data): return data is Dictionary and data.get("kind") == "kokoverse_value" and data.get("value_type") in ["string","vec3","quat","color"] and data.get("value_type") == manager.field_data(target_id,field).get("value_type") and controls.has(field) and manager.field_driver(target_id,field).is_empty()
 		label.received = func(data): apply_dropped_value(field,data.value)
-		label.tooltip_text = "Drag: field reference · Shift+drag: copy shared value"
+		label.tooltip_text = "Drag / Ctrl+RMB: field reference · Add Shift: copy shared value"
 		reference_chips[field] = label
 	label.add_theme_color_override("font_color", Color("9cc6d4"))
 	field_container.add_child(label)
@@ -245,7 +245,7 @@ func component_section(name: String, component_id: int = 0) -> void:
 	label.flat = true
 	label.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	label.payload = func(): return {"kind":"kokoverse_reference","reference":{"kind":"component","target":{"instance_id":target_id,"local_id":component_id}}}
-	label.tooltip_text = "Drag this component reference to another inspector"
+	label.tooltip_text = "Drag / Ctrl+RMB: component reference"
 	label.add_theme_font_size_override("font_size", 19 if desktop else 23)
 	label.add_theme_color_override("font_color", Color("5ac8c5"))
 	section.add_child(label)

@@ -37,9 +37,13 @@ func run() -> void:
 	event.pressed = true
 	event.button_index = MOUSE_BUTTON_RIGHT
 	chip._gui_input(event)
+	if not scene.world_panels.carried_reference.is_empty(): push_error("Plain RMB took a reference"); quit(1); return
+	event.ctrl_pressed = true
+	chip._gui_input(event)
 	if scene.world_panels.carried_reference.is_empty(): push_error("Reference not picked up"); quit(1); return
 	if not destination._can_drop_data(Vector2.ZERO,scene.world_panels.carried_reference): push_error("Field rejected"); quit(1); return
 	event.button_index = MOUSE_BUTTON_LEFT
+	event.ctrl_pressed = false
 	destination._gui_input(event)
 	if not await until(func(): return scene.objects[target].scripts[0].parameters.source!=null,"Reference not shared"): quit(1); return
 	if not await until(func(): return scene.world_panels.field_driver(target,"position").get("schema",{}).get("name")=="CopyPosition","Reference not evaluated"): quit(1); return
