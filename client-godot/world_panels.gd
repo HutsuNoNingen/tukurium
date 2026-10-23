@@ -102,18 +102,6 @@ func duplicate_panel(id: String) -> void:
 	if not app.objects.has(id): return
 	command({"kind":"structure","command":{"action":"duplicate","target":app.address_of(app.objects[id]),"expected_revision":app.objects[id].object_revision}})
 
-func pin_panel(id: String) -> void:
-	var object: Dictionary = app.objects.get(id, {})
-	if object.is_empty(): return
-	if object.panel.get("attachment") != null:
-		edit(id, "panel_pin", null)
-		return
-	var node: Node3D = panels[id]
-	var user_basis := Basis(Vector3.UP, app.player_yaw)
-	var offset: Vector3 = user_basis.inverse() * (node.global_position - app.player_position)
-	var rotation: Quaternion = (user_basis.inverse() * node.global_basis.orthonormalized()).get_rotation_quaternion()
-	edit(id, "panel_pin", {"user_id":"$self","offset":[offset.x,offset.y,offset.z],"rotation":[rotation.x,rotation.y,rotation.z,rotation.w]})
-
 func sync() -> void:
 	for id in panels.keys():
 		if not app.objects.has(id):

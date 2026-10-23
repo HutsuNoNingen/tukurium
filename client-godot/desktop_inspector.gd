@@ -22,7 +22,6 @@ func build_layout() -> void:
 	target_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	target_picker.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	header.add_child(target_picker)
-	pin_button = add_button(header, "Pin in world", func(): manager.pin_panel(panel_id))
 	add_button(header, "Delete shared panel", func(): manager.close_panel(panel_id)).tooltip_text = "Delete this inspector for everyone. The Windows close button only closes this window."
 	var actions := HBoxContainer.new()
 	actions.add_theme_constant_override("separation", 8)

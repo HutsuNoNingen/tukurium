@@ -19,7 +19,6 @@ var target_picker := OptionButton.new()
 var scroll := ScrollContainer.new()
 var fields_box := VBoxContainer.new()
 var message := Label.new()
-var pin_button: Button
 var picker_ids: Array[String] = []
 var picker_signature := ""
 var built := false
@@ -75,7 +74,6 @@ func build_layout() -> void:
 	header.add_child(title)
 	add_button(header, "+", func(): manager.duplicate_panel(panel_id))
 	add_button(header, "↗", func(): manager.open_window(panel_id)).tooltip_text = "Open in a desktop window"
-	pin_button = add_button(header, "Pin", func(): manager.pin_panel(panel_id))
 	add_button(header, "×", func(): manager.close_panel(panel_id)).tooltip_text = "Delete this shared inspector for everyone"
 	column.add_child(target_picker)
 	var actions := HBoxContainer.new()
@@ -370,7 +368,6 @@ func playback(action: String) -> void:
 func refresh(object: Dictionary) -> void:
 	panel_state = object
 	filling = true
-	pin_button.text = "Unpin" if object.panel.get("attachment") != null else "Pin"
 	var entries: Array = []
 	for id in manager.app.objects:
 		entries.append([id, manager.field_data(id, "name").get("value", id)])
