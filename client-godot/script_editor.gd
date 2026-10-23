@@ -1,6 +1,7 @@
 extends RefCounted
 
 var app
+const REFERENCE_CHIP = preload("res://reference_chip.gd")
 var action_guard: Callable
 var reload_guard: Callable
 var selection_guard: Callable
@@ -395,6 +396,23 @@ func build_parameters(component: Dictionary) -> void:
 		row.add_child(title)
 		var value: Variant = component.parameters[field.id]
 		match field.value_type:
+			"field_ref":
+				var reference = REFERENCE_CHIP.new()
+				reference.manager = app.world_panels
+				reference.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				reference.text = "Drop a field reference" if value == null else str(app.world_panels.field_data(value.target.instance_id,"name").get("value","Deleted Slot")) + " · " + str(value.field_id)
+				reference.payload = func(): return null if value == null else {"kind":"kokoverse_reference","reference":value}
+				reference.accepts = func(data): return data is Dictionary and data.get("kind") == "kokoverse_reference" and data.get("reference",{}).get("kind") == "field"
+				reference.received = func(data): queue_parameter(field.id,data.reference)
+				reference.pressed.connect(func():
+					if value != null: app.world_panels.open_inspector(value.target.instance_id))
+				row.add_child(reference)
+				parameter_controls[field.id] = reference
+				var clear := Button.new()
+				clear.text = "Clear"
+				clear.focus_mode = Control.FOCUS_NONE
+				clear.pressed.connect(func(): queue_parameter(field.id,null))
+				row.add_child(clear)
 			"number":
 				var spin := SpinBox.new()
 				spin.min_value = float(field.min) if field.min != null else -1000000000

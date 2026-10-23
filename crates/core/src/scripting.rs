@@ -172,6 +172,10 @@ pub(crate) fn prepare_frame(world: &mut World) {
         runtime.cursor = (runtime.cursor + 1) % count;
     }
     for mut object in objects {
+        let local = crate::hierarchy::local_of(&object);
+        object.world_position = local.translation;
+        object.world_rotation = local.rotation;
+        object.world_scale = local.scale;
         let original = object.clone();
         for index in 0..object.scripts.len() {
             let script = object.scripts[index].clone();
@@ -229,12 +233,13 @@ pub(crate) fn prepare_frame(world: &mut World) {
                 if let Some(index) = event_index {
                     delivered.insert(index);
                 }
-                match program.run_at(
+                match program.run_at_with_fields(
                     &object,
                     &object.scripts[index],
                     event,
                     dt,
                     world.resource::<MediaClock>().0,
+                    &crate::references::values(&snapshot, &object.scripts[index]),
                 ) {
                     Ok(output) => {
                         let values = [

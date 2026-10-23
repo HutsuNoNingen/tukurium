@@ -4,6 +4,8 @@ mod drives;
 mod components;
 pub mod edit_sessions;
 mod grabbing;
+mod hierarchy;
+mod references;
 pub mod locomotion;
 pub mod panels;
 pub mod presence;
@@ -88,6 +90,7 @@ impl WorldModel {
         simulation.add_systems(
             (
                 grabbing::update_grab,
+                hierarchy::update_evaluated,
                 collision::sync_colliders,
                 locomotion::simulate_character,
                 presence::extract_presence,
@@ -271,7 +274,7 @@ impl WorldModel {
     pub fn begin_grab(&mut self) -> Result<(), String> {
         // Input can arrive between simulation steps, including immediately after cancellation.
         let mut refresh = Schedule::default();
-        refresh.add_systems(collision::sync_colliders);
+        refresh.add_systems((hierarchy::update_evaluated, collision::sync_colliders).chain());
         refresh.run(&mut self.world);
         grabbing::begin(&mut self.world)
     }
@@ -546,6 +549,7 @@ pub(crate) fn field(
 pub(crate) fn new_object(name: String, position: [f64; 3], color: [f64; 4]) -> ObjectView {
     let id = Uuid::new_v4().to_string();
     ObjectView {
+        parent: None,
         address: Address {
             instance_id: id.clone(),
             local_id: 1,
@@ -569,6 +573,7 @@ pub(crate) fn new_object(name: String, position: [f64; 3], color: [f64; 4]) -> O
         inspector: None,
         fields: vec![
             field("name", "Name", "string", json!(name), &Revisions::default()),
+            field("parent", "Parent", "address", Value::Null, &Revisions::default()),
             field(
                 "position",
                 "Position",
@@ -644,6 +649,7 @@ pub(crate) fn set_default_collider(object: &mut ObjectView) {
 
 pub(crate) fn sync_object_fields(object: &mut ObjectView) {
     for (id, label, kind, value) in [
+        ("parent", "Parent", "address", json!(object.parent)),
         ("rotation", "Rotation", "quat", json!(object.world_rotation)),
         ("scale", "Scale", "vec3", json!(object.world_scale)),
         ("collider", "Collider", "collider", json!(object.collider)),
@@ -747,19 +753,7 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
             {
                 return Err("Invalid field schema".into());
             }
-            if f.id == "position"
-                && serde_json::from_value::<[f64; 3]>(f.value.clone()).unwrap()
-                    != object.world_position
-            {
-                return Err("Derived transform does not match local transform".into());
-            }
-            if (f.id == "rotation"
-                && serde_json::from_value::<[f64; 4]>(f.value.clone()).unwrap()
-                    != object.world_rotation)
-                || (f.id == "scale"
-                    && serde_json::from_value::<[f64; 3]>(f.value.clone()).unwrap()
-                        != object.world_scale)
-                || (f.id == "collider"
+            if (f.id == "collider"
                     && serde_json::from_value::<Option<kokoverse_protocol::ColliderSpec>>(
                         f.value.clone(),
                     )
@@ -776,6 +770,7 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
             }
         }
     }
+    hierarchy::validate(snapshot)?;
     Ok(())
 }
 

@@ -96,6 +96,14 @@ pub struct DriveFrame {
     pub world_time: f64,
     pub objects: Vec<DrivenObject>,
     pub statuses: Vec<ScriptStatus>,
+    pub transforms: Vec<EvaluatedTransform>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct EvaluatedTransform {
+    pub target: Address,
+    pub position: [f64; 3],
+    pub rotation: [f64; 4],
+    pub scale: [f64; 3],
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DrivenObject {

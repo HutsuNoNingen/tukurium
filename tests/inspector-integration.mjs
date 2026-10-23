@@ -37,7 +37,7 @@ try {
   const godot=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(process.argv.includes('--rendered')?['--rendering-method','gl_compatibility']:['--headless']),'--path','client-godot','--script','res://inspector_ux_smoke.gd','--',`--port=${guest.port}`,`--session=${session}`,...(process.argv.includes('--rendered')?[`--screenshot=${resolve(work,'inspector.png')}`]:[])]);
   await until(()=>godot.exitCode!==null,'Inspector UI timed out',60000);
   assert.equal(godot.exitCode,0,godot.logs);assert.doesNotMatch(godot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(godot.logs,/INSPECTOR UX SMOKE PASS/);
-  await until(()=>host.client.latest().snapshot.objects.some(o=>o.fields.some(f=>f.id==='name'&&f.value==='Native shared inspector')),'Native edit did not reach host');
+  await until(()=>host.client.latest().snapshot.objects.some(o=>o.fields.some(f=>f.id==='name'&&f.value==='Native closed safely')),'Native edit did not reach host');
   console.log('PASS: component inspector, native window, local drive provenance and cross-client editing');
   if(process.argv.includes('--rendered'))console.log(`SCREENSHOT=${resolve(work,'inspector.png')}`);
 }catch(error){for(const child of children)if(child.logs)console.error(child.logs.slice(-5000));throw error;}

@@ -14,6 +14,7 @@ pub struct ObjectRoot {
 #[derive(Component)]
 pub struct Slot {
     pub name: String,
+    pub parent: Option<Address>,
 }
 
 #[derive(Component, Clone, Copy)]

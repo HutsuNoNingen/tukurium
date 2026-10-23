@@ -24,7 +24,7 @@ var overlay
 func setup(controller, id: String, mount: Control) -> void:
 	manager = controller
 	panel_id = id
-	client_id = manager.client_id + "/" + id
+	client_id = manager.client_id + "/" + id + "/" + str(get_instance_id())
 	editor = EDITOR.new()
 	editor.setup(manager.app, mount)
 	editor.shared_document_mode = true

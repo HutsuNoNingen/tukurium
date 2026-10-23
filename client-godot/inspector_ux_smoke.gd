@@ -18,8 +18,11 @@ func run() -> void:
 	scene.world_panels.open_inspector(scene.selected_id, true)
 	if not await until(func(): return scene.world_panels.windows.size() == 1, "Native inspector did not open"): quit(1); return
 	var panel = scene.world_panels.panels.values()[0]
-	var view = panel.content
 	var window: Window = scene.world_panels.windows[panel.panel_id]
+	var view = window.get_meta("inspector")
+	var world_view = panel.content
+	if window.get_window_id() == root.get_window_id() or view == world_view:
+		push_error("Inspector is not an independent native view"); quit(1); return
 	if not await until(func(): return view.drive_labels.has("rotation") and view.drive_labels.rotation.visible, "Drive provenance is missing"): quit(1); return
 	if view.controls.rotation[0].editable: push_error("Driven output should not appear writable"); quit(1); return
 	if not view.controls.position[0].editable: push_error("Un-driven field should stay editable"); quit(1); return
@@ -30,13 +33,14 @@ func run() -> void:
 	var line: LineEdit = view.controls.name[0]
 	line.grab_focus()
 	if not await until(func(): return view.edits.has("name") and view.edits.name.granted, "Native field lease not granted"): quit(1); return
+	if not await until(func(): return not world_view.controls.name[0].editable,"Spatial view did not respect native editor lease"): quit(1); return
 	line.select_all()
 	for character in "Native shared inspector":
 		var event := InputEventKey.new()
 		event.keycode = character.unicode_at(0)
 		event.unicode = character.unicode_at(0)
 		event.pressed = true
-		panel.viewport.push_input(event, true)
+		window.push_input(event, true)
 	if not await until(func(): return scene.world_panels.field_data(view.target_id, "name").value == "Native shared inspector", "Native typing not committed"): quit(1); return
 	line.release_focus()
 	view.drive_buttons.rotation.pressed.emit()
@@ -49,10 +53,17 @@ func run() -> void:
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--screenshot="):
 			await RenderingServer.frame_post_draw
-			panel.viewport.get_texture().get_image().save_png(argument.trim_prefix("--screenshot="))
+			window.get_texture().get_image().save_png(argument.trim_prefix("--screenshot="))
+	view.controls.name[0].grab_focus()
+	if not await until(func(): return view.edits.has("name") and view.edits.name.granted,"Final lease missing"): quit(1); return
+	view.controls.name[0].text = "Native closed safely"
+	view.controls.name[0].text_changed.emit("Native closed safely")
+	var inspected_target: String = view.target_id
 	window.close_requested.emit()
 	if not await until(func(): return scene.world_panels.windows.is_empty(), "Native window did not close"): quit(1); return
-	if panel.content != view or panel.viewport.get_parent() != panel: push_error("Close replaced the shared view"); quit(1); return
+	if scene.world_panels.field_data(inspected_target,"name").value != "Native closed safely":
+		push_error("Closing the window lost the last edit"); quit(1); return
+	if panel.content != world_view or panel.viewport.get_parent() != panel: push_error("Close replaced the shared view"); quit(1); return
 	scene.world_panels.open_window(panel.panel_id)
 	await process_frame
 	# Remote deletion must close the local window and dispose its viewport safely.

@@ -1,5 +1,6 @@
 extends Node
 const WORLD_PANEL = preload("res://world_panel.gd")
+const INSPECTOR = preload("res://inspector_view.gd")
 const GIZMO = preload("res://translation_gizmo.gd")
 var app
 var panels: Dictionary = {}
@@ -11,8 +12,11 @@ var keyboard_id := ""
 var hover_id := ""
 var component_schemas: Array = []
 var drive_sources: Dictionary = {}
+var evaluated_transforms: Dictionary = {}
 var windows: Dictionary = {}
 var pending_window := ""
+var pending_panel_close: Dictionary = {}
+var carried_reference: Dictionary = {}
 
 func setup(application) -> void:
 	app = application
@@ -36,11 +40,11 @@ func field_data(object_id: String, field: String) -> Dictionary:
 		if entry.id == field: return entry
 	return {}
 
-func session_input(panel_id: String, target_id: String, field: String, action: String, draft: Dictionary, callback: Callable = Callable()) -> void:
+func session_input(panel_id: String, target_id: String, field: String, action: String, draft: Dictionary, callback: Callable = Callable(), editor_id: String = "") -> void:
 	if not app.objects.has(panel_id) or not app.objects.has(target_id):
 		if callback.is_valid(): callback.call({"ok":false,"message":"Target unavailable"})
 		return
-	command({"kind":"edit_session","request":{"client_id":client_id,"context":{"source":app.field_address(panel_id,"inspector_target"),"field_id":"inspector_target"},"target":app.field_address(target_id,field),"field_id":field,"action":action,"draft":draft}}, callback)
+	command({"kind":"edit_session","request":{"client_id":client_id if editor_id.is_empty() else editor_id,"context":{"source":app.field_address(panel_id,"inspector_target"),"field_id":"inspector_target"},"target":app.field_address(target_id,field),"field_id":field,"action":action,"draft":draft}}, callback)
 
 func receive(body: Dictionary) -> bool:
 	if body.get("kind") == "snapshot":
@@ -50,17 +54,21 @@ func receive(body: Dictionary) -> bool:
 		update_drive_sources(body.frame)
 	elif body.get("kind") == "status" and not body.get("editable", false):
 		drive_sources.clear()
+		evaluated_transforms.clear()
+		carried_reference.clear()
 	if body.get("kind") == "script_document_state":
-		for panel in panels.values(): panel.content.script_view.receive(body.document)
+		for view in views(): view.script_view.receive(body.document)
 		return true
 	if body.get("kind") == "edit_sessions":
 		sessions = body.get("sessions", [])
-		for panel in panels.values(): panel.content.refresh_sessions()
+		for view in views(): view.refresh_sessions()
 		return true
 	return false
 
 func update_drive_sources(frame: Dictionary) -> void:
 	drive_sources.clear()
+	evaluated_transforms.clear()
+	for transform in frame.get("transforms", []): evaluated_transforms[transform.target.instance_id] = transform
 	for object in frame.get("objects", []):
 		drive_sources[object.target.instance_id] = object.get("sources", {})
 
@@ -82,9 +90,12 @@ func open_inspector(target_id: String = "", desktop: bool = false) -> void:
 func close_panel(id: String) -> void:
 	if not app.objects.has(id): return
 	panels[id].clear_focus()
-	if panels[id].content.has_active_edits():
-		panels[id].content.close_when_ready = true
+	for view in views():
+		if view.panel_id == id: view.finish_all()
+	if views().any(func(view): return view.panel_id == id and view.has_active_edits()):
+		pending_panel_close[id] = true
 		return
+	pending_panel_close.erase(id)
 	command({"kind":"structure","command":{"action":"delete","target":app.address_of(app.objects[id]),"expected_revision":app.objects[id].object_revision}})
 
 func duplicate_panel(id: String) -> void:
@@ -106,54 +117,65 @@ func pin_panel(id: String) -> void:
 func sync() -> void:
 	for id in panels.keys():
 		if not app.objects.has(id):
-			close_window(id)
+			close_window(id, true)
 			panels[id].content.finish_all()
 			panels.erase(id)
 			if capture_id == id: capture_id = ""
 			if keyboard_id == id: keyboard_id = ""
 	for id in app.objects:
-		if app.objects[id].get("panel") != null and panels.has(id): panels[id].refresh(app.objects[id])
+		if app.objects[id].get("panel") != null and panels.has(id):
+			panels[id].refresh(app.objects[id])
+			if windows.has(id): windows[id].get_meta("inspector").refresh(app.objects[id])
 	refresh_gizmos()
 
 func open_window(id: String) -> void:
 	if not panels.has(id): return
 	app.release_cursor()
 	if windows.has(id):
+		windows[id].set_meta("closing", false)
+		windows[id].show()
 		windows[id].grab_focus()
 		return
-	var panel = panels[id]
-	panel.clear_focus()
 	var window := Window.new()
 	window.hide()
-	window.title = "Kokoverse · Shared inspector"
+	window.title = "Kokoverse · Inspector"
 	window.force_native = true
-	window.size = panel.viewport.size
-	window.min_size = Vector2i(620, 500)
+	window.borderless = false
+	window.size = Vector2i(1100, 800)
+	window.min_size = Vector2i(900, 560)
 	window.transient = false
 	window.close_requested.connect(close_window.bind(id))
 	window.focus_entered.connect(func(): app.release_cursor())
 	app.add_child(window)
-	var container := SubViewportContainer.new()
-	container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	container.stretch = true
-	window.add_child(container)
-	panel.viewport.reparent(container)
-	panel.viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	var view = INSPECTOR.new()
+	window.add_child(view)
+	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	view.setup(self, id, true)
+	window.set_meta("inspector", view)
+	window.set_meta("closing", false)
 	windows[id] = window
+	view.refresh(app.objects[id])
 	window.show()
 	window.grab_focus()
 
-func close_window(id: String) -> void:
+func close_window(id: String, force: bool = false) -> void:
 	if not windows.has(id): return
 	var window: Window = windows[id]
-	if panels.has(id) and is_instance_valid(panels[id]):
-		var panel = panels[id]
-		panel.clear_focus()
-		panel.viewport.reparent(panel)
-		panel.viewport.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE
-	windows.erase(id)
+	var view = window.get_meta("inspector")
+	window.gui_release_focus()
+	view.finish_all()
 	window.hide()
+	if not force and view.has_active_edits():
+		window.set_meta("closing", true)
+		return
+	windows.erase(id)
 	window.queue_free()
+
+func views() -> Array:
+	var result: Array = []
+	for panel in panels.values(): result.append(panel.content)
+	for window in windows.values(): result.append(window.get_meta("inspector"))
+	return result
 
 func has_window_focus() -> bool:
 	for window in windows.values():
@@ -214,7 +236,14 @@ func route_input(event: InputEvent) -> bool:
 		panels[keyboard_id].viewport.push_input(event.duplicate(), true)
 		return true
 	if not event is InputEventMouse: return false
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT: return false
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT:
+		var reference_hit := pick(app.get_viewport().get_visible_rect().size * 0.5 if app.fps_active else event.position)
+		if not reference_hit.is_empty():
+			var control: Control = panels[reference_hit.id].viewport.gui_get_hovered_control()
+			if control != null and control.has_method("is_reference_chip"):
+				panels[reference_hit.id].forward_pointer(event,reference_hit.position)
+				return true
+		return false
 	if not app.hand_grab.is_empty() or app.gizmo.dragging: return false
 	var screen: Vector2 = app.get_viewport().get_visible_rect().size * 0.5 if app.fps_active else event.position
 	var hit := pick(screen)
@@ -247,10 +276,15 @@ func tick() -> void:
 	if not pending_window.is_empty() and panels.has(pending_window):
 		open_window(pending_window)
 		pending_window = ""
-	for panel in panels.values(): panel.content.tick()
+	for view in views(): view.tick()
+	for id in windows.keys():
+		if windows[id].get_meta("closing") and not windows[id].get_meta("inspector").has_active_edits(): close_window(id)
+	for id in pending_panel_close.keys():
+		if not app.objects.has(id): pending_panel_close.erase(id)
+		elif not views().any(func(view): return view.panel_id == id and view.has_active_edits()): close_panel(id)
 	refresh_gizmos()
 
 func disconnected() -> void:
 	sessions.clear()
 	clear_focus()
-	for panel in panels.values(): panel.content.disconnected()
+	for view in views(): view.disconnected()

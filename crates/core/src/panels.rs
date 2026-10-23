@@ -5,13 +5,14 @@ use kokoverse_protocol::{Address, ObjectView, PanelAttachment, Snapshot, Visual}
 use serde_json::{Value, json};
 
 pub const MAX_PANELS: usize = 16;
-pub const FIELDS: [&str; 6] = [
+pub const FIELDS: [&str; 7] = [
     "panel_size",
     "panel_pin",
     "inspector_target",
     "panel_scroll",
     "inspector_scripts_open",
     "inspector_script_id",
+    "inspector_tree",
 ];
 
 pub fn valid_address(value: &Value) -> bool {
@@ -22,6 +23,9 @@ pub fn valid_address(value: &Value) -> bool {
 
 pub(crate) fn validate_field(id: &str, value: &Value) -> Result<(), String> {
     let valid = match id {
+        "inspector_tree" => serde_json::from_value::<kokoverse_protocol::InspectorTree>(value.clone()).is_ok_and(|tree| {
+            valid_address(&json!(tree.root)) && tree.collapsed.len() <= crate::MAX_OBJECTS && tree.collapsed.iter().all(|a| valid_address(&json!(a)))
+        }),
         "panel_size" => serde_json::from_value::<[u32; 2]>(value.clone())
             .is_ok_and(|v| v.iter().all(|x| (256..=1536).contains(x))),
         "inspector_target" => valid_address(value),
@@ -57,6 +61,7 @@ pub(crate) fn append_fields(object: &mut ObjectView, revisions: &Revisions) {
         return;
     };
     for (id, label, kind, value) in [
+        ("inspector_tree", "Hierarchy", "inspector_tree", json!(inspector.tree)),
         (
             "panel_size",
             "Panel resolution",
@@ -140,6 +145,7 @@ pub(crate) fn validate_object(object: &ObjectView) -> Result<(), String> {
                 }
                 "inspector_scripts_open" => actual.value == json!(inspector.scripts_open),
                 "inspector_script_id" => actual.value == json!(inspector.script_id),
+                "inspector_tree" => actual.value == json!(inspector.tree),
                 _ => false,
             };
             if !matches || actual.value_type != field.value_type {
@@ -178,7 +184,7 @@ pub(crate) fn create(
     object.visual = Visual::Panel;
     object.world_rotation = rotation;
     object.panel = Some(kokoverse_protocol::WorldPanel {
-        size: [720, 960],
+        size: [1120, 960],
         attachment: None,
     });
     object.inspector = Some(kokoverse_protocol::InspectorView {
@@ -186,6 +192,7 @@ pub(crate) fn create(
         scroll: [0.0; 2],
         scripts_open: false,
         script_id: None,
+        tree: Default::default(),
     });
     crate::set_default_collider(&mut object);
     Ok(object)
@@ -193,6 +200,7 @@ pub(crate) fn create(
 
 pub(crate) fn write_field(world: &mut World, entity: Entity, field: &str, value: Value) {
     match field {
+        "inspector_tree" => world.get_mut::<InspectorView>(entity).unwrap().0.tree = serde_json::from_value(value).unwrap(),
         "panel_size" => {
             world.get_mut::<WorldPanel>(entity).unwrap().0.size =
                 serde_json::from_value(value).unwrap()
@@ -240,6 +248,14 @@ pub(crate) fn apply_field(world: &mut World, entity: Entity, field: &str, value:
 }
 
 pub(crate) fn target_removed(world: &mut World, address: &Address) {
+    let trees: Vec<_> = world.query::<(Entity, &InspectorView)>().iter(world).filter_map(|(e,i)| {
+        let mut tree=i.0.tree.clone();
+        let original=tree.clone();
+        if tree.root.as_ref()==Some(address) {tree.root=None;}
+        tree.collapsed.retain(|a| a!=address);
+        (tree!=original).then_some((e,tree))
+    }).collect();
+    for (entity,tree) in trees { apply_field(world,entity,"inspector_tree",json!(tree)); }
     let mut query = world.query::<(Entity, &InspectorView)>();
     let affected: Vec<_> = query
         .iter(world)

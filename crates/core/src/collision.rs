@@ -134,20 +134,22 @@ pub(crate) fn preview_matches(p: &ObjectPreview, revisions: &Revisions) -> bool 
             .as_ref()
             .is_none_or(|r| matches("scale", r))
 }
+type ColliderData<'a> = (
+    &'a Identity,
+    &'a GlobalTransform,
+    &'a Collider,
+    &'a Revisions,
+    Option<&'a crate::drives::DrivenFields>,
+    Option<&'a crate::hierarchy::EvaluatedGlobal>,
+);
 pub(crate) fn sync_colliders(
-    shapes: Query<(
-        &Identity,
-        &GlobalTransform,
-        &Collider,
-        &Revisions,
-        Option<&crate::drives::DrivenFields>,
-    )>,
+    shapes: Query<ColliderData>,
     previews: Res<PreviewPositions>,
     grab: Res<crate::grabbing::GrabState>,
     mut colliders: ResMut<CollisionWorld>,
 ) {
     colliders.0.clear();
-    for (identity, transform, shape, revisions, driven) in &shapes {
+    for (identity, transform, shape, revisions, driven, evaluated) in &shapes {
         let preview = grab
             .0
             .as_ref()
@@ -165,9 +167,16 @@ pub(crate) fn sync_colliders(
         let base_scale = read("scale")
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or(transform.scale);
-        let center = preview.map_or(base_position, |p| p.position);
-        let rotation = preview.and_then(|p| p.rotation).unwrap_or(base_rotation);
-        let scale = preview.and_then(|p| p.scale).unwrap_or(base_scale);
+        let effective = evaluated.map(|v| v.0);
+        let center = preview.map_or(effective.map_or(base_position, |v| v.translation), |p| {
+            p.position
+        });
+        let rotation = preview
+            .and_then(|p| p.rotation)
+            .unwrap_or(effective.map_or(base_rotation, |v| v.rotation));
+        let scale = preview
+            .and_then(|p| p.scale)
+            .unwrap_or(effective.map_or(base_scale, |v| v.scale));
         colliders.0.push(Bounds {
             address: identity.0.clone(),
             center,

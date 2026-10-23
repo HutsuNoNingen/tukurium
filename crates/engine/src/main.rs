@@ -426,7 +426,7 @@ impl Engine {
         let outcomes = self.model.advance(elapsed);
         self.sync_grab();
         let frame = self.model.drive_frame();
-        if self.last_drive_frame.as_ref().is_none_or(|last| last.objects != frame.objects || last.statuses != frame.statuses) {
+        if self.last_drive_frame.as_ref().is_none_or(|last| last.objects != frame.objects || last.statuses != frame.statuses || last.transforms != frame.transforms) {
             self.ui(json!({"kind":"drive_frame", "frame":frame}));
             self.last_drive_frame = Some(frame);
         }

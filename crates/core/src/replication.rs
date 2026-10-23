@@ -121,6 +121,9 @@ fn playback(v: &Value) -> Result<(), String> {
 fn visual(v: &Value) -> Result<(), String> {
     crate::validate_visual(&parse::<Visual>(v)?)
 }
+fn global_vector(v: &Value) -> Result<(), String> {
+    valid(parse::<[f64;3]>(v).is_ok_and(|v| v.iter().all(|x| x.is_finite())))
+}
 fn scripts(v: &Value) -> Result<(), String> {
     let scripts: Vec<ScriptComponent> = parse(v)?;
     crate::scripting::validate_world_scripts(std::iter::once(scripts.as_slice()))
@@ -136,6 +139,7 @@ fn panel_scroll(v: &Value) -> Result<(), String> {
 }
 fn inspector_scripts_open(v: &Value) -> Result<(), String> { crate::panels::validate_field("inspector_scripts_open", v) }
 fn inspector_script_id(v: &Value) -> Result<(), String> { crate::panels::validate_field("inspector_script_id", v) }
+fn inspector_tree(v: &Value) -> Result<(), String> { crate::panels::validate_field("inspector_tree", v) }
 fn inspector_target(v: &Value) -> Result<(), String> {
     crate::panels::validate_field("inspector_target", v)
 }
@@ -162,10 +166,10 @@ pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
         ComponentRegistration {
             type_id: "Slot",
             local_id: 1,
-            fields: vec![editable("name", "Name", "string", 0, name)],
+            fields: vec![editable("name", "Name", "string", 0, name), field("parent", "Parent", "address", Some(0), inspector_target, FieldAccess::Command)],
             present: |_| true,
-            project: |o| json!({"name":ui_value(o,"name")}),
-            restore: |_, _| Ok(()),
+            project: |o| json!({"name":ui_value(o,"name"),"parent":o.parent}),
+            restore: |o, v| { o.parent = parse(&v["parent"])?; Ok(()) },
             apply: |w, e, _, v| w.get_mut::<Slot>(e).unwrap().name = v.as_str().unwrap().into(),
         },
         ComponentRegistration {
@@ -200,13 +204,16 @@ pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
                 editable("position", "Position", "vec3", 1, position),
                 editable("rotation", "Rotation", "quat", 3, rotation),
                 editable("scale", "Scale", "vec3", 4, scale),
+                field("world_position", "World position", "vec3", None, global_vector, FieldAccess::Command),
+                field("world_rotation", "World rotation", "quat", None, rotation, FieldAccess::Command),
+                field("world_scale", "World scale", "vec3", None, global_vector, FieldAccess::Command),
             ],
             present: |_| true,
-            project: |o| json!({"position":o.world_position,"rotation":o.world_rotation,"scale":o.world_scale}),
+            project: |o| json!({"position":ui_value(o,"position"),"rotation":ui_value(o,"rotation"),"scale":ui_value(o,"scale"),"world_position":o.world_position,"world_rotation":o.world_rotation,"world_scale":o.world_scale}),
             restore: |o, v| {
-                o.world_position = parse(&v["position"])?;
-                o.world_rotation = parse(&v["rotation"])?;
-                o.world_scale = parse(&v["scale"])?;
+                o.world_position = parse(&v["world_position"])?;
+                o.world_rotation = parse(&v["world_rotation"])?;
+                o.world_scale = parse(&v["world_scale"])?;
                 Ok(())
             },
             apply: |w, e, id, v| {
@@ -297,11 +304,12 @@ pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
                 editable("panel_scroll", "Scroll", "panel_scroll", 10, panel_scroll),
                 editable("inspector_scripts_open", "Script editor", "bool", 11, inspector_scripts_open),
                 editable("inspector_script_id", "Selected script", "script_id", 12, inspector_script_id),
+                editable("inspector_tree", "Hierarchy", "inspector_tree", 13, inspector_tree),
             ],
             present: |o| o.inspector.is_some(),
             project: |o| {
                 let i = o.inspector.as_ref().unwrap();
-                json!({"inspector_target":i.target,"panel_scroll":i.scroll,"inspector_scripts_open":i.scripts_open,"inspector_script_id":i.script_id})
+                json!({"inspector_target":i.target,"panel_scroll":i.scroll,"inspector_scripts_open":i.scripts_open,"inspector_script_id":i.script_id,"inspector_tree":i.tree})
             },
             restore: |o, v| {
                 o.inspector = Some(kokoverse_protocol::InspectorView {
@@ -309,6 +317,7 @@ pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
                     scroll: parse(&v["panel_scroll"])?,
                     scripts_open: parse(&v["inspector_scripts_open"])?,
                     script_id: parse(&v["inspector_script_id"])?,
+                    tree: parse(&v["inspector_tree"])?,
                 });
                 Ok(())
             },

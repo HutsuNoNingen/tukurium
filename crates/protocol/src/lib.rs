@@ -159,6 +159,8 @@ pub enum PlaybackAction {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ObjectView {
+    #[serde(default)]
+    pub parent: Option<Address>,
     pub address: Address,
     pub renderer: Address,
     pub object_revision: String,
@@ -243,6 +245,8 @@ pub struct StructuralCommand {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum StructuralOperation {
+    CreateChild { parent: Address },
+    Reparent { target: Address, parent: Option<Address>, expected_revision: String },
     Create,
     CreateInspector {
         target: Option<Address>,

@@ -622,11 +622,12 @@ func valid_remote_preview(preview: Dictionary) -> bool:
 	return revisions.get("position") == preview.expected_revision and (preview.get("expected_rotation_revision") == null or revisions.get("rotation") == preview.expected_rotation_revision) and (preview.get("expected_scale_revision") == null or revisions.get("scale") == preview.expected_scale_revision)
 
 func object_quaternion(object: Dictionary) -> Quaternion:
-	var q: Array = driven_objects.get(object.address.instance_id, {}).get("rotation", object.get("world_rotation",[0,0,0,1]))
+	var values: Dictionary = world_panels.evaluated_transforms.get(object.address.instance_id, {}) if object.get("parent") != null else driven_objects.get(object.address.instance_id, {})
+	var q: Array = values.get("rotation", object.get("world_rotation",[0,0,0,1]))
 	return Quaternion(q[0],q[1],q[2],q[3])
 
 func apply_object_transform(node: Node3D, object: Dictionary) -> void:
-	var values: Dictionary = driven_objects.get(object.address.instance_id, {})
+	var values: Dictionary = world_panels.evaluated_transforms.get(object.address.instance_id, {}) if object.get("parent") != null else driven_objects.get(object.address.instance_id, {})
 	var p: Array = values.get("position", object.world_position)
 	var s: Array = values.get("scale", object.get("world_scale",[1,1,1]))
 	node.position = Vector3(p[0],p[1],p[2])
@@ -640,6 +641,8 @@ func apply_drive_frame(frame: Dictionary) -> void:
 		if objects.has(object.target.instance_id) and objects[object.target.instance_id].address == object.target:
 			driven_objects[object.target.instance_id] = object["values"]
 	for id in driven_objects.keys():
+		if not previous.has(id): previous.append(id)
+	for id in world_panels.evaluated_transforms:
 		if not previous.has(id): previous.append(id)
 	for id in previous:
 		if not objects.has(id) or not render_nodes.has(id): continue

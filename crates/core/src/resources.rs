@@ -38,6 +38,8 @@ pub(crate) enum Mutation {
     },
     ScriptFrame(Vec<crate::scripting::FramePatch>),
     Insert(Box<ObjectView>),
+    InsertMany(Vec<ObjectView>),
+    Reparent { entity: Entity, parent: Option<Address>, local: LocalTransform },
     Delete(Address),
 }
 
@@ -98,12 +100,13 @@ pub(crate) fn insert_object(world: &mut World, object: ObjectView) {
             },
             Slot {
                 name: get("name").as_str().expect("validated name").into(),
+                parent: object.parent.clone(),
             },
             LocalTransform {
                 translation: serde_json::from_value(get("position").clone())
                     .expect("validated position"),
-                rotation: object.world_rotation,
-                scale: object.world_scale,
+                rotation: serde_json::from_value(get("rotation").clone()).expect("validated rotation"),
+                scale: serde_json::from_value(get("scale").clone()).expect("validated scale"),
             },
             GlobalTransform::default(),
             revisions,

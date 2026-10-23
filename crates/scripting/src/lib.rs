@@ -92,6 +92,9 @@ pub fn validate_state(state: &BTreeMap<String, Value>) -> Result<(), String> {
 }
 
 fn field_valid(field: &ScriptField, value: &Value) -> bool {
+    if field.value_type == "field_ref" {
+        return value.is_null() || serde_json::from_value::<kokoverse_protocol::TypedReference>(value.clone()).is_ok_and(|r| matches!(r,kokoverse_protocol::TypedReference::Field{ref target,ref field_id} if target.instance_id.len()==36 && target.local_id>0 && field_id.len()<=80));
+    }
     if !validate_atom(value) {
         return false;
     }
@@ -269,13 +272,19 @@ impl Program {
                     if !identifier(&id) || fields.len() >= MAX_FIELDS {
                         return Err(error("At most 16 named fields are allowed"));
                     }
+                    let value_type: String = definition.get("type")?;
+                    let default = if value_type == "field_ref" {
+                        Value::Null
+                    } else {
+                        atom(definition.get("default")?)?
+                    };
                     let field = ScriptField {
                         label: definition
                             .get::<Option<String>>("label")?
                             .unwrap_or_else(|| id.clone()),
                         id,
-                        value_type: definition.get("type")?,
-                        default: atom(definition.get("default")?)?,
+                        value_type,
+                        default,
                         min: definition.get("min")?,
                         max: definition.get("max")?,
                     };
@@ -341,6 +350,18 @@ impl Program {
         dt: f64,
         world_time: f64,
     ) -> Result<Output, String> {
+        self.run_at_with_fields(object, component, event, dt, world_time, &BTreeMap::new())
+    }
+
+    pub fn run_at_with_fields(
+        &self,
+        object: &ObjectView,
+        component: &ScriptComponent,
+        event: Event,
+        dt: f64,
+        world_time: f64,
+        readable_fields: &BTreeMap<String, Value>,
+    ) -> Result<Output, String> {
         let run = || -> mlua::Result<Output> {
             let color: [f64; 4] = serde_json::from_value(
                 object
@@ -375,6 +396,7 @@ impl Program {
                 output.clone(),
                 matches!(event, Event::Drive),
                 world_time,
+                readable_fields,
             )?;
             self.budget.reset();
             function.call::<()>((ctx, dt))?;
@@ -392,9 +414,25 @@ impl Program {
         output: Arc<Mutex<Output>>,
         local_drive: bool,
         world_time: f64,
+        readable_fields: &BTreeMap<String, Value>,
     ) -> mlua::Result<Table> {
         let lua = &self.lua;
         let ctx = lua.create_table()?;
+        let readable_fields = readable_fields.clone();
+        ctx.set(
+            "read",
+            lua.create_function(move |lua, (_ctx, value): (Table, LuaValue)| {
+                let reference: Option<kokoverse_protocol::TypedReference> =
+                    lua.from_value(value)?;
+                let Some(reference) = reference else {
+                    return Ok(LuaValue::Nil);
+                };
+                match readable_fields.get(&serde_json::to_string(&reference).unwrap()) {
+                    Some(value) => lua.to_value(value),
+                    None => Ok(LuaValue::Nil),
+                }
+            })?,
+        )?;
         ctx.set("world_time", world_time)?;
         ctx.set("time", component.clock.time(world_time, component.enabled))?;
         ctx.set(

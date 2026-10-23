@@ -1,5 +1,7 @@
 extends PanelContainer
 const SHARED_SCRIPT_VIEW = preload("res://shared_script_view.gd")
+const INSPECTOR_TREE = preload("res://inspector_tree.gd")
+const REFERENCE_CHIP = preload("res://reference_chip.gd")
 ## One inspector instance. Selection, drafts and requests never use the HUD's singleton state.
 var manager
 var script_view
@@ -32,34 +34,44 @@ var drive_labels: Dictionary = {}
 var drive_buttons: Dictionary = {}
 var field_signature := ""
 var requested_script := ""
+var hierarchy
+var input_client_id := ""
+var desktop := false
+var building_field: Dictionary = {}
+var reference_chips: Dictionary = {}
+var pending_field := ""
+var pending_reference_target := ""
+var reference_values: Dictionary = {}
 
-func setup(controller, id: String) -> void:
+func setup(controller, id: String, in_desktop: bool = false) -> void:
 	manager = controller
 	panel_id = id
+	desktop = in_desktop
+	input_client_id = manager.client_id + "/" + str(get_instance_id())
 	theme = Theme.new()
-	theme.default_font_size = 26
+	theme.default_font_size = 17 if desktop else 26
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color("15212e")
 	style.border_color = Color("5ac8c5")
-	style.set_border_width_all(3)
-	style.set_corner_radius_all(10)
+	style.set_border_width_all(0 if desktop else 3)
+	style.set_corner_radius_all(0 if desktop else 10)
 	add_theme_stylebox_override("panel", style)
 	var margin := MarginContainer.new()
 	for side in ["left", "top", "right", "bottom"]: margin.add_theme_constant_override("margin_"+side, 16)
 	add_child(margin)
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 12)
+	column.add_theme_constant_override("separation", 6 if desktop else 12)
 	margin.add_child(column)
 	var header := HBoxContainer.new()
 	column.add_child(header)
-	title.text = "SHARED INSPECTOR"
+	title.text = "Inspector"
 	title.add_theme_font_size_override("font_size", 27)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 	add_button(header, "+", func(): manager.duplicate_panel(panel_id))
 	add_button(header, "↗", func(): manager.open_window(panel_id)).tooltip_text = "Open in a desktop window"
 	pin_button = add_button(header, "Pin", func(): manager.pin_panel(panel_id))
-	add_button(header, "×", func(): manager.close_panel(panel_id))
+	add_button(header, "×", func(): manager.close_panel(panel_id)).tooltip_text = "Delete this shared inspector for everyone"
 	column.add_child(target_picker)
 	target_picker.item_selected.connect(func(index: int):
 		if filling or index >= picker_ids.size(): return
@@ -76,15 +88,36 @@ func setup(controller, id: String) -> void:
 		if not script_view.busy():
 			manager.edit(panel_id,"inspector_scripts_open",not bool(panel_state.inspector.get("scripts_open",false))))
 	add_button(actions, "New inspector", func(): manager.open_inspector(target_id))
+	var receiver = REFERENCE_CHIP.new()
+	receiver.manager = manager
+	receiver.text = "Drop reference"
+	receiver.custom_minimum_size.x = 155
+	receiver.accepts = func(data): return data is Dictionary and data.get("kind") == "kokoverse_reference"
+	receiver.received = func(data):
+		var reference: Dictionary = data.reference
+		pending_field = reference.get("field_id", "")
+		pending_reference_target = str(reference.target.instance_id)
+		choose_target(str(reference.target.instance_id))
+	receiver.tooltip_text = "Drop a Slot, component or field reference to inspect its object"
+	actions.add_child(receiver)
+	var body := HBoxContainer.new()
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(body)
+	hierarchy = INSPECTOR_TREE.new()
+	hierarchy.setup(self)
+	body.add_child(hierarchy)
+	var details := VBoxContainer.new()
+	details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.add_child(details)
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	column.add_child(scroll)
+	details.add_child(scroll)
 	fields_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	fields_box.add_theme_constant_override("separation", 10)
 	scroll.add_child(fields_box)
 	script_mount = MarginContainer.new()
 	script_mount.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	column.add_child(script_mount)
+	details.add_child(script_mount)
 	script_mount.hide()
 	script_view = SHARED_SCRIPT_VIEW.new()
 	script_view.setup(manager,panel_id,script_mount)
@@ -103,14 +136,28 @@ func add_button(parent: Node, text: String, action: Callable) -> Button:
 	return button
 
 func heading(text: String) -> void:
-	var label := Label.new()
+	var label = REFERENCE_CHIP.new() if not building_field.is_empty() else Label.new()
 	label.text = text
+	if label is Label: label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	else:
+		label.manager = manager
+		label.flat = true
+		label.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		var field := str(building_field.id)
+		label.payload = func(): return {"kind":"kokoverse_reference","reference":{"kind":"field","target":manager.app.field_address(target_id,field),"field_id":field}}
+		label.value_payload = func():
+			var data: Dictionary = manager.field_data(target_id,field)
+			return {"kind":"kokoverse_value","value_type":data.value_type,"value":data.value}
+		label.accepts = func(data): return data is Dictionary and data.get("kind") == "kokoverse_value" and data.get("value_type") in ["string","vec3","quat","color"] and data.get("value_type") == manager.field_data(target_id,field).get("value_type") and controls.has(field) and manager.field_driver(target_id,field).is_empty()
+		label.received = func(data): apply_dropped_value(field,data.value)
+		label.tooltip_text = "Drag: field reference · Shift+drag: copy shared value"
+		reference_chips[field] = label
 	label.add_theme_color_override("font_color", Color("9cc6d4"))
 	field_container.add_child(label)
 
 func line_field(parent: Node, field: String, part: String) -> LineEdit:
 	var line := LineEdit.new()
-	line.custom_minimum_size = Vector2(0, 44)
+	line.custom_minimum_size = Vector2(0, 30 if desktop else 44)
 	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	line.max_length = 80 if field == "name" else 32
 	line.set_meta("field", field)
@@ -147,6 +194,9 @@ func build_fields() -> void:
 	controls.clear()
 	drive_labels.clear()
 	drive_buttons.clear()
+	reference_chips.clear()
+	reference_values.clear()
+	building_field = {}
 	field_container = fields_box
 	if target_id.is_empty() or not manager.app.objects.has(target_id):
 		heading("Choose an object above. Deleted targets are cleared.")
@@ -155,9 +205,10 @@ func build_fields() -> void:
 	for schema in manager.component_schemas:
 		var fields: Array = object.fields.filter(func(field): return int(field.component_id) == int(schema.local_id))
 		if fields.is_empty(): continue
-		component_section(str(schema.type_id))
+		component_section(str(schema.type_id),int(schema.local_id))
 		for field in fields: build_field(field)
-	component_section("Scripts")
+	building_field = {}
+	component_section("Scripts",8)
 	if object.get("scripts", []).is_empty(): heading("No scripts attached")
 	for script in object.get("scripts", []):
 		var row := HBoxContainer.new()
@@ -170,21 +221,45 @@ func build_fields() -> void:
 		add_button(row, "Edit", open_script.bind(str(script.id)))
 	add_button(field_container, "Manage scripts", open_script.bind(""))
 
-func component_section(name: String) -> void:
+func component_section(name: String, component_id: int = 0) -> void:
 	var section := VBoxContainer.new()
 	section.add_theme_constant_override("separation", 6)
 	fields_box.add_child(section)
 	var rule := HSeparator.new()
 	section.add_child(rule)
-	var label := Label.new()
+	var label = REFERENCE_CHIP.new()
+	label.manager = manager
 	label.text = name
-	label.add_theme_font_size_override("font_size", 23)
+	label.flat = true
+	label.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	label.payload = func(): return {"kind":"kokoverse_reference","reference":{"kind":"component","target":{"instance_id":target_id,"local_id":component_id}}}
+	label.tooltip_text = "Drag this component reference to another inspector"
+	label.add_theme_font_size_override("font_size", 19 if desktop else 23)
 	label.add_theme_color_override("font_color", Color("5ac8c5"))
 	section.add_child(label)
 	field_container = section
 
 func build_field(field: Dictionary) -> void:
+		building_field = field
 		match field.value_type:
+			"address":
+				heading(field.label)
+				var reference = REFERENCE_CHIP.new()
+				reference.manager = manager
+				reference.text = "World" if field.value == null else str(manager.field_data(field.value.instance_id,"name").get("value","Deleted Slot"))
+				reference_values[field.id] = reference
+				reference.payload = func():
+					var value: Variant = manager.field_data(target_id,field.id).value
+					return null if value == null else {"kind":"kokoverse_reference","reference":{"kind":"slot","target":value}}
+				reference.pressed.connect(func():
+					var value: Variant = manager.field_data(target_id,field.id).value
+					if value != null: manager.open_inspector(value.instance_id))
+				if field.id == "parent":
+					reference.accepts = func(data): return data is Dictionary and data.get("kind") == "kokoverse_reference" and data.get("reference",{}).get("kind") == "slot"
+					reference.received = func(data): hierarchy.move_object(target_id,data.reference.target.instance_id)
+				field_container.add_child(reference)
+			"inspector_tree":
+				pass
 			"string":
 				heading(field.label)
 				line_field(field_container, field.id, "0")
@@ -233,6 +308,11 @@ func open_script(id: String) -> void:
 	finish_all()
 	requested_script = id if not id.is_empty() else "*"
 
+func choose_target(id: String) -> void:
+	finish_all()
+	pending_target = manager.app.address_of(manager.app.objects[id]) if manager.app.objects.has(id) else null
+	target_change_pending = true
+
 func value_text(value: Variant, kind: String) -> String:
 	if kind == "quat" and value is Array:
 		var angles := Quaternion(value[0],value[1],value[2],value[3]).get_euler()
@@ -240,6 +320,20 @@ func value_text(value: Variant, kind: String) -> String:
 	if value is Array:
 		return ", ".join(value.map(func(v): return String.num(float(v), 3)))
 	return str(value)
+
+func apply_dropped_value(field: String, value: Variant) -> void:
+	if not controls.has(field) or not manager.field_driver(target_id,field).is_empty(): return
+	var data: Dictionary = manager.field_data(target_id,field)
+	filling = true
+	var values: Variant = value
+	if data.value_type == "quat":
+		var angles := Quaternion(value[0],value[1],value[2],value[3]).get_euler()
+		values = [rad_to_deg(angles.x),rad_to_deg(angles.y),rad_to_deg(angles.z)]
+	for i in controls[field].size():
+		if controls[field][i] is LineEdit:
+			controls[field][i].text = str(values[i]) if values is Array else str(values)
+	filling = false
+	changed(field,controls[field][0],true)
 
 func refresh_drives() -> void:
 	for field in drive_labels:
@@ -282,7 +376,7 @@ func refresh(object: Dictionary) -> void:
 	if new_target != target_id or not built or (next_signature != field_signature and edits.is_empty()):
 		for field in edits:
 			# A target switch ends the old lease; never redirect a draft to the new target.
-			manager.session_input(panel_id, target_id, field, "end", {})
+			manager.session_input(panel_id, target_id, field, "end", {}, Callable(), input_client_id)
 		edits.clear()
 		scroll_pending = -1.0
 		target_id = new_target
@@ -290,6 +384,7 @@ func refresh(object: Dictionary) -> void:
 		build_fields()
 		built = true
 	target_picker.select(maxi(0, picker_ids.find(target_id)))
+	if hierarchy != null: hierarchy.refresh()
 	fill_values()
 	refresh_drives()
 	var bar := scroll.get_v_scroll_bar()
@@ -297,6 +392,9 @@ func refresh(object: Dictionary) -> void:
 		scroll.scroll_vertical = int(float(object.inspector.scroll[1]) * maxf(0.0, bar.max_value - bar.page))
 	filling = false
 	refresh_sessions()
+	if not pending_field.is_empty() and target_id == pending_reference_target and not target_change_pending and reference_chips.has(pending_field):
+		scroll.ensure_control_visible(reference_chips[pending_field])
+		pending_field = ""
 	var show_scripts: bool = object.inspector.get("scripts_open",false)
 	script_mount.visible = show_scripts
 	scroll.visible = not show_scripts
@@ -305,6 +403,9 @@ func refresh(object: Dictionary) -> void:
 	if show_scripts: script_view.refresh(target_id, object.inspector.get("script_id"))
 
 func fill_values() -> void:
+	for field in reference_values:
+		var value: Variant = manager.field_data(target_id,field).get("value")
+		reference_values[field].text = "World" if value == null else str(manager.field_data(value.instance_id,"name").get("value","Deleted Slot"))
 	for field in controls:
 		if edits.has(field): continue
 		var data: Dictionary = manager.field_data(target_id, field)
@@ -331,7 +432,7 @@ func start_edit(field: String, control: Control, one_shot: bool = false) -> void
 	var data: Dictionary = manager.field_data(target_id, field)
 	if data.is_empty(): return
 	edits[field] = {"granted":false,"dirty":false,"inflight":false,"release":one_shot,"revision":str(data.revision),"due":0,"heartbeat":0,"control":control,"value":null}
-	manager.session_input(panel_id, target_id, field, "begin", draft_for(control), on_lease.bind(field))
+	manager.session_input(panel_id, target_id, field, "begin", draft_for(control), on_lease.bind(field), input_client_id)
 
 func draft_for(control: Control) -> Dictionary:
 	if control is LineEdit:
@@ -410,7 +511,7 @@ func tick() -> void:
 			state.inflight = true
 			manager.edit(target_id, field, state.value, edit_result.bind(field), state.revision)
 		if state.release and not state.dirty and not state.inflight:
-			manager.session_input(panel_id, target_id, field, "end", {})
+			manager.session_input(panel_id, target_id, field, "end", {}, Callable(), input_client_id)
 			edits.erase(field)
 			continue
 		if now - state.heartbeat >= 120:
@@ -418,7 +519,7 @@ func tick() -> void:
 			manager.session_input(panel_id, target_id, field, "update", draft_for(state.control), func(result):
 				if not result.ok and edits.has(field):
 					edits.erase(field)
-					message.text = str(result.get("message", "Editing expired")))
+					message.text = str(result.get("message", "Editing expired")), input_client_id)
 	if edits.is_empty() and not script_view.busy() and close_when_ready:
 		close_when_ready = false
 		manager.close_panel(panel_id)
@@ -458,7 +559,7 @@ func refresh_sessions() -> void:
 	for field in controls:
 		var remote: Dictionary = {}
 		for session in manager.sessions:
-			if session.target.instance_id == target_id and session.field_id == field and (session.client_id != manager.client_id or session.get("context") == null or session.context.source.instance_id != panel_id):
+			if session.target.instance_id == target_id and session.field_id == field and (session.client_id != input_client_id or session.get("context") == null or session.context.source.instance_id != panel_id):
 				remote = session
 		var readonly: bool = not manager.app.editable or not remote.is_empty() or not manager.field_driver(target_id, field).is_empty()
 		for control in controls[field]:

@@ -103,12 +103,19 @@ pub(crate) fn evaluate(world: &mut World) {
             } else {
                 script.clock.anchor
             };
-            match cached
-                .program
-                .as_ref()
-                .unwrap()
-                .run_at(object, script, Event::Drive, 0.0, time)
-            {
+            let mut local_object = object.clone();
+            let local = crate::hierarchy::local_of(object);
+            local_object.world_position = local.translation;
+            local_object.world_rotation = local.rotation;
+            local_object.world_scale = local.scale;
+            match cached.program.as_ref().unwrap().run_at_with_fields(
+                &local_object,
+                script,
+                Event::Drive,
+                0.0,
+                time,
+                &crate::references::values(&snapshot, script),
+            ) {
                 Ok(output) => cached.values = output.drives,
                 Err(error) => {
                     cached.values.clear();
@@ -135,7 +142,12 @@ pub(crate) fn evaluate(world: &mut World) {
                 if let Some(field) = cached.values.keys().find(|k| values.contains_key(*k)) {
                     error = Some(format!("Field {field} is already driven by another script"));
                 } else {
-                    sources.extend(cached.values.keys().map(|field| (field.clone(), script.id.clone())));
+                    sources.extend(
+                        cached
+                            .values
+                            .keys()
+                            .map(|field| (field.clone(), script.id.clone())),
+                    );
                     values.extend(cached.values.clone());
                 }
             }
@@ -160,6 +172,7 @@ pub(crate) fn evaluate(world: &mut World) {
         }
     }
     runtime.cache.retain(|id, _| alive.contains(id));
+    frame.transforms = crate::hierarchy::evaluate(world);
     runtime.frame = frame;
     world.insert_resource(runtime);
 }
@@ -268,7 +281,10 @@ mod tests {
         model.set_media_time(110.0);
         model.advance(Duration::ZERO);
         assert_eq!(model.drive_frame().objects[0].values["rotation"], rotation);
-        assert_eq!(model.drive_frame().objects[0].sources["rotation"], model.snapshot().objects[0].scripts[0].id);
+        assert_eq!(
+            model.drive_frame().objects[0].sources["rotation"],
+            model.snapshot().objects[0].scripts[0].id
+        );
         update(&mut model, true);
         model.advance(Duration::ZERO);
         assert_eq!(model.drive_frame().objects[0].values["rotation"], rotation);
@@ -366,6 +382,9 @@ mod tests {
                 .unwrap()
                 .contains("already driven")
         );
-        assert_eq!(model.drive_frame().objects[0].sources["color"], model.snapshot().objects[0].scripts[0].id);
+        assert_eq!(
+            model.drive_frame().objects[0].sources["color"],
+            model.snapshot().objects[0].scripts[0].id
+        );
     }
 }

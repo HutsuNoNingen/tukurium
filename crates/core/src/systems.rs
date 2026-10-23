@@ -60,6 +60,15 @@ pub(crate) fn validate_commands(
                         return Ok(Mutation::ScriptInteract{entity});
                     }
                     let value=crate::scripting::prepare_edit(current,command.action,clock.0)?;
+                    for script in &value {
+                        for field in script.schema.fields.iter().filter(|f|f.value_type=="field_ref") {
+                            let reference=&script.parameters[&field.id];
+                            let unchanged=current.iter().find(|s|s.id==script.id).and_then(|s|s.parameters.get(&field.id))==Some(reference);
+                            if !reference.is_null() && !unchanged {
+                                crate::references::validate(&snapshot.0,&serde_json::from_value::<kokoverse_protocol::TypedReference>(reference.clone()).map_err(|_|"Invalid field reference")?)?;
+                            }
+                        }
+                    }
                     crate::scripting::validate_world_scripts(snapshot.0.objects.iter().map(|o|if o.address==command.target {value.as_slice()} else {o.scripts.as_slice()}))?;
                     Ok(Mutation::SetScripts{entity,value})
                 }
@@ -69,6 +78,11 @@ pub(crate) fn validate_commands(
                         return Err("Use the component's commands to change this field".into());
                     }
                     (spec.validate)(&edit.value)?;
+                    if edit.field_id == "panel_pin" && !edit.value.is_null() && object.parent.is_some() { return Err("Move the panel to World before pinning it".into()); }
+                    if edit.field_id == "inspector_tree" {
+                        let tree: kokoverse_protocol::InspectorTree = serde_json::from_value(edit.value.clone()).unwrap();
+                        if tree.root.as_ref().is_some_and(|root| !snapshot.0.objects.iter().any(|o| &o.address == root)) { return Err("Hierarchy root no longer exists".into()); }
+                    }
                     let entity = index.0[&object.address];
                     let (_, _, revisions, _) = slots.get(entity).map_err(|_| "Expected an ObjectRoot Slot")?;
                     let expected = edit.expected_revision.parse::<u64>().map_err(|_| "Invalid revision")?;
@@ -94,6 +108,9 @@ pub(crate) fn validate_commands(
                             return Err("Transform changed elsewhere; review the current value".into());
                         }
                     }
+                    let object = snapshot.0.objects.iter().find(|o| o.address == command.target).unwrap();
+                    let local = crate::hierarchy::relative(GlobalTransform{translation:command.position,rotation:command.rotation,scale:command.scale},crate::hierarchy::parent_transform(&snapshot.0,&object.parent)?);
+                    for (id,value) in [("position",serde_json::json!(local.translation)),("rotation",serde_json::json!(local.rotation)),("scale",serde_json::json!(local.scale))] { validate_value(id,&value)?; }
                     Ok(Mutation::SetTransform{entity,position:command.position,rotation:command.rotation,scale:command.scale})
                 }
                 WorldCommand::Playback { command } => {
@@ -121,6 +138,34 @@ pub(crate) fn validate_commands(
                 WorldCommand::Structure { command } => {
                     let deleting = matches!(&command.operation, StructuralOperation::Delete { .. });
                     match command.operation {
+                        StructuralOperation::CreateChild { parent } => {
+                            if slots.iter().count() >= MAX_OBJECTS { return Err("Object limit reached (128)".into()); }
+                            let parent_object = snapshot.0.objects.iter().find(|o| o.address == parent).ok_or("Parent no longer exists")?;
+                            let mut object = new_object("Child".into(), parent_object.world_position, [0.2,0.65,0.8,1.0]);
+                            crate::hierarchy::validate_parent(&snapshot.0, &object.address, &Some(parent.clone()))?;
+                            object.parent = Some(parent);
+                            object.world_rotation = parent_object.world_rotation;
+                            object.world_scale = parent_object.world_scale;
+                            for field in &mut object.fields {
+                                field.value = match field.id.as_str() {
+                                    "position" => serde_json::json!([0.0,0.0,0.0]),
+                                    "parent" => serde_json::json!(object.parent),
+                                    _ => field.value.clone(),
+                                };
+                            }
+                            Ok(Mutation::Insert(Box::new(object)))
+                        }
+                        StructuralOperation::Reparent { target, parent, expected_revision } => {
+                            let object = snapshot.0.objects.iter().find(|o| o.address == target).ok_or("Target no longer exists")?;
+                            if object.object_revision != expected_revision { return Err("Object changed before reparenting".into()); }
+                            if object.panel.as_ref().is_some_and(|p| p.attachment.is_some()) { return Err("Unpin the panel before reparenting".into()); }
+                            crate::hierarchy::validate_parent(&snapshot.0, &target, &parent)?;
+                            let local = crate::hierarchy::relative(crate::hierarchy::global_of(object), crate::hierarchy::parent_transform(&snapshot.0,&parent)?);
+                            validate_value("position", &serde_json::json!(local.translation))?;
+                            validate_value("rotation", &serde_json::json!(local.rotation))?;
+                            validate_value("scale", &serde_json::json!(local.scale))?;
+                            Ok(Mutation::Reparent {entity:index.0[&target],parent,local})
+                        }
                         StructuralOperation::CreateInspector {target,position,rotation} => Ok(Mutation::Insert(Box::new(crate::panels::create(&snapshot.0,target,position,rotation)?))),
                         StructuralOperation::Create => {
                             let count = slots.iter().count();
@@ -155,32 +200,12 @@ pub(crate) fn validate_commands(
                         }
                         StructuralOperation::Duplicate { target, expected_revision } | StructuralOperation::Delete { target, expected_revision } => {
                             let entity = *index.0.get(&target).ok_or("Target no longer exists")?;
-                            let (slot, transform, _, root) = slots.get(entity).map_err(|_| "Expected an ObjectRoot Slot")?;
+                            let (_, _, _, root) = slots.get(entity).map_err(|_| "Expected an ObjectRoot Slot")?;
                             if expected_revision.parse::<u64>().map_err(|_| "Invalid object revision")? != root.revision {
                                 return Err("Object changed before this operation. Review it and retry.".into());
                             }
                             if deleting { return Ok(Mutation::Delete(target)); }
-                            if slots.iter().count() >= MAX_OBJECTS { return Err("Object limit reached (128)".into()); }
-                            let mesh = meshes.get(index.0[&root.renderer]).map_err(|_| "Renderer is missing")?;
-                            if matches!(mesh.visual,kokoverse_protocol::Visual::Panel) && snapshot.0.objects.iter().filter(|o|o.panel.is_some()).count()>=crate::panels::MAX_PANELS {return Err("Panel limit reached (16)".into());}
-                            if meshes.iter().map(|m|image_size(&m.visual)).sum::<usize>() + image_size(&mesh.visual) > crate::MAX_IMAGE_WORLD { return Err("World image budget exceeded; remove an image first".into()); }
-                            let mut position = transform.translation;
-                            position[0] = (position[0] + 1.8).min(1000.0);
-                            let mut object = new_object(format!("{} copy", slot.name.chars().take(75).collect::<String>()), position, mesh.color);
-                            object.visual = mesh.visual.clone();
-                            object.world_rotation = transform.rotation;
-                            object.world_scale = transform.scale;
-                            object.collider = colliders.get(entity).ok().map(|c|c.0.clone());
-                            object.playback = playback.get(entity).ok().map(|p|p.0.clone());
-                            let source=snapshot.0.objects.iter().find(|o|o.address==target).unwrap();
-                            object.panel=source.panel.clone();
-                            if let Some(panel)=&mut object.panel {panel.attachment=None;}
-                            object.inspector=source.inspector.clone();
-                            object.scripts=scripts.get(entity).map(|s|s.0.clone()).unwrap_or_default();
-                            for script in &mut object.scripts {script.id=uuid::Uuid::new_v4().to_string();script.revision="0".into();}
-                            crate::scripting::validate_world_scripts(snapshot.0.objects.iter().map(|o|o.scripts.as_slice()).chain(std::iter::once(object.scripts.as_slice())))?;
-                            crate::sync_object_fields(&mut object);
-                            Ok(Mutation::Insert(Box::new(object)))
+                            Ok(Mutation::InsertMany(crate::hierarchy::duplicate(&snapshot.0,&target)?))
                         }
                     }
                 }
@@ -200,6 +225,10 @@ pub(crate) fn apply_commands(world: &mut World) {
         Err(error) => Err(error),
         Ok(mutation) => {
             let selected = match mutation {
+                Mutation::Reparent {entity,parent,local} => {
+                    crate::hierarchy::reparent(world,entity,parent,local);
+                    Some(world.get::<Identity>(entity).unwrap().0.clone())
+                }
                 Mutation::SetField {
                     entity,
                     component_id,
@@ -287,11 +316,8 @@ pub(crate) fn apply_commands(world: &mut World) {
                     rotation,
                     scale,
                 } => {
-                    *world.get_mut::<LocalTransform>(entity).unwrap() = LocalTransform {
-                        translation: position,
-                        rotation,
-                        scale,
-                    };
+                    let local = crate::hierarchy::world_to_local(world, entity, GlobalTransform { translation: position, rotation, scale });
+                    *world.get_mut::<LocalTransform>(entity).unwrap() = local;
                     for id in ["position", "rotation", "scale"] {
                         *world
                             .get_mut::<Revisions>(entity)
@@ -308,10 +334,18 @@ pub(crate) fn apply_commands(world: &mut World) {
                     insert_object(world, *object);
                     Some(selected)
                 }
+                Mutation::InsertMany(objects) => {
+                    let selected=objects.first().map(|o|o.address.clone());
+                    for object in objects { insert_object(world,object); }
+                    selected
+                }
                 Mutation::Delete(address) => {
-                    crate::panels::target_removed(world, &address);
-                    remove_object(world, &address);
-                    world.resource_mut::<ChangeSet>().removed.push(address);
+                    let descendants = crate::hierarchy::subtree(&world.resource::<SnapshotCache>().0, &address);
+                    for address in descendants {
+                        crate::panels::target_removed(world, &address);
+                        remove_object(world, &address);
+                        world.resource_mut::<ChangeSet>().removed.push(address);
+                    }
                     None
                 }
             };
@@ -336,19 +370,14 @@ pub(crate) fn bump_field(world: &mut World, entity: Entity, field: &str) {
 }
 
 /// Roots currently have no parent. Hierarchy propagation can replace this system later.
-pub(crate) fn update_transforms(
-    mut transforms: Query<(&LocalTransform, &mut GlobalTransform), Changed<LocalTransform>>,
-) {
-    for (local, mut global) in &mut transforms {
-        global.translation = local.translation;
-        global.rotation = local.rotation;
-        global.scale = local.scale;
-    }
+pub(crate) fn update_transforms(world: &mut World) {
+    crate::hierarchy::propagate(world);
 }
 
 type ChangedRoot = Or<(
     Changed<Slot>,
     Changed<LocalTransform>,
+    Changed<GlobalTransform>,
     Changed<Revisions>,
     Changed<ObjectRoot>,
 )>;
@@ -394,6 +423,7 @@ pub(crate) fn extract_snapshot(
             .get(index.0[&root.renderer])
             .expect("registered renderer");
         let mut object = kokoverse_protocol::ObjectView {
+            parent: slot.parent.clone(),
             address: identity.0.clone(),
             renderer: root.renderer.clone(),
             object_revision: root.revision.to_string(),
@@ -414,6 +444,8 @@ pub(crate) fn extract_snapshot(
                     serde_json::json!(slot.name),
                     revisions,
                 ),
+                crate::field("parent", "Parent", "address", serde_json::json!(slot.parent), revisions),
+
                 crate::field(
                     "position",
                     "Position",
