@@ -342,6 +342,19 @@ pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
             },
             apply: no_edit,
         },
+        ComponentRegistration {
+            type_id: "CreationView",
+            local_id: 10,
+            fields: vec![editable("creation_shape", "Selected shape", "primitive_shape", 14,
+                |v| parse::<PrimitiveShape>(v).map(|_| ()))],
+            present: |o| o.creation.is_some(),
+            project: |o| json!({"creation_shape":o.creation.as_ref().unwrap().shape}),
+            restore: |o, v| {
+                o.creation = Some(kokoverse_protocol::CreationView {shape: parse(&v["creation_shape"])?});
+                Ok(())
+            },
+            apply: |w, e, _, v| w.get_mut::<crate::components::CreationView>(e).unwrap().0.shape = parse(&v).unwrap(),
+        },
     ],
 });
 

@@ -100,6 +100,13 @@ func close_panel(id: String) -> void:
 	pending_panel_close.erase(id)
 	command({"kind":"structure","command":{"action":"delete","target":app.address_of(app.objects[id]),"expected_revision":app.objects[id].object_revision}})
 
+func open_creation() -> void:
+	if not app.editable: return
+	var position: Vector3 = app.camera.global_position - app.camera.global_basis.z * 2.6
+	var q: Quaternion = app.camera.global_basis.get_rotation_quaternion()
+	command({"kind":"structure","command":{"action":"create_creation_panel","position":[position.x,position.y,position.z],"rotation":[q.x,q.y,q.z,q.w]}}, func(result):
+		if not result.ok: app.feedback.text = result.get("message","Cannot open creation panel"))
+
 func duplicate_panel(id: String) -> void:
 	if not app.objects.has(id): return
 	command({"kind":"structure","command":{"action":"duplicate","target":app.address_of(app.objects[id]),"expected_revision":app.objects[id].object_revision}})
@@ -163,7 +170,8 @@ func close_window(id: String, force: bool = false) -> void:
 
 func views() -> Array:
 	var result: Array = []
-	for panel in panels.values(): result.append(panel.content)
+	for panel in panels.values():
+		if panel.inspector_content: result.append(panel.content)
 	for window in windows.values(): result.append(window.get_meta("inspector"))
 	return result
 

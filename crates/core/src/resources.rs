@@ -124,6 +124,9 @@ pub(crate) fn insert_object(world: &mut World, object: ObjectView) {
     if let Some(inspector) = object.inspector.clone() {
         world.entity_mut(slot).insert(InspectorView(inspector));
     }
+    if let Some(creation) = object.creation.clone() {
+        world.entity_mut(slot).insert(CreationView(creation));
+    }
     world
         .entity_mut(slot)
         .insert(ScriptComponents(object.scripts.clone()));

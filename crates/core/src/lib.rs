@@ -571,6 +571,7 @@ pub(crate) fn new_object(name: String, position: [f64; 3], color: [f64; 4]) -> O
         scripts: Vec::new(),
         panel: None,
         inspector: None,
+        creation: None,
         fields: vec![
             field("name", "Name", "string", json!(name), &Revisions::default()),
             field("parent", "Parent", "address", Value::Null, &Revisions::default()),

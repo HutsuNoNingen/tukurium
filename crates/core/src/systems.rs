@@ -31,6 +31,7 @@ type SnapshotRoot<'a> = (
     &'a ScriptComponents,
     Option<&'a WorldPanel>,
     Option<&'a InspectorView>,
+    Option<&'a CreationView>,
 );
 
 /// Resolve stable addresses and validate against state committed by the preceding command.
@@ -167,6 +168,7 @@ pub(crate) fn validate_commands(
                             Ok(Mutation::Reparent {entity:index.0[&target],parent,local})
                         }
                         StructuralOperation::CreateInspector {target,position,rotation} => Ok(Mutation::Insert(Box::new(crate::panels::create(&snapshot.0,target,position,rotation)?))),
+                        StructuralOperation::CreateCreationPanel {position,rotation} => Ok(Mutation::Insert(Box::new(crate::panels::create_creation(&snapshot.0,position,rotation)?))),
                         StructuralOperation::Create => {
                             let count = slots.iter().count();
                             if count >= MAX_OBJECTS { return Err("Object limit reached (128)".into()); }
@@ -417,6 +419,7 @@ pub(crate) fn extract_snapshot(
         scripts,
         panel,
         inspector,
+        creation,
     ) in &roots
     {
         let mesh = meshes
@@ -436,6 +439,7 @@ pub(crate) fn extract_snapshot(
             scripts: scripts.0.clone(),
             panel: panel.map(|p| p.0.clone()),
             inspector: inspector.map(|i| i.0.clone()),
+            creation: creation.map(|c| c.0.clone()),
             fields: vec![
                 crate::field(
                     "name",

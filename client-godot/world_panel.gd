@@ -1,15 +1,19 @@
 extends MeshInstance3D
-## A shared surface. Its content is a separate inspector view, not the world model.
+## A shared surface. Content views render InspectorView or CreationView data.
 const INSPECTOR_VIEW = preload("res://inspector_view.gd")
+const CREATION_VIEW = preload("res://creation_panel.gd")
 var panel_id := ""
 var viewport := SubViewport.new()
-var content = INSPECTOR_VIEW.new()
+var content
+var inspector_content := true
 var manager
 var last_pointer := Vector2(-1000, -1000)
 
 func setup(controller, id: String) -> void:
 	manager = controller
 	panel_id = id
+	inspector_content = manager.app.objects[id].get("creation") == null
+	content = INSPECTOR_VIEW.new() if inspector_content else CREATION_VIEW.new()
 	var quad := QuadMesh.new()
 	quad.size = Vector2(1.2, 1.6)
 	mesh = quad

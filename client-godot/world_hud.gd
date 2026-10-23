@@ -1,7 +1,6 @@
 extends CanvasLayer
 ## Local application chrome. The world and edit operations stay in the Engine.
 const RING = preload("res://ring_menu.gd")
-const CREATION_PANEL = preload("res://creation_panel.gd")
 const INK := Color("101b25")
 const LINE := Color("304550")
 const TEXT := Color("e6f0f4")
@@ -10,7 +9,6 @@ const ACCENT := Color("77dbce")
 var app
 var root := Control.new()
 var ring = RING.new()
-var creation_panel
 var menu := ColorRect.new()
 var workspace
 var room_label: Label
@@ -158,27 +156,15 @@ func workspace_open() -> bool:
 	return workspace != null and workspace.enabled and workspace.shade.visible
 
 func blocking() -> bool:
-	return menu.visible or ring.visible or workspace_open() or is_instance_valid(creation_panel)
+	return menu.visible or ring.visible or workspace_open()
 
 func open_creation() -> void:
-	if is_instance_valid(creation_panel): return
-	ring.hide()
-	app.release_cursor()
-	creation_panel=CREATION_PANEL.new()
-	app.add_child(creation_panel)
-	creation_panel.setup(app)
-	creation_panel.closed.connect(close_creation)
-
-func close_creation(resume: bool = true) -> void:
-	if is_instance_valid(creation_panel): creation_panel.queue_free()
-	creation_panel=null
-	if resume: resume_view()
+	app.world_panels.open_creation()
 
 func release_to_cursor() -> void:
 	menu.hide()
 	ring.hide()
 	if workspace_open(): workspace.shade.hide()
-	close_creation(false)
 	last_overlay=false
 	app.get_viewport().gui_release_focus()
 	app.world_panels.clear_focus()
@@ -238,7 +224,7 @@ func choose_action(index: int) -> void:
 		1: app.world_panels.open_inspector(ring_target)
 		2: open_creation()
 		3: app.choose_image()
-	if index == 1: resume_view()
+	if index in [1,2]: resume_view()
 
 func handle_input(event: InputEvent) -> bool:
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -248,7 +234,6 @@ func handle_input(event: InputEvent) -> bool:
 		if (event.keycode == KEY_F5 or event.physical_keycode == KEY_F5) and not app.gameplay_keyboard_blocked():
 			cycle_view()
 			return true
-	if is_instance_valid(creation_panel): return creation_panel.route_input(event)
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and event.pressed:
 		if ring.visible: close_ring(); return true
 		if not app.gameplay_keyboard_blocked(): show_ring(event.position); return true

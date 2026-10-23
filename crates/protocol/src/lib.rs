@@ -181,6 +181,8 @@ pub struct ObjectView {
     pub panel: Option<WorldPanel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inspector: Option<InspectorView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation: Option<CreationView>,
     pub fields: Vec<Field>,
 }
 
@@ -276,6 +278,10 @@ pub enum StructuralOperation {
     Create,
     CreateInspector {
         target: Option<Address>,
+        position: [f64; 3],
+        rotation: [f64; 4],
+    },
+    CreateCreationPanel {
         position: [f64; 3],
         rotation: [f64; 4],
     },

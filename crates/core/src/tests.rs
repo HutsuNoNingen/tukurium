@@ -63,6 +63,40 @@ fn primitives_replicate_and_restore_without_mesh_assets() {
 }
 
 #[test]
+fn creation_panels_use_shared_surface_components_and_survive_restore() {
+    use kokoverse_protocol::{PrimitiveShape, Visual};
+    let mut host = WorldModel::new();
+    let mut guest = WorldModel::new();
+    guest.restore(host.snapshot()).unwrap();
+    let created = run(&mut host, structure(StructuralOperation::CreateCreationPanel {
+        position: [2.0, 1.5, 1.0], rotation: [0.0, 0.0, 0.0, 1.0],
+    }));
+    let id = created.selected.unwrap();
+    guest.apply_commit(created.result.unwrap()).unwrap();
+    let object = host.snapshot().objects.into_iter().find(|o| o.address == id).unwrap();
+    assert_eq!(object.visual, Visual::Panel);
+    assert!(object.inspector.is_none());
+    assert_eq!(object.creation.unwrap().shape, PrimitiveShape::Box);
+    assert_eq!(object.collider.unwrap().half_extents, panels::half_extents([1120, 720]));
+    for (field, value) in [("creation_shape", json!("sphere")), ("position", json!([3.0, 2.0, 1.0])), ("scale", json!([1.5, 1.5, 1.5]))] {
+        let result = run(&mut host, WorldCommand::Edit { edit: Edit {
+            command_id: field.into(), target: replication::REGISTRY.field_address(&id, field).unwrap(),
+            field_id: field.into(), expected_revision: "0".into(), value,
+        }});
+        guest.apply_commit(result.result.unwrap()).unwrap();
+        assert_eq!(host.snapshot(), guest.snapshot());
+    }
+    for object in host.snapshot().objects {
+        let wire = replication::REGISTRY.encode_object(&object);
+        let decoded = replication::REGISTRY.decode_object(wire).unwrap();
+        assert_eq!(decoded, object);
+    }
+    let mut restored = WorldModel::new();
+    restored.restore(serde_json::from_slice(&serde_json::to_vec(&host.snapshot()).unwrap()).unwrap()).unwrap();
+    assert_eq!(restored.snapshot(), host.snapshot());
+}
+
+#[test]
 fn transform_commit_is_atomic_and_replicates_all_fields() {
     use kokoverse_protocol::TransformCommand;
     let mut host = WorldModel::new();

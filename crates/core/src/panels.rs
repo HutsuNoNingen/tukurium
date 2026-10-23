@@ -60,101 +60,45 @@ pub(crate) fn validate_field(id: &str, value: &Value) -> Result<(), String> {
     }
 }
 
+fn surface_components(object: &ObjectView) -> impl Iterator<Item = &'static crate::replication::ComponentRegistration> + '_ {
+    crate::replication::REGISTRY.components.iter().filter(move |c| {
+        matches!(c.type_id, "WorldPanel" | "InspectorView" | "CreationView") && (c.present)(object)
+    })
+}
+
 pub(crate) fn append_fields(object: &mut ObjectView, revisions: &Revisions) {
-    let (Some(panel), Some(inspector)) = (&object.panel, &object.inspector) else {
-        return;
-    };
-    for (id, label, kind, value) in [
-        ("inspector_tree", "Hierarchy", "inspector_tree", json!(inspector.tree)),
-        (
-            "panel_size",
-            "Panel resolution",
-            "panel_size",
-            json!(panel.size),
-        ),
-        (
-            "panel_pin",
-            "Follow user",
-            "panel_pin",
-            json!(panel.attachment),
-        ),
-        (
-            "inspector_target",
-            "Inspected object",
-            "address",
-            json!(inspector.target),
-        ),
-        (
-            "panel_scroll",
-            "Scroll",
-            "panel_scroll",
-            json!(inspector.scroll),
-        ),
-        (
-            "inspector_scripts_open",
-            "Script editor",
-            "bool",
-            json!(inspector.scripts_open),
-        ),
-        (
-            "inspector_script_id",
-            "Selected script",
-            "script_id",
-            json!(inspector.script_id),
-        ),
-    ] {
-        if let Some(f) = object.fields.iter_mut().find(|f| f.id == id) {
-            f.value = value;
+    let values: Vec<_> = surface_components(object).flat_map(|c| {
+        let values = (c.project)(object);
+        c.fields.iter().map(move |f| (f, values[&f.schema.id].clone()))
+    }).collect();
+    for (registration, value) in values {
+        let schema = &registration.schema;
+        if let Some(field) = object.fields.iter_mut().find(|f| f.id == schema.id) {
+            field.value = value;
         } else {
-            object
-                .fields
-                .push(crate::field(id, label, kind, value, revisions));
+            object.fields.push(crate::field(&schema.id, &schema.label, &schema.value_type, value, revisions));
         }
     }
 }
 
 pub(crate) fn validate_object(object: &ObjectView) -> Result<(), String> {
     let is_panel = matches!(object.visual, Visual::Panel);
-    if is_panel != object.panel.is_some() || is_panel != object.inspector.is_some() {
-        return Err("Panel visual and components must agree".into());
+    let views = usize::from(object.inspector.is_some()) + usize::from(object.creation.is_some());
+    if is_panel != object.panel.is_some() || views != usize::from(is_panel) {
+        return Err("Panel visual requires one surface and one content component".into());
     }
-    if is_panel {
-        let mut expected = object.clone();
-        expected.fields.clear();
-        append_fields(&mut expected, &Revisions::default());
-        for field in expected.fields {
-            let actual = object
-                .fields
-                .iter()
-                .find(|f| f.id == field.id)
-                .ok_or("Missing panel field")?;
-            let panel = object.panel.as_ref().unwrap();
-            let inspector = object.inspector.as_ref().unwrap();
-            let matches = match field.id.as_str() {
-                "panel_size" => {
-                    serde_json::from_value::<[u32; 2]>(actual.value.clone()).ok()
-                        == Some(panel.size)
-                }
-                "panel_pin" => {
-                    serde_json::from_value::<Option<PanelAttachment>>(actual.value.clone()).ok()
-                        == Some(panel.attachment.clone())
-                }
-                "panel_scroll" => {
-                    serde_json::from_value::<[f64; 2]>(actual.value.clone()).ok()
-                        == Some(inspector.scroll)
-                }
-                "inspector_target" => {
-                    serde_json::from_value::<Option<Address>>(actual.value.clone()).ok()
-                        == Some(inspector.target.clone())
-                }
-                "inspector_scripts_open" => actual.value == json!(inspector.scripts_open),
-                "inspector_script_id" => actual.value == json!(inspector.script_id),
-                "inspector_tree" => actual.value == json!(inspector.tree),
-                _ => false,
-            };
-            if !matches || actual.value_type != field.value_type {
-                return Err("Panel component does not match its fields".into());
-            }
+    for component in surface_components(object) {
+        let mut values = serde_json::Map::new();
+        for registration in &component.fields {
+            let field = object.fields.iter().find(|f| f.id == registration.schema.id).ok_or("Missing panel field")?;
+            if field.value_type != registration.schema.value_type { return Err("Panel field type mismatch".into()); }
+            (registration.validate)(&field.value)?;
+            values.insert(field.id.clone(), field.value.clone());
+        }
+        let mut restored = object.clone();
+        (component.restore)(&mut restored, &Value::Object(values))?;
+        if (component.project)(&restored) != (component.project)(object) {
+            return Err("Panel component does not match its fields".into());
         }
     }
     Ok(())
@@ -198,6 +142,18 @@ pub(crate) fn create(
         script_id: None,
         tree: Default::default(),
     });
+    crate::set_default_collider(&mut object);
+    Ok(object)
+}
+
+pub(crate) fn create_creation(
+    snapshot: &Snapshot, position: [f64; 3], rotation: [f64; 4],
+) -> Result<ObjectView, String> {
+    let mut object = create(snapshot, None, position, rotation)?;
+    object.inspector = None;
+    object.creation = Some(kokoverse_protocol::CreationView {shape: kokoverse_protocol::PrimitiveShape::Box});
+    object.panel.as_mut().unwrap().size = [1120, 720];
+    object.fields.iter_mut().find(|f| f.id == "name").unwrap().value = json!("Create new");
     crate::set_default_collider(&mut object);
     Ok(object)
 }

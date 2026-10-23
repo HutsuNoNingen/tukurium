@@ -32,6 +32,11 @@ pub struct WorldPanel {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CreationView {
+    pub shape: crate::PrimitiveShape,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct InspectorView {
     pub target: Option<Address>,
     pub scroll: [f64; 2],

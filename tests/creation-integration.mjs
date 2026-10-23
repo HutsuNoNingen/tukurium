@@ -30,10 +30,20 @@ try {
   assert.equal(godot.exitCode,0,godot.logs);assert.doesNotMatch(godot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(godot.logs,/CREATION SMOKE PASS/);
   const shapes=['box','sphere','capsule','cylinder','cone','torus','grid','quad'];
   await until(()=>shapes.every(shape=>host.client.latest().snapshot.objects.some(o=>o.visual.kind==='primitive'&&o.visual.shape===shape)),'Primitives did not reach host');
+  const panel=host.client.latest().snapshot.objects.find(o=>o.creation);
+  assert.ok(panel?.panel && panel.collider && !panel.inspector,'Creation must use the shared world surface and collider');
+  assert.equal(panel.creation.shape,'quad');
+  assert.ok(panel.world_scale[0]>1.05 && Math.abs(panel.world_rotation[1])>0.01,'Grabbed transform did not reach host');
+  host.client.send({kind:'structure',command:{command_id:randomUUID(),action:'duplicate',target:panel.address,expected_revision:panel.object_revision}});
+  await until(()=>host.client.latest().snapshot.objects.filter(o=>o.creation).length===2,'Shared creation panel did not duplicate');
   const late=await peer('guest',2);
   await until(()=>shapes.every(shape=>late.client.latest().snapshot.objects.some(o=>o.visual.kind==='primitive'&&o.visual.shape===shape)),'Late join missed primitives');
+  await until(()=>late.client.latest().snapshot.objects.filter(o=>o.creation?.shape==='quad').length===2,'Late join missed creation panels or selection');
+  const copy=host.client.latest().snapshot.objects.find(o=>o.creation&&o.address.instance_id!==panel.address.instance_id);
+  host.client.send({kind:'structure',command:{command_id:randomUUID(),action:'delete',target:copy.address,expected_revision:copy.object_revision}});
+  await until(()=>late.client.latest().snapshot.objects.filter(o=>o.creation).length===1,'Panel removal did not replicate');
   assert.ok(host.client.latest().snapshot.objects.every(o=>o.visual.asset_id===undefined));
-  console.log('PASS: eight procedural shapes, 3D creation input, FPS retained, host/guest and late join');
+  console.log('PASS: shared creation surface, movement, grab/rotation/scale, eight shapes, shared selection, duplicate/delete and late join');
   if(process.argv.includes('--rendered'))console.log(`SCREENSHOT=${resolve(work,'creation.png')}`);
 }catch(error){for(const child of children)if(child.logs)console.error(child.logs.slice(-5000));throw error;}
 finally{for(const socket of sockets)socket.destroy();for(const child of children)if(child.exitCode===null)child.kill();}
