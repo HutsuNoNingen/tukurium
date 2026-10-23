@@ -223,6 +223,7 @@ pub(crate) fn apply_commands(world: &mut World) {
     let Some(prepared) = world.resource_mut::<Prepared>().0.take() else {
         return;
     };
+    let editor = world.resource_mut::<Authors>().0.remove(&prepared.ticket);
     let result = match prepared.mutation {
         Err(error) => Err(error),
         Ok(mutation) => {
@@ -351,6 +352,26 @@ pub(crate) fn apply_commands(world: &mut World) {
                     None
                 }
             };
+            if let Some(editor) = editor
+                && let Some(address) = &selected
+                && let Some(entity) = world.resource::<EntityIndex>().0.get(address).copied()
+            {
+                let mut root = world.get_mut::<ObjectRoot>(entity).unwrap();
+                let identity =
+                    root.item_identity
+                        .get_or_insert_with(|| kokoverse_protocol::ItemIdentity {
+                            creator_id: editor.user_id.clone(),
+                            owner_id: editor.user_id.clone(),
+                            source_version: None,
+                            permissions: kokoverse_protocol::ItemPermissions {
+                                modify: true,
+                                redistribute: true,
+                            },
+                            editors: vec![],
+                        });
+                identity.editors.retain(|e| e.user_id != editor.user_id);
+                identity.editors.push(editor);
+            }
             world.resource_mut::<WorldRevision>().0 += 1;
             Ok(selected)
         }
@@ -427,6 +448,7 @@ pub(crate) fn extract_snapshot(
             .expect("registered renderer");
         let mut object = kokoverse_protocol::ObjectView {
             parent: slot.parent.clone(),
+            item_identity: root.item_identity.clone(),
             address: identity.0.clone(),
             renderer: root.renderer.clone(),
             object_revision: root.revision.to_string(),

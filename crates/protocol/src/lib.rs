@@ -7,6 +7,8 @@ mod panels;
 pub use panels::*;
 mod replication;
 pub use replication::*;
+mod library;
+pub use library::*;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const MAX_FRAME: usize = 1024 * 1024;
@@ -161,6 +163,8 @@ pub enum PlaybackAction {
 pub struct ObjectView {
     #[serde(default)]
     pub parent: Option<Address>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_identity: Option<ItemIdentity>,
     pub address: Address,
     pub renderer: Address,
     pub object_revision: String,

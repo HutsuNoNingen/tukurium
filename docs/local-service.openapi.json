@@ -1,0 +1,708 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Kokoverse local service",
+    "version": "0.1.0",
+    "description": "HN-only prototype. Matching trimmed HNs share an account. Calls use the automatically issued bearer session token. Licensing is deferred: signed-in users may save, acquire, modify, share and republish known items. Stored historical license flags do not restrict these operations."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8787"
+    }
+  ],
+  "security": [
+    {
+      "Bearer": []
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Service is available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "const": true
+                    },
+                    "service": {
+                      "const": "kokoverse"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/users": {
+      "post": {
+        "operationId": "loginByHandle",
+        "description": "Enter a trimmed HN (case-sensitive). Returns the shared user and a token; no supplied credential is required. Switching HNs does not rebind previous tokens.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persistent guest identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or invalid asset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown bearer credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operation not permitted for this account or session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found or not accessible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicting idempotency key or ended session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Size or storage quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many concurrent transfers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Storage error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/v1/rpc": {
+      "post": {
+        "operationId": "callService",
+        "description": "Authenticated metadata operations. The caller's identity always comes from the credential. Mutations with request_id are idempotent; changing the body for the same id is a 409. Library pagination uses offset and returns up to 10 entries.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Call"
+              },
+              "examples": {
+                "sessions": {
+                  "value": {
+                    "action": "sessions"
+                  }
+                },
+                "create": {
+                  "value": {
+                    "action": "create_session",
+                    "name": "My room",
+                    "request_id": "unique-request-id"
+                  }
+                },
+                "library": {
+                  "value": {
+                    "action": "library",
+                    "offset": 0
+                  }
+                },
+                "share": {
+                  "value": {
+                    "action": "share_item",
+                    "version_id": "00000000-0000-4000-8000-000000000001",
+                    "user_id": "00000000-0000-4000-8000-000000000002",
+                    "permissions": {
+                      "modify": true,
+                      "redistribute": false
+                    },
+                    "request_id": "unique-share-id"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result for the requested action. Sessions: array; library: {total, entries}; create/join: {session, peer, ticket, host}; version/save: immutable item document.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or invalid asset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown bearer credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operation not permitted for this account or session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found or not accessible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicting idempotency key or ended session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Size or storage quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many concurrent transfers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Storage error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/assets/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      ],
+      "put": {
+        "operationId": "uploadAsset",
+        "description": "Streams to a temporary file. Validates SHA-256 and supported PNG/JPEG/GLB/OGV content before publishing. Maximum 128 MiB, two concurrent uploads, configurable per-user byte quota. Retry the whole file.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Asset validated and associated with the caller"
+          },
+          "400": {
+            "description": "Invalid request or invalid asset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown bearer credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operation not permitted for this account or session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found or not accessible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicting idempotency key or ended session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Size or storage quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many concurrent transfers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Storage error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "downloadAsset",
+        "description": "Requires a signed-in user and a valid asset hash. Upload ownership and acquisition grants are not required while licensing is deferred.",
+        "responses": {
+          "200": {
+            "description": "Validated asset bytes",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or invalid asset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown bearer credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operation not permitted for this account or session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found or not accessible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicting idempotency key or ended session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Size or storage quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many concurrent transfers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Storage error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "Bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "64-character hexadecimal local credential"
+      }
+    },
+    "schemas": {
+      "User": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "ok",
+          "message"
+        ],
+        "properties": {
+          "ok": {
+            "const": false
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Permissions": {
+        "type": "object",
+        "required": [
+          "modify",
+          "redistribute"
+        ],
+        "properties": {
+          "modify": {
+            "type": "boolean"
+          },
+          "redistribute": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Call": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "me",
+              "rename_user",
+              "sessions",
+              "create_session",
+              "join_session",
+              "verify_ticket",
+              "heartbeat",
+              "end_session",
+              "library",
+              "save_item",
+              "version",
+              "share_item",
+              "rename_entry",
+              "remove_entry",
+              "place_item",
+              "resolve_placement",
+              "workshop",
+              "workshop_detail",
+              "publish_item",
+              "unpublish_item",
+              "acquire_item"
+            ]
+          },
+          "request_id": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "name": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entry_id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "object",
+            "description": "Validated protocol ObjectView, including optional ItemIdentity and script components"
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/Permissions"
+          },
+          "position": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "query": {
+            "type": "string"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "ticket": {
+            "type": "string"
+          },
+          "peer": {
+            "type": "string"
+          },
+          "placement": {
+            "type": "string"
+          },
+          "thumbnail": {
+            "type": "string",
+            "description": "Optional PNG data URL, at most 256x256 and 65536 base64 characters"
+          },
+          "publication_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 80,
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "mine": {
+            "type": "boolean"
+          },
+          "license": {
+            "$ref": "#/components/schemas/PublicationLicense"
+          }
+        },
+        "additionalProperties": true
+      },
+      "PublicationLicense": {
+        "additionalProperties": false,
+        "required": [
+          "save",
+          "modify",
+          "redistribute"
+        ],
+        "properties": {
+          "save": {
+            "type": "boolean"
+          },
+          "modify": {
+            "type": "boolean"
+          },
+          "redistribute": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
+    }
+  }
+}

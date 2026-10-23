@@ -1,4 +1,4 @@
-param([string]$OutputDirectory = '', [switch]$SkipBuild, [string]$RelayCredentialsFile = '')
+param([string]$OutputDirectory = '', [switch]$SkipBuild)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $projectRoot
@@ -8,15 +8,7 @@ try {
     New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
     $OutputDirectory = (Resolve-Path -LiteralPath $OutputDirectory).Path
     $name = 'Kokoverse-Windows-x64-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
-    $includeLogin = -not [string]::IsNullOrWhiteSpace($RelayCredentialsFile)
-    $bundledAccess = $null
-    if ($includeLogin) {
-        $accessText = Get-Content -LiteralPath $RelayCredentialsFile -Raw
-        $username = [regex]::Match($accessText,'(?m)^Username:\s*(.+)$').Groups[1].Value.Trim()
-        $password = [regex]::Match($accessText,'(?m)^Password:\s*(.+)$').Groups[1].Value.Trim()
-        if (-not $username -or -not $password) { throw 'Relay credentials file must contain Username and Password lines.' }
-        $bundledAccess = @{ username=$username; password=$password }
-    }
+    $includeLogin = $false
     $stagingParent = Join-Path $projectRoot ('.run/packages/' + [guid]::NewGuid().ToString('N'))
     $packageRoot = Join-Path $stagingParent $name
     foreach ($directory in @('bin','scripts','client-godot','.tools/godot','licenses','source')) {
@@ -27,6 +19,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Rust release build failed' }
     }
     Copy-Item -LiteralPath 'target/release/kokoverse-engine.exe' -Destination (Join-Path $packageRoot 'bin')
+    Copy-Item -LiteralPath 'target/release/kokoverse-asset-server.exe' -Destination (Join-Path $packageRoot 'bin')
     $goTool = Join-Path $projectRoot '.tools/go/bin/go.exe'
     if (-not (Test-Path -LiteralPath $goTool)) { $goTool = Join-Path $projectRoot '../kokosync/.tools/go/bin/go.exe' }
     $goTool = (Resolve-Path -LiteralPath $goTool).Path
@@ -36,6 +29,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Adapter tests failed' }
         & $goTool build -mod=readonly -trimpath '-ldflags=-s -w' -o (Join-Path $packageRoot 'bin/kokosync-adapter.exe') .
         if ($LASTEXITCODE -ne 0) { throw 'Adapter build failed' }
+        & $goTool build -mod=readonly -trimpath '-ldflags=-s -w' -o (Join-Path $packageRoot 'bin/kokosync-relay.exe') ./cmd/relay
+        if ($LASTEXITCODE -ne 0) { throw 'Local relay build failed' }
         $goModules = & $goTool list -m -mod=readonly -f '{{.Path}}|{{.Version}}|{{.Dir}}' all
         if ($LASTEXITCODE -ne 0) { throw 'Could not list Go dependencies' }
     } finally { Pop-Location }
@@ -61,10 +56,10 @@ try {
         throw 'Packaged Godot project did not import successfully'
     }
     Get-ChildItem -LiteralPath 'distribution' -File | Copy-Item -Destination $packageRoot
-    if ($includeLogin) { $bundledAccess | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $packageRoot 'relay-access.json') -Encoding UTF8 }
     Get-ChildItem -LiteralPath 'distribution/scripts' -File | Copy-Item -Destination (Join-Path $packageRoot 'scripts')
     Copy-Item -LiteralPath 'scripts/setup-media.ps1' -Destination (Join-Path $packageRoot 'scripts')
     Copy-Item -LiteralPath 'scripts/start-instance.ps1' -Destination (Join-Path $packageRoot 'scripts')
+    Copy-Item -LiteralPath 'scripts/start-local.ps1','scripts/stop-local.ps1','scripts/start-online.ps1','scripts/stop-online.ps1','scripts/connect-relay.ps1','scripts/process-lifecycle.ps1' -Destination (Join-Path $packageRoot 'scripts')
     Copy-Item -LiteralPath 'scripts/stop-demo.ps1' -Destination (Join-Path $packageRoot 'scripts/stop.ps1')
 
     # Preserve license notices without copying toolchains, credentials or user assets.
@@ -104,7 +99,7 @@ Oekaki avatar source attribution: client-godot/assets/oekaki/README.md.
 User-imported world assets are NOT included in this archive.
 '@ | Set-Content -LiteralPath (Join-Path $licenseRoot 'NOTICE.txt') -Encoding UTF8
 
-    foreach ($directory in @('crates','tools/kokosync-adapter','distribution')) {
+    foreach ($directory in @('crates','tools/kokosync-adapter','distribution','deploy','docs')) {
         $target = Join-Path $packageRoot ('source/' + $directory)
         New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
         Copy-Item -LiteralPath $directory -Destination $target -Recurse
@@ -117,7 +112,8 @@ User-imported world assets are NOT included in this archive.
     $files = @(Get-ChildItem -LiteralPath $packageRoot -File -Recurse -Force | ForEach-Object {
         @{ path=$_.FullName.Substring($packageRoot.Length+1).Replace('\','/'); size=$_.Length; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
     })
-    @{ version=$name; protocol=3; relay='wss://45.77.130.146/ws'; room='kokoverse/workshop'; avatar='oekaki'; includesUserWorld=$false; includesCredentials=$includeLogin; optionalVideoTools='FFmpeg 9.0.2 downloaded in background on first launch'; rustDependencies=@($metadata.packages | Where-Object source | Select-Object name,version,license); goDependencies=$goModules | ForEach-Object { ($_ -split '\|')[0..1] -join '@' }; files=$files } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $packageRoot 'build-info.json') -Encoding UTF8
+    $connection = Get-Content -LiteralPath 'distribution/connection.json' -Raw | ConvertFrom-Json
+    @{ version=$name; protocol=3; service=$connection.service; relay=$connection.relay; sessionMode='managed'; legacyRoom='kokoverse/workshop'; avatar='oekaki'; includesUserWorld=$false; includesCredentials=$includeLogin; optionalVideoTools='FFmpeg 9.0.2 via Install-Video-Tools.bat'; rustDependencies=@($metadata.packages | Where-Object source | Select-Object name,version,license); goDependencies=$goModules | ForEach-Object { ($_ -split '\|')[0..1] -join '@' }; files=$files } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $packageRoot 'build-info.json') -Encoding UTF8
     $archive = Join-Path $OutputDirectory ($name + '.zip')
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [IO.Compression.ZipFile]::CreateFromDirectory($stagingParent,$archive,[IO.Compression.CompressionLevel]::Optimal,$false)

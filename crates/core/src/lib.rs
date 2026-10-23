@@ -1,4 +1,5 @@
 //! A renderer-independent ECS world with a scheduled command/transform/output pipeline.
+pub mod asset_validation;
 mod collision;
 mod drives;
 mod components;
@@ -55,6 +56,7 @@ impl WorldModel {
         world.init_resource::<WorldRevision>();
         world.init_resource::<MediaClock>();
         world.init_resource::<InputQueue>();
+        world.init_resource::<Authors>();
         world.init_resource::<Prepared>();
         world.init_resource::<Applied>();
         world.init_resource::<ChangeSet>();
@@ -331,6 +333,97 @@ impl WorldModel {
     pub fn snapshot(&self) -> Snapshot {
         self.world.resource::<SnapshotCache>().0.clone()
     }
+    pub fn enqueue_as(
+        &mut self,
+        command: WorldCommand,
+        editor: kokoverse_protocol::ItemEditor,
+    ) -> Result<u64, String> {
+        let ticket = self.enqueue(command)?;
+        self.world
+            .resource_mut::<Authors>()
+            .0
+            .insert(ticket, editor);
+        Ok(ticket)
+    }
+    pub fn set_item_source(
+        &mut self,
+        target: &Address,
+        version: String,
+    ) -> Result<WorldCommit, String> {
+        let snapshot = self.snapshot();
+        let mut object = snapshot
+            .objects
+            .into_iter()
+            .find(|o| &o.address == target)
+            .ok_or("Item no longer exists")?;
+        object
+            .item_identity
+            .as_mut()
+            .ok_or("Item has no owner")?
+            .source_version = Some(version);
+        let revision = snapshot
+            .world_revision
+            .parse::<u64>()
+            .map_err(|_| "Invalid revision")?
+            .checked_add(1)
+            .ok_or("Revision exhausted")?;
+        object.object_revision = revision.to_string();
+        let commit = WorldCommit {
+            world_revision: revision.to_string(),
+            upserts: vec![object],
+            removed: vec![],
+        };
+        self.apply_commit(commit.clone())?;
+        Ok(commit)
+    }
+
+    /// Import an already authorized immutable library version into a new instance.
+    pub fn place_library_item(
+        &mut self,
+        mut object: ObjectView,
+        identity: kokoverse_protocol::ItemIdentity,
+        position: [f64; 3],
+    ) -> Result<WorldCommit, String> {
+        let id = Uuid::new_v4().to_string();
+        object.address.instance_id = id.clone();
+        object.renderer.instance_id = id;
+        object.object_revision = "0".into();
+        object.item_identity = Some(identity);
+        object.world_position = position;
+        for field in &mut object.fields {
+            if field.id == "position" {
+                field.value = json!(position);
+            }
+        }
+        for script in &mut object.scripts {
+            script.id = Uuid::new_v4().to_string();
+            script.revision = "0".into();
+            script.state.clear();
+        }
+        for field in &mut object.fields {
+            field.revision = "0".into();
+        }
+        if let Some(playback) = &mut object.playback {
+            playback.playing = false;
+            playback.position_seconds = 0.0;
+            playback.anchor_seconds = self.world.resource::<MediaClock>().0;
+        }
+        sync_object_fields(&mut object);
+        let revision = self
+            .snapshot()
+            .world_revision
+            .parse::<u64>()
+            .map_err(|_| "Invalid revision")?
+            .checked_add(1)
+            .ok_or("Revision exhausted")?;
+        let commit = WorldCommit {
+            world_revision: revision.to_string(),
+            upserts: vec![object],
+            removed: vec![],
+        };
+        self.apply_commit(commit.clone())?;
+        Ok(commit)
+    }
     pub fn set_media_time(&mut self, time: f64) {
         if time.is_finite() && time >= 0.0 {
             self.world.resource_mut::<MediaClock>().0 = time;
@@ -550,6 +643,7 @@ pub(crate) fn new_object(name: String, position: [f64; 3], color: [f64; 4]) -> O
     let id = Uuid::new_v4().to_string();
     ObjectView {
         parent: None,
+        item_identity: None,
         address: Address {
             instance_id: id.clone(),
             local_id: 1,

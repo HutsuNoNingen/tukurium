@@ -1,0 +1,30 @@
+[Unit]
+Description=Kokoverse account, session and asset API
+After=network.target
+
+[Service]
+Type=simple
+User=kokoverse
+Group=kokoverse
+ExecStart=/opt/kokoverse/bin/kokoverse-asset-server --listen 127.0.0.1:8787 --data-dir /var/lib/kokoverse --relay wss://45.77.130.146/ws
+WorkingDirectory=/var/lib/kokoverse
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/kokoverse
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=768M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

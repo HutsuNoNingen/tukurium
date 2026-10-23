@@ -12,7 +12,7 @@ function New-RelayLoginForm([string]$Username = 'demo') {
     $form.TopMost = $true
     $form.ShowInTaskbar = $true
     $description = New-Object Windows.Forms.Label
-    $description.Text = "Relay: 45.77.130.146`r`nRoom: kokoverse/workshop`r`nEnter the relay login supplied by the host."
+    $description.Text = "Realtime connection`r`nEnter the relay login supplied by the host."
     $description.SetBounds(20,15,380,58)
     $form.Controls.Add($description)
     $userLabel = New-Object Windows.Forms.Label

@@ -164,6 +164,34 @@ fn no_edit(_: &mut World, _: Entity, _: &str, _: Value) {
 pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
     components: vec![
         ComponentRegistration {
+            type_id: "ItemIdentity",
+            local_id: 9,
+            fields: vec![field(
+                "item_identity",
+                "Item identity",
+                "item_identity",
+                None,
+                |v| {
+                    let i: ItemIdentity = parse(v)?;
+                    if uuid::Uuid::parse_str(&i.owner_id).is_err()
+                        || uuid::Uuid::parse_str(&i.creator_id).is_err()
+                        || i.editors.len() > 128
+                    {
+                        return Err("Invalid item identity".into());
+                    }
+                    Ok(())
+                },
+                FieldAccess::Command,
+            )],
+            present: |o| o.item_identity.is_some(),
+            project: |o| json!({"item_identity":o.item_identity}),
+            restore: |o, v| {
+                o.item_identity = Some(parse(&v["item_identity"])?);
+                Ok(())
+            },
+            apply: no_edit,
+        },
+        ComponentRegistration {
             type_id: "Slot",
             local_id: 1,
             fields: vec![editable("name", "Name", "string", 0, name), field("parent", "Parent", "address", Some(0), inspector_target, FieldAccess::Command)],

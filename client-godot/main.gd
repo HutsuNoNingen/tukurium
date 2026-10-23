@@ -120,6 +120,8 @@ var look := false
 var capture_path := ""
 var frames := 0
 var avatar_restore_started := false
+const SERVICE_PANEL = preload("res://service_panel.gd")
+var service_panel = SERVICE_PANEL.new()
 
 func _ready() -> void:
 	# Space belongs to gameplay/text entry, not BaseButton's default UI accept.
@@ -134,8 +136,8 @@ func _ready() -> void:
 			key.physical_keycode = bindings[action]
 			InputMap.action_add_event(action, key)
 	for argument in OS.get_cmdline_user_args():
-		if argument == "--close-with-engine": close_with_engine = true
 		if argument.begins_with("--port="): port = int(argument.trim_prefix("--port="))
+		if argument == "--close-with-engine": close_with_engine = true
 		if argument.begins_with("--session="): session = argument.trim_prefix("--session=")
 		if argument.begins_with("--capture="): capture_path = argument.trim_prefix("--capture=")
 	build_world()
@@ -143,6 +145,8 @@ func _ready() -> void:
 	add_child(world_panels)
 	world_panels.setup(self)
 	build_ui()
+	add_child(service_panel)
+	service_panel.setup(self)
 	add_child(asset_status)
 	asset_status.setup(self)
 	add_child(asset_importer)
@@ -1036,7 +1040,38 @@ func _process(delta: float) -> void:
 		get_tree().quit()
 
 func accept_message(message: Dictionary) -> void:
-	if message.get("protocol_version") != 3 or message.get("session_id") != session: return
+	if message.get("protocol_version") != 3: return
+	var service_body: Dictionary = message.get("body",{})
+	if service_body.get("kind") == "engine_shutdown":
+		get_tree().quit()
+		return
+	if service_body.get("kind") == "service_state":
+		if session != message.get("session_id"):
+			requests.disconnected()
+			asset_importer.disconnected()
+			world_panels.disconnected()
+			script_editor.disconnected()
+			session = message.session_id
+			epoch = ""
+			selected_id = ""
+			current.clear()
+			fields.clear()
+			pending = false
+			pending_edit.clear()
+			inspector_edits.clear()
+			dirty.clear()
+			player_initialized = false
+			reset_media_clock()
+			for avatar in avatars.values(): avatar.queue_free()
+			avatars.clear()
+			apply_snapshot({"world_revision":"0","objects":[]})
+			queue_message({"kind":"hello"})
+		service_panel.receive_state(service_body)
+		return
+	if service_body.get("kind") == "service_result":
+		requests.receive(service_body)
+		return
+	if message.get("session_id") != session: return
 	if epoch != message.authority_epoch:
 		reset_media_clock()
 		avatar_restore_started = false
@@ -1328,6 +1363,7 @@ func set_view_mode(mode: int, capture: bool = true) -> void:
 func gameplay_keyboard_blocked() -> bool:
 	if hud.blocking(): return true
 	if world_panels.has_window_focus(): return true
+	if service_panel.enabled and service_panel.shade.visible: return true
 	if world_panels.text_focused(): return true
 	var focus := get_viewport().gui_get_focus_owner()
 	if focus is LineEdit or focus is TextEdit: return true
@@ -1367,6 +1403,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if hud.blocking(): return
+	if service_panel.enabled and service_panel.shade.visible: return
 	if world_panels.route_input(event):
 		get_viewport().set_input_as_handled()
 		return
@@ -1391,6 +1428,7 @@ func _input(event: InputEvent) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if hud.blocking(): return
+	if service_panel.enabled and service_panel.shade.visible: return
 	if event is InputEventKey and event.keycode == KEY_ESCAPE and event.pressed:
 		release_cursor()
 		get_viewport().set_input_as_handled()

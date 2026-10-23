@@ -39,41 +39,8 @@ $Username = $Username.Trim()
 if ($Username.Length -eq 0 -or $Username.Length -gt 40 -or $Username -match '[\r\n\x00]') { throw 'Enter a name from 1 to 40 characters.' }
 @{name=$Username} | ConvertTo-Json | Set-Content -LiteralPath $profilePath -Encoding UTF8
 
-$bundledLogin = Join-Path $packageRoot 'relay-access.json'
-if ((-not $env:KOKOSYNC_USERNAME -or -not $env:KOKOSYNC_PASSWORD) -and (Test-Path -LiteralPath $bundledLogin)) {
-    $access = Get-Content -LiteralPath $bundledLogin -Raw | ConvertFrom-Json
-    if (-not $access.username -or -not $access.password) { throw 'Bundled relay login is incomplete.' }
-    $env:KOKOSYNC_USERNAME = $access.username
-    $env:KOKOSYNC_PASSWORD = $access.password
-    Write-Startup 'Using the bundled relay login.'
-}
-if (-not $env:KOKOSYNC_USERNAME -or -not $env:KOKOSYNC_PASSWORD) {
-    $credentialPath = Join-Path $runDirectory 'relay-login.xml'
-    $credential = $null
-    if (Test-Path -LiteralPath $credentialPath) {
-        try { $credential = Import-Clixml -LiteralPath $credentialPath } catch { $credential = $null }
-    }
-    if (-not $credential) {
-        Write-Startup '[2/4] Waiting for sign-in. A Kokoverse login window is open.'
-        . (Join-Path $PSScriptRoot 'login.ps1')
-        $credential = Get-RelayLogin
-        if (-not $credential) { throw 'Login cancelled.' }
-        $credential | Export-Clixml -LiteralPath $credentialPath
-    }
-    $env:KOKOSYNC_USERNAME = $credential.UserName
-    $env:KOKOSYNC_PASSWORD = $credential.GetNetworkCredential().Password
-}
-
-# Validate the password before starting background processes. Never print it.
-Write-Startup '[2/4] Checking the relay connection (up to 15 seconds)...'
-$auth = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($env:KOKOSYNC_USERNAME + ':' + $env:KOKOSYNC_PASSWORD))
-$health = ([uri]$settings.relay).GetLeftPart([System.UriPartial]::Authority).Replace('wss://','https://') + '/health'
-try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $health -Headers @{ Authorization = 'Basic ' + $auth } -UseBasicParsing -TimeoutSec 15 | Out-Null
-} catch {
-    throw 'Relay login or connection failed. Check your connection. Delete .run/relay-login.xml to enter credentials again.'
-} finally { $auth = $null }
+. (Join-Path $PSScriptRoot 'connect-relay.ps1')
+Connect-KokoverseRelay -Relay $settings.relay -Root $packageRoot
 
 $peerPath = Join-Path $runDirectory 'peer-id.txt'
 $peerFolderPath = Join-Path $runDirectory 'peer-folder.txt'

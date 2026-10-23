@@ -11,6 +11,8 @@ pub(crate) struct WorldRevision(pub u64);
 pub(crate) struct MediaClock(pub f64);
 #[derive(Resource, Default)]
 pub(crate) struct InputQueue(pub VecDeque<(u64, WorldCommand)>);
+#[derive(Resource, Default)]
+pub(crate) struct Authors(pub HashMap<u64, kokoverse_protocol::ItemEditor>);
 
 pub(crate) enum Mutation {
     SetField {
@@ -97,6 +99,7 @@ pub(crate) fn insert_object(world: &mut World, object: ObjectView) {
             ObjectRoot {
                 revision: object.object_revision.parse().expect("validated revision"),
                 renderer: object.renderer.clone(),
+                item_identity: object.item_identity.clone(),
             },
             Slot {
                 name: get("name").as_str().expect("validated name").into(),
