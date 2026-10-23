@@ -216,6 +216,7 @@ func text_focused() -> bool:
 func clear_focus() -> void:
 	for panel in panels.values(): panel.clear_focus()
 	keyboard_id = ""
+	capture_id = ""
 
 func pick(screen: Vector2) -> Dictionary:
 	var origin: Vector3 = app.camera.project_ray_origin(screen)

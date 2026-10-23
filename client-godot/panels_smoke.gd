@@ -20,9 +20,7 @@ func mouse(position: Vector2, pressed: bool) -> void:
 	event.pressed = pressed
 	root.push_input(event, true)
 
-func fps_tab(scene, panel, index: int) -> bool:
-	var tabs: TabBar = panel.content.tabs
-	var point: Vector2 = tabs.get_global_transform() * tabs.get_tab_rect(index).get_center()
+func fps_point(scene, panel, point: Vector2) -> void:
 	var local := Vector3((point.x/panel.viewport.size.x-0.5)*panel.mesh.size.x,(0.5-point.y/panel.viewport.size.y)*panel.mesh.size.y,0.025)
 	var direction: Vector3 = (panel.to_global(local)-scene.camera.global_position).normalized()
 	var aim := InputEventMouseMotion.new()
@@ -33,6 +31,21 @@ func fps_tab(scene, panel, index: int) -> bool:
 	await process_frame
 	mouse(root.size*0.5,true)
 	mouse(root.size*0.5,false)
+
+func fps_field(scene, panel, field: LineEdit) -> bool:
+	panel.content.scroll.ensure_control_visible(field)
+	await process_frame
+	await process_frame
+	if not await wait_for(func(): return panel.content.scroll_pending<0 and not panel.content.scroll_inflight,"Scroll did not settle before aiming at field"): return false
+	await fps_point(scene,panel,field.get_global_rect().get_center())
+	if not field.has_focus():
+		var focus: Control=panel.viewport.gui_get_focus_owner()
+		push_error("FPS field focus mismatch: wanted="+str(field.get_meta("field"))+" actual="+str(focus.get_meta("field","") if focus!=null else "none")+" pointer="+str(panel.last_pointer)); return false
+	return true
+
+func fps_tab(scene, panel, index: int) -> bool:
+	var tabs: TabBar = panel.content.tabs
+	await fps_point(scene,panel,tabs.get_global_transform() * tabs.get_tab_rect(index).get_center())
 	if not scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_CAPTURED:
 		push_error("Inspector tab click released FPS mouse capture"); return false
 	return await wait_for(func(): return scene.objects[panel.panel_id].inspector.scripts_open==(index==1),"FPS gaze did not switch the inspector tab")
@@ -78,6 +91,32 @@ func run() -> void:
 	if not scene.grounded: push_error("Typing Space made the player jump"); quit(1); return
 	if other.content.target_id != other_target: push_error("Editing switched another panel target"); quit(1); return
 	if not scene.world_panels.shared_gizmos.has(other_target): push_error("Shared target gizmo is missing"); quit(1); return
+	var title_point: Vector2=view.title.get_global_rect().get_center()
+	var title_local := Vector3((title_point.x/panel.viewport.size.x-0.5)*panel.mesh.size.x,(0.5-title_point.y/panel.viewport.size.y)*panel.mesh.size.y,0.025)
+	var title_screen: Vector2=scene.camera.unproject_position(panel.to_global(title_local))
+	mouse(title_screen,true)
+	mouse(title_screen,false)
+	if panel.has_text_focus(): push_error("Cursor click on title retained Name editing"); quit(1); return
+	scene.set_view_mode(1)
+	await create_timer(0.1).timeout
+	if not await fps_field(scene,panel,line): quit(1); return
+	if not await fps_field(scene,panel,view.controls.color[0]): quit(1); return
+	view.controls.color[0].select_all()
+	for character in "0.4":
+		var typed := InputEventKey.new()
+		typed.keycode=character.unicode_at(0); typed.unicode=typed.keycode; typed.pressed=true
+		root.push_input(typed,true)
+		typed=typed.duplicate(); typed.pressed=false; root.push_input(typed,true)
+	if not await wait_for(func(): return is_equal_approx(float(scene.world_panels.field_data(target_id,"color").value[0]),0.4),"Typing into color edited the wrong field"): quit(1); return
+	if scene.world_panels.field_data(target_id,"name").value!="World panel edit ": push_error("Editing color changed Name"); quit(1); return
+	if not await fps_field(scene,panel,view.controls.position[0]): quit(1); return
+	await fps_point(scene,panel,view.title.get_global_rect().get_center())
+	if panel.has_text_focus(): push_error("Clicking the inspector title left a text field focused"); quit(1); return
+	if not scene.fps_active: push_error("Leaving text editing released FPS capture"); quit(1); return
+	if not await wait_for(func(): return view.edits.is_empty(),"Clicking outside fields did not release editing leases"): quit(1); return
+	scene.set_view_mode(2)
+	scene.camera.position=Vector3(0,1.4,4.5)
+	scene.camera.rotation=Vector3.ZERO
 	scene.world_panels.clear_focus()
 	if not await wait_for(func(): return view.edits.is_empty(), "Editing lease did not release"): quit(1); return
 	scene.world_panels.edit(panel.panel_id, "panel_size", [720,640])

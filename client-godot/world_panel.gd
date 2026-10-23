@@ -55,6 +55,18 @@ func canvas_point(global_point: Vector3) -> Vector2:
 	return Vector2((local.x / mesh.size.x + 0.5) * viewport.size.x, (0.5 - local.y / mesh.size.y) * viewport.size.y)
 
 func forward_pointer(event: InputEventMouse, point: Vector2) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		# A camera move can change the hit without a viewport mouse-motion event.
+		# Refresh hover at the actual ray hit before deciding which editor keeps focus.
+		var motion := InputEventMouseMotion.new()
+		motion.position = point
+		motion.global_position = point
+		motion.relative = point - last_pointer
+		viewport.push_input(motion, true)
+		var focus := viewport.gui_get_focus_owner()
+		var hovered := viewport.gui_get_hovered_control()
+		if focus != null and hovered != focus and (hovered == null or not focus.is_ancestor_of(hovered)):
+			viewport.gui_release_focus()
 	var copy: InputEventMouse = event.duplicate()
 	copy.position = point
 	copy.global_position = point
