@@ -6,7 +6,8 @@ const REFERENCE_CHIP = preload("res://reference_chip.gd")
 var manager
 var script_view
 var script_mount: MarginContainer
-var scripts_button: Button
+var tabs := TabBar.new()
+var pending_shared_tab := -1
 var panel_id := ""
 var target_id := ""
 var panel_state: Dictionary = {}
@@ -102,9 +103,6 @@ func connect_view() -> void:
 func build_actions(actions: Container) -> void:
 	add_button(actions, "Select / Gizmo", func():
 		if not target_id.is_empty(): manager.app.select_object(target_id))
-	scripts_button = add_button(actions, "Scripts", func():
-		if not script_view.busy():
-			manager.edit(panel_id,"inspector_scripts_open",not bool(panel_state.inspector.get("scripts_open",false))))
 	add_button(actions, "New inspector", func(): manager.open_inspector(target_id))
 	var receiver = REFERENCE_CHIP.new()
 	receiver.manager = manager
@@ -126,6 +124,10 @@ func build_body(body: Container) -> void:
 	var details := VBoxContainer.new()
 	details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body.add_child(details)
+	tabs.add_tab("Object")
+	tabs.add_tab("Scripts")
+	tabs.tab_changed.connect(select_tab)
+	details.add_child(tabs)
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	details.add_child(scroll)
@@ -405,12 +407,21 @@ func refresh(object: Dictionary) -> void:
 	if not pending_field.is_empty() and target_id == pending_reference_target and not target_change_pending and reference_chips.has(pending_field):
 		scroll.ensure_control_visible(reference_chips[pending_field])
 		pending_field = ""
+	refresh_pages(object)
+
+func refresh_pages(object: Dictionary) -> void:
 	var show_scripts: bool = object.inspector.get("scripts_open",false)
+	tabs.set_block_signals(true)
+	tabs.current_tab = 1 if show_scripts else 0
+	tabs.set_block_signals(false)
 	script_mount.visible = show_scripts
 	scroll.visible = not show_scripts
-	scripts_button.text = "Object fields" if show_scripts else "Scripts"
 	script_view.active = show_scripts
 	if show_scripts: script_view.refresh(target_id, object.inspector.get("script_id"))
+
+func select_tab(index: int) -> void:
+	finish_all()
+	pending_shared_tab = index
 
 func restore_scroll(object: Dictionary) -> void:
 	var bar := scroll.get_v_scroll_bar()
@@ -542,14 +553,21 @@ func tick() -> void:
 	if edits.is_empty() and not script_view.busy() and target_change_pending:
 		target_change_pending = false
 		manager.edit(panel_id, "inspector_target", pending_target)
+	if edits.is_empty() and not script_view.busy() and pending_shared_tab >= 0:
+		var selected := pending_shared_tab
+		pending_shared_tab = -1
+		manager.edit(panel_id, "inspector_scripts_open", selected == 1)
 	if edits.is_empty() and not script_view.busy() and not requested_script.is_empty():
 		var id := requested_script
 		requested_script = ""
-		if id == "*": manager.edit(panel_id,"inspector_scripts_open",true)
-		else:
-			manager.edit(panel_id,"inspector_script_id",id,func(result):
-				if result.ok: manager.edit(panel_id,"inspector_scripts_open",true))
+		show_requested_script(id)
 	refresh_sessions()
+
+func show_requested_script(id: String) -> void:
+	if id == "*": manager.edit(panel_id,"inspector_scripts_open",true)
+	else:
+		manager.edit(panel_id,"inspector_script_id",id,func(result):
+			if result.ok: manager.edit(panel_id,"inspector_scripts_open",true))
 
 func has_active_edits() -> bool:
 	return not edits.is_empty() or script_view.busy()
@@ -564,6 +582,7 @@ func disconnected() -> void:
 	scroll_pending = -1.0
 	scroll_inflight = false
 	target_change_pending = false
+	pending_shared_tab = -1
 	close_when_ready = false
 	message.text = "Disconnected · shared editing paused"
 	refresh_sessions()

@@ -18,7 +18,7 @@ func run() -> void:
 	for _i in 2: scene.world_panels.open_inspector(target)
 	if not await until(func(): return scene.world_panels.panels.size() == 2,"Shared inspectors missing"): quit(1); return
 	var panels: Array = scene.world_panels.panels.values()
-	for panel in panels: scene.world_panels.edit(panel.panel_id,"inspector_scripts_open",true)
+	for panel in panels: panel.content.tabs.current_tab = 1
 	if not await until(func(): return panels[0].content.script_mount.visible and panels[1].content.script_mount.visible,"Scripts tabs did not sync"): quit(1); return
 	var a = panels[0].content.script_view
 	var b = panels[1].content.script_view

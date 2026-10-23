@@ -19,6 +19,7 @@ var due := 0
 var heartbeat := 0
 var generation := 0
 var selecting := false
+var local_selection := false
 var overlay
 
 func setup(controller, id: String, mount: Control) -> void:
@@ -96,7 +97,7 @@ func can_select() -> bool:
 
 func select_shared(id: String) -> void:
 	leave()
-	if not selecting:
+	if not local_selection and not selecting:
 		selecting = true
 		manager.edit(panel_id,"inspector_script_id",null if id.is_empty() else id,func(_r): selecting = false)
 	open_document()

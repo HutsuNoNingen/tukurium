@@ -46,6 +46,7 @@ try {
   await until(()=>godot.exitCode!==null,'Inspector UI timed out',60000);
   assert.equal(godot.exitCode,0,godot.logs);assert.doesNotMatch(godot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(godot.logs,/INSPECTOR UX SMOKE PASS/);
   await until(()=>host.client.latest().snapshot.objects.some(o=>o.fields.some(f=>f.id==='name'&&f.value==='Native closed safely')),'Native edit did not reach host');
+  assert.ok(host.client.messages.some(m=>m.kind==='snapshot' && m.snapshot.objects.some(o=>o.inspector?.scripts_open)),'World tab selection did not reach the other client');
   console.log('PASS: component inspector, native window, local drive provenance and cross-client editing');
   if(process.argv.includes('--rendered'))console.log(`SCREENSHOT=${resolve(work,'inspector.png')}`);
 }catch(error){for(const child of children)if(child.logs)console.error(child.logs.slice(-5000));throw error;}

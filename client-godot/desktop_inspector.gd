@@ -1,6 +1,9 @@
 extends "res://inspector_view.gd"
 ## Desktop layout of the same inspector model and editing operations.
 ## No SubViewport texture or world-panel dimensions are used here.
+var active_tab := 0
+var pending_tab := -1
+var local_script := ""
 
 func build_layout() -> void:
 	var margin := MarginContainer.new()
@@ -31,10 +34,39 @@ func build_layout() -> void:
 	body.split_offset = 245
 	column.add_child(body)
 	build_body(body)
+	script_view.local_selection = true
 	hierarchy.custom_minimum_size.x = 200
 	hierarchy.tree.add_theme_font_size_override("font_size", 17)
 	column.add_child(HSeparator.new())
 	column.add_child(message)
+
+func select_tab(index: int) -> void:
+	finish_all()
+	pending_tab = index
+
+func tick() -> void:
+	super.tick()
+	if pending_tab >= 0 and edits.is_empty() and not script_view.busy():
+		active_tab = pending_tab
+		pending_tab = -1
+		refresh_pages(panel_state)
+
+func show_requested_script(id: String) -> void:
+	local_script = "" if id == "*" else id
+	active_tab = 1
+	pending_tab = -1
+	refresh_pages(panel_state)
+
+func refresh_pages(_object: Dictionary) -> void:
+	tabs.set_block_signals(true)
+	tabs.current_tab = active_tab
+	tabs.set_block_signals(false)
+	scroll.visible = active_tab == 0
+	script_mount.visible = active_tab == 1
+	script_view.active = active_tab == 1
+	if script_view.active:
+		script_view.refresh(target_id, null if local_script.is_empty() else local_script)
+		if script_view.editor.selected == local_script: local_script = ""
 
 func restore_scroll(_object: Dictionary) -> void:
 	pass # Desktop scrolling is local and independent of the world surface.
