@@ -74,16 +74,23 @@ func run() -> void:
 	if not jumped: quit(1); return
 	if not await until(func(): return scene.grounded,"Player did not land after jump"): quit(1); return
 	scene.release_cursor()
-	var initial_count: int=scene.objects.size()
+	var initial_count: int=scene.objects.values().filter(func(o): return o.visual.kind=="primitive").size()
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--screenshot="):
 			await RenderingServer.frame_post_draw
 			root.get_texture().get_image().save_png(arg.trim_prefix("--screenshot=").replace(".png","-palette.png"))
 	for index in PRIMITIVES.SHAPES.size():
+		if index>0:
+			scene.hud.open_creation()
+			if not await until(func(): return scene.world_panels.panels.size()==1,"Creation panel did not reopen"): quit(1); return
+			surface=scene.world_panels.panels.values()[0]
+			panel=surface.content
+			id=surface.panel_id
+			await create_timer(0.15).timeout
 		click_control(scene,surface,panel.cards[index])
 		if not await until(func(): return scene.objects[id].creation.shape==PRIMITIVES.SHAPES[index] and panel.selected==index,"3D selection was not shared"): quit(1); return
 		click_control(scene,surface,panel.create_button)
-		if not await until(func(): return not panel.busy and scene.objects.size()==initial_count+index+1 and scene.current.visual.get("shape")==PRIMITIVES.SHAPES[index],"Primitive not created/selected: "+PRIMITIVES.NAMES[index]): quit(1); return
+		if not await until(func(): return not scene.objects.has(id) and scene.objects.values().filter(func(o): return o.visual.kind=="primitive").size()==initial_count+index+1 and scene.current.visual.get("shape")==PRIMITIVES.SHAPES[index],"Primitive not created/selected: "+PRIMITIVES.NAMES[index]): quit(1); return
 		var object: Dictionary=scene.current
 		if object.visual.get("shape")!=PRIMITIVES.SHAPES[index] or scene.render_nodes[scene.selected_id].mesh.get_class()!=PRIMITIVES.create(PRIMITIVES.SHAPES[index]).get_class():
 			push_error("Wrong procedural mesh: expected "+PRIMITIVES.SHAPES[index]+", got "+str(object.visual)+", pending="+str(scene.pending)); quit(1); return
@@ -92,11 +99,14 @@ func run() -> void:
 		if arg.begins_with("--screenshot="):
 			await RenderingServer.frame_post_draw
 			root.get_texture().get_image().save_png(arg.trim_prefix("--screenshot="))
+	scene.hud.open_creation()
+	if not await until(func(): return scene.world_panels.panels.size()==1,"Creation panel did not reopen for Esc"): quit(1); return
+	id=scene.world_panels.panels.keys()[0]
 	var escape := InputEventKey.new()
 	escape.keycode=KEY_ESCAPE; escape.pressed=true
 	root.push_input(escape,true)
 	if not scene.world_panels.panels.has(id) or Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE: push_error("Esc deleted world panel or captured cursor"); quit(1); return
-	print("CREATION SMOKE PASS: shared surface, move while open, grab/rotate/scale, shared selection, eight meshes, no camera switch")
+	print("CREATION SMOKE PASS: shared surface, move while open, grab/rotate/scale, shared selection, eight meshes, close after success, no camera switch")
 	scene.queue_free()
 	await process_frame
 	await process_frame

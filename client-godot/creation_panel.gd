@@ -169,5 +169,5 @@ func spawn_selected(index: int = -1) -> void:
 		create_button.disabled=not app.editable
 		if result.ok:
 			app.select_object(result.selected.instance_id)
-			status.text=name_text+" を追加しました"
+			manager.close_panel(panel_id)
 		else: status.text=result.get("message","作成できませんでした"))
