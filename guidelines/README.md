@@ -12,6 +12,7 @@ Rustが共有ワールドの正本を持ち、Godotが入力と描画を担当�
 | 3Dパネルの入力・表示・共有をどう実装するか | [3Dパネルの実装指針](world-space-panels.md) |
 | 同じ不具合を再発させないために何を見るか | [不具合から得た知見](lessons-learned.md) |
 | エージェントが作業するときの既定方針 | [AGENTS.md](../AGENTS.md) |
+| 配布版をビルドし、ZIPと展開済み版を検証する | [Windows配布版のビルド手順](../docs/windows-build.md) |
 | 現在の操作方法 | [インスペクタの操作](../docs/inspector-controls.md) |
 | ECS・通信・保存の実装詳細 | [ランタイム構成](../docs/runtime.md) |
 | 共有WriteとローカルDriveの違い | [UGCのローカル実行](../docs/ugc-driving.md) |
