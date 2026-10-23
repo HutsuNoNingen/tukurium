@@ -2,16 +2,17 @@ param([ValidatePattern('^[A-Za-z0-9_-]{1,40}$')][string]$Profile = 'default', [s
     [string]$Server = 'http://127.0.0.1:8787', [string]$Relay = '')
 $ErrorActionPreference = 'Stop'
 $localRoot = Split-Path -Parent $PSScriptRoot
+$stateRoot = if ($env:KOKOVERSE_DATA_ROOT) { [IO.Path]::GetFullPath($env:KOKOVERSE_DATA_ROOT) } else { $localRoot }
 Set-Location -LiteralPath $localRoot
 . (Join-Path $PSScriptRoot 'process-lifecycle.ps1')
 $Server = $Server.TrimEnd('/')
 $isLocal = $Server -eq 'http://127.0.0.1:8787'
 if (-not $isLocal -and ([uri]$Server).Scheme -ne 'https') { throw 'Remote service requires HTTPS.' }
-$runRoot = Join-Path $localRoot $(if ($isLocal) { '.run/local' } else { '.run/online' })
+$runRoot = Join-Path $stateRoot $(if ($isLocal) { '.run/local' } else { '.run/online' })
 $clientRoot = Join-Path $runRoot $Profile
 $recordsPath = Join-Path $clientRoot 'processes.json'
 New-Item -ItemType Directory -Force -Path $clientRoot | Out-Null
-$launchMutex = New-KokoverseLaunchMutex $localRoot $Profile (-not $isLocal)
+$launchMutex = New-KokoverseLaunchMutex $stateRoot $Profile (-not $isLocal)
 $locked = $false
 $newClients = @()
 $processes = @()

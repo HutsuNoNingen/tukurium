@@ -1,12 +1,13 @@
 param([switch]$Local, [switch]$Headless)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+$stateRoot = if ($env:KOKOVERSE_DATA_ROOT) { [IO.Path]::GetFullPath($env:KOKOVERSE_DATA_ROOT) } else { $root }
 . (Join-Path $PSScriptRoot 'process-lifecycle.ps1')
 $online = -not $Local
 $mode = if ($online) { 'online' } else { 'local' }
 # Serialize allocation through startup, including rapid double-clicks from
 # separate launcher processes. Explicit -Profile launches keep their old behavior.
-$allocationMutex = New-KokoverseLaunchMutex $root ':instance-allocation:' $online
+$allocationMutex = New-KokoverseLaunchMutex $stateRoot ':instance-allocation:' $online
 $allocationHeld = $false
 $profileMutex = $null
 $profileHeld = $false
@@ -17,13 +18,13 @@ try {
     if (-not $allocationHeld) { throw 'Another instance is still starting. Please retry.' }
     for ($index = 1; $index -le 10000; $index++) {
         $candidate = if ($index -eq 1) { 'default' } else { "instance-$index" }
-        $candidateMutex = New-KokoverseLaunchMutex $root $candidate $online
+        $candidateMutex = New-KokoverseLaunchMutex $stateRoot $candidate $online
         $candidateHeld = $false
         try {
             try { $candidateHeld = $candidateMutex.WaitOne(0) }
             catch [Threading.AbandonedMutexException] { $candidateHeld = $true }
             if (-not $candidateHeld) { continue }
-            $recordPath = Join-Path $root ".run/$mode/$candidate/processes.json"
+            $recordPath = Join-Path $stateRoot ".run/$mode/$candidate/processes.json"
             $busy = $false
             if (Test-Path -LiteralPath $recordPath) {
                 try {

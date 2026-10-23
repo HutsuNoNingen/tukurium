@@ -11,6 +11,7 @@ Rust / bevy_ecs のEngineとGodotの表示クライアントを別プロセス�
 ## 起動（Windows x64）
 
 配布用のビルド、ZIPと展開済み版の作成、起動確認は [Windows配布版のビルド手順](docs/windows-build.md) を参照。
+テスターへの差分配信は [テスター向け差分更新](docs/tester-updates.md) を参照。
 
 ### 公開サーバーのセッション・ライブラリ版
 

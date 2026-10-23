@@ -1,7 +1,8 @@
 param([ValidatePattern('^[A-Za-z0-9_-]{1,40}$')][string]$Profile = 'default', [switch]$Services, [switch]$Online)
 $ErrorActionPreference = 'Stop'
 $localRoot = Split-Path -Parent $PSScriptRoot
-$recordPath = Join-Path $localRoot $(if ($Online) { ".run/online/$Profile/processes.json" } else { ".run/local/$Profile/processes.json" })
+$stateRoot = if ($env:KOKOVERSE_DATA_ROOT) { [IO.Path]::GetFullPath($env:KOKOVERSE_DATA_ROOT) } else { $localRoot }
+$recordPath = Join-Path $stateRoot $(if ($Online) { ".run/online/$Profile/processes.json" } else { ".run/local/$Profile/processes.json" })
 function Stop-OwnedProcess($record) {
     $p = Get-Process -Id $record.id -ErrorAction SilentlyContinue
     if ($p -and $p.Path -eq $record.path -and $p.StartTime.ToUniversalTime().Ticks.ToString() -eq $record.startTicks) { Stop-Process -Id $p.Id }
@@ -38,9 +39,9 @@ if (Test-Path -LiteralPath $recordPath) {
     Remove-Item -LiteralPath $recordPath
 }
 if ($Services -and -not $Online) {
-    $otherClients = Get-ChildItem -LiteralPath (Join-Path $localRoot '.run/local') -Filter processes.json -Recurse -ErrorAction SilentlyContinue
+    $otherClients = Get-ChildItem -LiteralPath (Join-Path $stateRoot '.run/local') -Filter processes.json -Recurse -ErrorAction SilentlyContinue
     if ($otherClients) { throw 'Stop the other local profiles before stopping the shared services.' }
-    $sharedPath=Join-Path $localRoot '.run/local/services.json'
+    $sharedPath=Join-Path $stateRoot '.run/local/services.json'
     if (Test-Path -LiteralPath $sharedPath) { foreach ($record in (Get-Content -LiteralPath $sharedPath -Raw | ConvertFrom-Json)) { Stop-OwnedProcess $record }; Remove-Item -LiteralPath $sharedPath }
 }
 Write-Host 'Session saved and stopped.'

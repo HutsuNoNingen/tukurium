@@ -1,4 +1,4 @@
-param([string]$OutputDirectory = '', [switch]$SkipBuild)
+param([string]$OutputDirectory = '', [switch]$SkipBuild, [string]$Version = '')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $projectRoot
@@ -7,7 +7,12 @@ try {
     if (-not $OutputDirectory) { $OutputDirectory = Join-Path $projectRoot 'dist' }
     New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
     $OutputDirectory = (Resolve-Path -LiteralPath $OutputDirectory).Path
-    $name = 'Kokoverse-Windows-x64-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
+    if ($Version -and $Version -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') { throw 'Version must contain only letters, numbers, dots, underscores and hyphens.' }
+    $name = 'Kokoverse-Windows-x64-' + $(if ($Version) { $Version } else { Get-Date -Format 'yyyyMMdd-HHmmss' })
+    $sourceCommit = (git rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read source commit.' }
+    $sourceTreeClean = @(git status --porcelain --untracked-files=all).Count -eq 0
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read source status.' }
     $includeLogin = $false
     $stagingParent = Join-Path $projectRoot ('.run/packages/' + [guid]::NewGuid().ToString('N'))
     $packageRoot = Join-Path $stagingParent $name
@@ -113,7 +118,7 @@ User-imported world assets are NOT included in this archive.
         @{ path=$_.FullName.Substring($packageRoot.Length+1).Replace('\','/'); size=$_.Length; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
     })
     $connection = Get-Content -LiteralPath 'distribution/connection.json' -Raw | ConvertFrom-Json
-    @{ version=$name; protocol=3; service=$connection.service; relay=$connection.relay; sessionMode='managed'; legacyRoom='kokoverse/workshop'; avatar='oekaki'; includesUserWorld=$false; includesCredentials=$includeLogin; optionalVideoTools='FFmpeg 9.0.2 via Install-Video-Tools.bat'; rustDependencies=@($metadata.packages | Where-Object source | Select-Object name,version,license); goDependencies=$goModules | ForEach-Object { ($_ -split '\|')[0..1] -join '@' }; files=$files } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $packageRoot 'build-info.json') -Encoding UTF8
+    @{ version=$name; sourceCommit=$sourceCommit; sourceTreeClean=$sourceTreeClean; protocol=3; service=$connection.service; relay=$connection.relay; sessionMode='managed'; legacyRoom='kokoverse/workshop'; avatar='oekaki'; includesUserWorld=$false; includesCredentials=$includeLogin; optionalVideoTools='FFmpeg 9.0.2 via Install-Video-Tools.bat'; rustDependencies=@($metadata.packages | Where-Object source | Select-Object name,version,license); goDependencies=$goModules | ForEach-Object { ($_ -split '\|')[0..1] -join '@' }; files=$files } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $packageRoot 'build-info.json') -Encoding UTF8
     $archive = Join-Path $OutputDirectory ($name + '.zip')
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [IO.Compression.ZipFile]::CreateFromDirectory($stagingParent,$archive,[IO.Compression.CompressionLevel]::Optimal,$false)
