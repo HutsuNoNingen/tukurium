@@ -234,9 +234,12 @@ func handle_input(event: InputEvent) -> bool:
 		if (event.keycode == KEY_F5 or event.physical_keycode == KEY_F5) and not app.gameplay_keyboard_blocked():
 			cycle_view()
 			return true
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and event.pressed:
-		if ring.visible: close_ring(); return true
-		if not app.gameplay_keyboard_blocked(): show_ring(event.position); return true
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE:
+		# Opening the ring releases the cursor and cancels a right-click grab.
+		if app.right_down or app.look or app.grab_waiting or not app.hand_grab.is_empty(): return true
+		if event.pressed:
+			if ring.visible: close_ring(); return true
+			if not app.gameplay_keyboard_blocked(): show_ring(event.position); return true
 	return false
 
 func _process(_delta: float) -> void:

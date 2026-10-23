@@ -172,6 +172,17 @@ func run() -> void:
 	root.push_input(grab, true)
 	if not await wait_for(func(): return not scene.hand_grab.is_empty() and scene.hand_grab.preview.target.instance_id == panel.panel_id, "RMB did not grab the panel"): quit(1); return
 	if not scene.world_panels.carried_reference.is_empty(): push_error("Plain RMB copied a reference instead of grabbing"); quit(1); return
+	var middle := InputEventMouseButton.new()
+	middle.button_index = MOUSE_BUTTON_MIDDLE
+	middle.position = root.get_visible_rect().size * 0.5
+	middle.pressed = true
+	root.push_input(middle, true)
+	middle.pressed = false
+	root.push_input(middle, true)
+	if scene.hand_grab.is_empty() or not scene.right_down or scene.hud.ring.visible or Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		push_error("Middle click interrupted the active right-click grab")
+		quit(1)
+		return
 	scene.queue_message({"kind":"grab","action":"scale","factor":1.2})
 	scene.queue_message({"kind":"grab","action":"rotate","delta":[0.2,0.1],"vertical":false})
 	if not await wait_for(func(): return scene.hand_grab.preview.scale[0] > 1.1, "Panel scale preview missing"): quit(1); return
