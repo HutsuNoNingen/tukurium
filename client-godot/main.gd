@@ -5,6 +5,8 @@ const AVATAR = preload("res://avatar.gd")
 const TRANSLATION_GIZMO = preload("res://translation_gizmo.gd")
 const ASSET_IMPORTER = preload("res://asset_importer.gd")
 const SCRIPT_EDITOR = preload("res://script_editor.gd")
+const WORLD_PANELS = preload("res://world_panels.gd")
+var world_panels = WORLD_PANELS.new()
 var script_editor = SCRIPT_EDITOR.new()
 var script_templates: Array = []
 var script_statuses: Array = []
@@ -64,6 +66,7 @@ var camera := Camera3D.new()
 var cube: MeshInstance3D
 var material: StandardMaterial3D
 var avatars: Dictionary = {}
+var participant_names: Dictionary = {}
 var self_id := "local"
 var player_position := Vector3(0, 0, 3)
 var player_target_position := Vector3(0, 0, 3)
@@ -124,6 +127,8 @@ func _ready() -> void:
 		if argument.begins_with("--session="): session = argument.trim_prefix("--session=")
 		if argument.begins_with("--capture="): capture_path = argument.trim_prefix("--capture=")
 	build_world()
+	add_child(world_panels)
+	world_panels.setup(self)
 	build_ui()
 	add_child(asset_importer)
 	asset_importer.configure(self)
@@ -358,6 +363,10 @@ func build_ui() -> void:
 		release_cursor()
 		script_editor.open(selected_id))
 	inspector.add_child(scripts_button)
+	var world_inspector_button := Button.new()
+	world_inspector_button.text = "Open shared world inspector · Ctrl+I"
+	world_inspector_button.pressed.connect(func(): world_panels.open_inspector(selected_id))
+	inspector.add_child(world_inspector_button)
 	inspector.add_child(HSeparator.new())
 	inspector.add_child(label("Slot · Name", 14))
 	name_input = LineEdit.new()
@@ -758,6 +767,13 @@ func release_player_input() -> void:
 func begin_hand_grab() -> void:
 	if not editable or pending or grab_waiting or not hand_grab.is_empty(): return
 	grab_waiting = true
+	world_panels.clear_focus()
+	var hit: Dictionary = world_panels.pick(get_viewport().get_visible_rect().size * 0.5)
+	if not hit.is_empty() and objects[hit.id].panel.get("attachment") != null:
+		world_panels.edit(hit.id, "panel_pin", null, func(result):
+			if result.ok and right_down: queue_message({"kind":"grab","action":"begin"})
+			else: grab_waiting = false)
+		return
 	send_player_input()
 	queue_message({"kind":"grab","action":"begin"})
 
@@ -821,6 +837,8 @@ func draw_interaction_rays() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		release_cursor()
+		world_panels.capture_id = ""
+		world_panels.clear_focus()
 
 func reset_media_clock() -> void:
 	clock_ready = false
@@ -941,6 +959,7 @@ func _process(delta: float) -> void:
 		node.quaternion = node.quaternion.slerp(Quaternion(q[0],q[1],q[2],q[3]),alpha)
 		node.scale = node.scale.lerp(Vector3(s[0],s[1],s[2]),alpha)
 	update_selection_outline()
+	world_panels.tick()
 	if not current.is_empty(): gizmo.set_target(cube.position, editable and not busy and not look and not fps_active)
 	else: gizmo.clear_target()
 	if look and not gizmo.dragging and not avatar_camera:
@@ -985,6 +1004,7 @@ func accept_message(message: Dictionary) -> void:
 		avatar_restore_started = false
 	epoch = message.authority_epoch
 	var body: Dictionary = message.body
+	if world_panels.receive(body): return
 	if str(body.get("kind","")).begins_with("asset_"):
 		asset_importer.receive(body)
 		return
@@ -1015,11 +1035,13 @@ func accept_message(message: Dictionary) -> void:
 			set_remote_previews(body.previews)
 		"presence":
 			self_id = body.self_id
+			participant_names.clear()
 			if body.get("local_motion") is Dictionary: grounded = body.local_motion.grounded
 			var visible := {}
 			var names: PackedStringArray = []
 			for person in body.participants:
 				var id: String = person.id
+				participant_names[id] = person.name
 				visible[id] = true
 				var fresh := not avatars.has(id)
 				if fresh:
@@ -1055,6 +1077,7 @@ func accept_message(message: Dictionary) -> void:
 			status_label.text = body.message
 			editable = body.editable
 			if not editable:
+				world_panels.disconnected()
 				script_editor.disconnected()
 				avatar_restore_started = false
 				reset_media_clock()
@@ -1111,36 +1134,7 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 		var id: String = object.address.instance_id
 		objects[id] = object
 		if not render_nodes.has(id):
-			var node := MeshInstance3D.new()
-			var image_panel: bool = object.get("visual", {}).get("kind", "cube") in ["image","video"]
-			if image_panel:
-				var quad := QuadMesh.new()
-				var ratio: float = float(object.visual.width) / float(object.visual.height)
-				quad.size = Vector2(2.0, 2.0 / ratio) if ratio >= 1 else Vector2(2.0 * ratio, 2.0)
-				node.mesh = quad
-			else:
-				var mesh := BoxMesh.new()
-				mesh.size = Vector3(1.5, 1.5, 1.5)
-				node.mesh = mesh
-			var mat := StandardMaterial3D.new()
-			mat.roughness = 0.45
-			if image_panel:
-				mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-				mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-				mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			node.material_override = mat
-			var body := StaticBody3D.new()
-			body.set_meta("object_id", id)
-			var collision := CollisionShape3D.new()
-			collision.name = "Collider"
-			var shape := BoxShape3D.new()
-			shape.size = Vector3.ONE
-			collision.shape = shape
-			body.add_child(collision)
-			node.add_child(body)
-			body.name = "PickBody"
-			add_child(node)
-			render_nodes[id] = node
+			render_nodes[id] = world_panels.create_surface(id) if object.get("panel") != null else create_render_node(object)
 		var node: MeshInstance3D = render_nodes[id]
 		var collision: CollisionShape3D = node.get_node("PickBody/Collider")
 		collision.disabled = object.get("collider") == null
@@ -1178,6 +1172,39 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 	revision_label.text = "World revision " + snapshot.world_revision + " · ObjectRoot"
 	update_selected()
 	rebuild_tree()
+	world_panels.sync()
+
+func create_render_node(object: Dictionary) -> MeshInstance3D:
+	var node := MeshInstance3D.new()
+	var image_panel: bool = object.get("visual", {}).get("kind", "cube") in ["image","video"]
+	if image_panel:
+		var quad := QuadMesh.new()
+		var ratio: float = float(object.visual.width) / float(object.visual.height)
+		quad.size = Vector2(2.0, 2.0 / ratio) if ratio >= 1 else Vector2(2.0 * ratio, 2.0)
+		node.mesh = quad
+	else:
+		var mesh := BoxMesh.new()
+		mesh.size = Vector3(1.5, 1.5, 1.5)
+		node.mesh = mesh
+	var mat := StandardMaterial3D.new()
+	mat.roughness = 0.45
+	if image_panel:
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	node.material_override = mat
+	var body := StaticBody3D.new()
+	body.set_meta("object_id", object.address.instance_id)
+	var collision := CollisionShape3D.new()
+	collision.name = "Collider"
+	var shape := BoxShape3D.new()
+	shape.size = Vector3.ONE
+	collision.shape = shape
+	body.add_child(collision)
+	node.add_child(body)
+	body.name = "PickBody"
+	add_child(node)
+	return node
 
 func select_object(id: String) -> void:
 	if pending: return
@@ -1256,6 +1283,7 @@ func set_view_mode(mode: int) -> void:
 	view_mode.release_focus()
 
 func gameplay_keyboard_blocked() -> bool:
+	if world_panels.text_focused(): return true
 	var focus := get_viewport().gui_get_focus_owner()
 	if focus is LineEdit or focus is TextEdit: return true
 	for window in get_tree().root.find_children("*", "Window", true, false):
@@ -1290,6 +1318,13 @@ func refresh_fields() -> void:
 	filling = false
 
 func _input(event: InputEvent) -> void:
+	if world_panels.route_input(event):
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.physical_keycode == KEY_I and not gameplay_keyboard_blocked():
+		world_panels.open_inspector(selected_id)
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and (event.keycode == KEY_SPACE or event.physical_keycode == KEY_SPACE) and not gameplay_keyboard_blocked():
 		if event.pressed and not event.echo: try_jump()
 		get_viewport().set_input_as_handled()

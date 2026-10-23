@@ -93,12 +93,33 @@ pub(crate) fn validate_object(object: &ObjectView) -> Result<(), String> {
         expected.fields.clear();
         append_fields(&mut expected, &Revisions::default());
         for field in expected.fields {
-            if object
+            let actual = object
                 .fields
                 .iter()
                 .find(|f| f.id == field.id)
-                .is_none_or(|f| f.value != field.value || f.value_type != field.value_type)
-            {
+                .ok_or("Missing panel field")?;
+            let panel = object.panel.as_ref().unwrap();
+            let inspector = object.inspector.as_ref().unwrap();
+            let matches = match field.id.as_str() {
+                "panel_size" => {
+                    serde_json::from_value::<[u32; 2]>(actual.value.clone()).ok()
+                        == Some(panel.size)
+                }
+                "panel_pin" => {
+                    serde_json::from_value::<Option<PanelAttachment>>(actual.value.clone()).ok()
+                        == Some(panel.attachment.clone())
+                }
+                "panel_scroll" => {
+                    serde_json::from_value::<[f64; 2]>(actual.value.clone()).ok()
+                        == Some(inspector.scroll)
+                }
+                "inspector_target" => {
+                    serde_json::from_value::<Option<Address>>(actual.value.clone()).ok()
+                        == Some(inspector.target.clone())
+                }
+                _ => false,
+            };
+            if !matches || actual.value_type != field.value_type {
                 return Err("Panel component does not match its fields".into());
             }
         }
@@ -318,6 +339,17 @@ mod tests {
         let mut restored = WorldModel::new();
         restored.restore(snapshot.clone()).unwrap();
         assert_eq!(restored.snapshot(), snapshot);
+        let mut wire = snapshot.clone();
+        for object in &mut wire.objects {
+            if let Some(field) = object
+                .fields
+                .iter_mut()
+                .find(|f| f.id == "panel_scroll" && f.value == json!([0.0, 0.0]))
+            {
+                field.value = json!([0, 0]);
+            }
+        }
+        restored.restore(wire).unwrap();
         let revision = snapshot
             .objects
             .iter()

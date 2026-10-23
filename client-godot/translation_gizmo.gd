@@ -17,6 +17,8 @@ var plane_normal := Vector3.ZERO
 var start_offset := 0.0
 var unit_scale := 1.0
 var materials: Array[StandardMaterial3D] = []
+var shared_display := false
+var shared_active := false
 
 func _ready() -> void:
 	visible = false
@@ -80,7 +82,11 @@ func _process(_delta: float) -> void:
 		scale = Vector3.ONE * unit_scale
 		hovered_axis = pick_axis(get_viewport().get_mouse_position()) if enabled and get_viewport().gui_get_hovered_control() == null else -1
 	for i in range(3):
-		materials[i].albedo_color = Color("ffe69a") if i == active_axis or i == hovered_axis else COLORS[i]
+		materials[i].albedo_color = Color("ffe69a") if shared_active or i == active_axis or i == hovered_axis else COLORS[i]
+		if shared_display: materials[i].no_depth_test = false
+	if shared_display:
+		for child in get_children():
+			if child is Label3D: child.no_depth_test = false
 
 func pick_axis(screen: Vector2) -> int:
 	if not visible or not enabled or camera == null or camera.is_position_behind(global_position): return -1
