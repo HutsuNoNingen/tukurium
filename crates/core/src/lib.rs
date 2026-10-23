@@ -776,7 +776,7 @@ pub(crate) fn initialize_playback(object: &mut ObjectView, now: f64) {
     );
 }
 
-fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
+pub(crate) fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
     scripting::validate_world_scripts(snapshot.objects.iter().map(|o| o.scripts.as_slice()))?;
     let revision = snapshot
         .world_revision

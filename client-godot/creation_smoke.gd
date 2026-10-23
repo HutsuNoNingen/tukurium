@@ -142,6 +142,18 @@ func run() -> void:
 	if not await until(func(): return not scene.objects.has(id) and scene.current.get("visual",{}).get("kind")=="none","Empty Slot was not created"): quit(1); return
 	if scene.current.get("renderer")!=null or scene.render_nodes[scene.selected_id].mesh!=null or scene.current.get("collider")!=null:
 		push_error("Empty Slot unexpectedly has a renderer or collider"); quit(1); return
+	var slot_id: String=scene.selected_id
+	scene.hud.open_creation()
+	if not await until(func(): return scene.world_panels.panels.size()==1,"Creation panel did not reopen for Component"): quit(1); return
+	surface=scene.world_panels.panels.values()[0]
+	panel=surface.content
+	await click_control(scene,surface,panel.add_renderer_button)
+	if not await until(func(): return scene.objects[slot_id].visual.kind=="primitive" and scene.render_nodes[slot_id].mesh!=null,"Renderer Component did not attach"):
+		push_error("Palette status="+panel.status.text+" selected="+scene.selected_id+" disabled="+str(panel.add_renderer_button.disabled)); quit(1); return
+	await click_control(scene,surface,panel.remove_renderer_button)
+	if not await until(func(): return scene.objects[slot_id].visual.kind=="none" and scene.render_nodes[slot_id].mesh==null,"Renderer Component did not detach"): quit(1); return
+	scene.world_panels.close_panel(surface.panel_id)
+	if not await until(func(): return scene.world_panels.panels.is_empty(),"Component palette did not close"): quit(1); return
 	scene.hud.open_creation()
 	if not await until(func(): return scene.world_panels.panels.size()==1,"Creation panel did not reopen for Esc"): quit(1); return
 	id=scene.world_panels.panels.keys()[0]

@@ -11,6 +11,26 @@ fn image_size(visual: &kokoverse_protocol::Visual) -> usize {
     }
 }
 
+fn prepare_component_change(
+    snapshot: &kokoverse_protocol::Snapshot,
+    target: &Address,
+    type_id: &str,
+    expected_revision: &str,
+    values: Option<&serde_json::Value>,
+) -> Result<Mutation, String> {
+    let mut candidate = snapshot.clone();
+    let object = candidate.objects.iter_mut().find(|o| &o.address == target).ok_or("Target no longer exists")?;
+    if object.object_revision != expected_revision { return Err("Object changed before this operation. Review it and retry.".into()); }
+    let revision = object.object_revision.parse::<u64>().map_err(|_| "Invalid object revision")?;
+    object.object_revision = revision.checked_add(1).ok_or("Object revision exhausted")?.to_string();
+    crate::replication::REGISTRY.change_component(object, type_id, values)?;
+    let changed = object.clone();
+    let world_revision = candidate.world_revision.parse::<u64>().map_err(|_| "Invalid world revision")?;
+    candidate.world_revision = world_revision.checked_add(1).ok_or("World revision exhausted")?.to_string();
+    crate::validate_snapshot(&candidate)?;
+    Ok(Mutation::Replace(Box::new(changed)))
+}
+
 type SlotData<'a> = (&'a Slot, &'a LocalTransform, &'a Revisions, &'a ObjectRoot);
 type ValidationState<'a> = (
     Res<'a, EntityIndex>,
@@ -61,6 +81,9 @@ pub(crate) fn validate_commands(
                         return Ok(Mutation::ScriptInteract{entity});
                     }
                     let value=crate::scripting::prepare_edit(current,command.action,clock.0)?;
+                    if snapshot.0.objects.iter().find(|o| o.address == command.target).is_some_and(|o| o.renderer.is_none()) && !value.is_empty() {
+                        return Err("Attach a renderer before adding scripts to this Slot".into());
+                    }
                     for script in &value {
                         for field in script.schema.fields.iter().filter(|f|f.value_type=="field_ref") {
                             let reference=&script.parameters[&field.id];
@@ -139,6 +162,10 @@ pub(crate) fn validate_commands(
                 WorldCommand::Structure { command } => {
                     let deleting = matches!(&command.operation, StructuralOperation::Delete { .. });
                     match command.operation {
+                        StructuralOperation::AddComponent { target, type_id, expected_revision, values } =>
+                            prepare_component_change(&snapshot.0, &target, &type_id, &expected_revision, Some(&values)),
+                        StructuralOperation::RemoveComponent { target, type_id, expected_revision } =>
+                            prepare_component_change(&snapshot.0, &target, &type_id, &expected_revision, None),
                         StructuralOperation::CreateSlot { parent } => {
                             if slots.iter().count() >= MAX_OBJECTS { return Err("Object limit reached (128)".into()); }
                             let mut object = new_object("Slot".into(), [0.0, 0.0, 0.0], [1.0; 4]);
@@ -358,6 +385,12 @@ pub(crate) fn apply_commands(world: &mut World) {
                     let selected=objects.first().map(|o|o.address.clone());
                     for object in objects { insert_object(world,object); }
                     selected
+                }
+                Mutation::Replace(object) => {
+                    let selected = object.address.clone();
+                    remove_object(world, &selected);
+                    insert_object(world, *object);
+                    Some(selected)
                 }
                 Mutation::Delete(address) => {
                     let descendants = crate::hierarchy::subtree(&world.resource::<SnapshotCache>().0, &address);

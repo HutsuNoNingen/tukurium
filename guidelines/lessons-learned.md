@@ -189,3 +189,10 @@ FPSで3Dパネルを右クリック保持したままミドルクリックする
 
 - 再現・確認：共有作成パネルから空のSlotを作り、選択、2クライアント同期、途中参加を [creation-integration.mjs](../tests/creation-integration.mjs) の `--rendered` で確認する。
 - コード：[main.gd](../client-godot/main.gd)、[systems.rs](../crates/core/src/systems.rs)。確認日：2026-10-24。
+
+## Godotから構造コマンドへ渡すAddressは整数化する
+
+作成パネルから `AddComponent` を送ったとき、スナップショット内の `address.local_id` をそのまま再送するとGodotが `1.0` としてJSON化し、Rustの整数フィールドへ復元できず `Invalid edit payload` になった。既存の `app.address_of()` で `local_id` を整数化してから要求Brokerへ渡す。
+
+- 再現・確認：空のSlotを選択し、共有作成パネルから表示部品を追加・削除する。[creation-integration.mjs](../tests/creation-integration.mjs) の `--rendered` で実入力、ホストの変更、途中参加を確認する。
+- コード：[creation_panel.gd](../client-godot/creation_panel.gd)。確認日：2026-10-24。

@@ -32,6 +32,8 @@ try {
   await until(()=>shapes.every(shape=>host.client.latest().snapshot.objects.some(o=>o.visual.kind==='primitive'&&o.visual.shape===shape)),'Primitives did not reach host');
   await until(()=>host.client.latest().snapshot.objects.some(o=>o.visual.kind==='none'&&o.renderer===undefined&&o.collider===null),'Empty Slot did not reach host');
   const observed=host.client.messages.filter(m=>m.kind==='snapshot').flatMap(m=>m.snapshot.objects);
+  const slot=host.client.latest().snapshot.objects.find(o=>o.visual.kind==='none'&&o.renderer===undefined);
+  assert.ok(observed.some(o=>o.address.instance_id===slot.address.instance_id&&o.visual.kind==='primitive'&&o.renderer),'Renderer attachment did not reach host');
   const manipulated=observed.find(o=>o.creation && o.world_scale[0]>1.05 && Math.abs(o.world_rotation[1])>0.01);
   assert.ok(manipulated?.panel && manipulated.collider && !manipulated.inspector,'Grabbed creation surface did not reach host');
   assert.ok(shapes.every(shape=>observed.some(o=>o.creation?.shape===shape)),'Selection did not reach host');

@@ -1208,11 +1208,15 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 		if not valid_target:
 			gizmo.cancel_drag()
 			feedback.text = "Object changed elsewhere. Move cancelled."
+	var previous_objects: Dictionary=objects.duplicate()
 	objects.clear()
 	var used_images := {}
 	for object in snapshot.objects:
 		var id: String = object.address.instance_id
 		objects[id] = object
+		if render_nodes.has(id) and previous_objects.has(id) and previous_objects[id].get("visual") != object.get("visual"):
+			render_nodes[id].queue_free()
+			render_nodes.erase(id)
 		if not render_nodes.has(id):
 			render_nodes[id] = world_panels.create_surface(id) if object.get("panel") != null else create_render_node(object)
 		var node: MeshInstance3D = render_nodes[id]

@@ -61,6 +61,48 @@ fn empty_slots_replicate_duplicate_and_restore_without_mesh_renderers() {
 }
 
 #[test]
+fn renderer_component_attaches_and_detaches_with_revision_and_schema_checks() {
+    let mut host = WorldModel::new();
+    let mut guest = WorldModel::new();
+    guest.restore(host.snapshot()).unwrap();
+    let created = run(&mut host, structure(StructuralOperation::CreateSlot { parent: None }));
+    let id = created.selected.unwrap();
+    guest.apply_commit(created.result.unwrap()).unwrap();
+    let initial = host.snapshot().objects.into_iter().find(|o| o.address == id).unwrap();
+    let add = StructuralOperation::AddComponent {
+        target: id.clone(), type_id: "MeshRenderer".into(), expected_revision: initial.object_revision.clone(),
+        values: json!({"color":[0.2,0.4,0.7,1.0],"visual":{"kind":"primitive","shape":"sphere"}}),
+    };
+    let bad = StructuralOperation::AddComponent {
+        target: id.clone(), type_id: "MeshRenderer".into(), expected_revision: initial.object_revision.clone(),
+        values: json!({"color":[0.2,0.4,0.7,1.0],"visual":{"kind":"none"}}),
+    };
+    let before = host.snapshot();
+    assert!(run(&mut host, structure(bad)).result.is_err());
+    assert_eq!(host.snapshot(), before);
+    let added = run(&mut host, structure(add));
+    guest.apply_commit(added.result.unwrap()).unwrap();
+    assert_eq!(guest.snapshot(), host.snapshot());
+    let rendered = host.snapshot().objects.into_iter().find(|o| o.address == id).unwrap();
+    assert!(rendered.renderer.is_some());
+    assert!(rendered.fields.iter().any(|f| f.id == "color"));
+    let stale = StructuralOperation::RemoveComponent { target: id.clone(), type_id: "MeshRenderer".into(), expected_revision: initial.object_revision };
+    assert!(run(&mut host, structure(stale)).result.is_err());
+    let removed = run(&mut host, structure(StructuralOperation::RemoveComponent {
+        target: id.clone(), type_id: "MeshRenderer".into(), expected_revision: rendered.object_revision,
+    }));
+    guest.apply_commit(removed.result.unwrap()).unwrap();
+    assert_eq!(guest.snapshot(), host.snapshot());
+    let empty = host.snapshot().objects.into_iter().find(|o| o.address == id).unwrap();
+    assert!(empty.renderer.is_none());
+    assert_eq!(empty.visual, kokoverse_protocol::Visual::None);
+    assert!(empty.fields.iter().all(|f| f.id != "color"));
+    let mut restored = WorldModel::new();
+    restored.restore(host.snapshot()).unwrap();
+    assert_eq!(restored.snapshot(), host.snapshot());
+}
+
+#[test]
 fn primitives_replicate_and_restore_without_mesh_assets() {
     use kokoverse_protocol::{PrimitiveShape, Visual};
     let mut host = WorldModel::new();

@@ -8,6 +8,8 @@ var cards: Array[Button] = []
 var selected := 0
 var create_button: Button
 var slot_button: Button
+var add_renderer_button: Button
+var remove_renderer_button: Button
 var status: Label
 var busy := false
 
@@ -56,6 +58,18 @@ func build_ui() -> void:
 	body.add_child(categories)
 	categories.add_child(label("3Dモデル",23))
 	categories.add_child(label("Procedural",15))
+	categories.add_child(HSeparator.new())
+	categories.add_child(label("選択中のSlot",17))
+	add_renderer_button=Button.new()
+	add_renderer_button.text="表示部品を追加"
+	add_renderer_button.focus_mode=Control.FOCUS_NONE
+	add_renderer_button.pressed.connect(change_renderer.bind(true))
+	categories.add_child(add_renderer_button)
+	remove_renderer_button=Button.new()
+	remove_renderer_button.text="表示部品を外す"
+	remove_renderer_button.focus_mode=Control.FOCUS_NONE
+	remove_renderer_button.pressed.connect(change_renderer.bind(false))
+	categories.add_child(remove_renderer_button)
 	var grid := GridContainer.new()
 	grid.columns=4
 	grid.size_flags_horizontal=Control.SIZE_EXPAND_FILL
@@ -156,11 +170,31 @@ func refresh(object: Dictionary) -> void:
 	var index: int=PRIMITIVES.SHAPES.find(object.creation.shape)
 	if index>=0: show_selection(index)
 	for card in cards: card.disabled=not app.editable
+	var target: Dictionary=app.objects.get(app.selected_id,{})
+	var selectable: bool=not target.is_empty() and target.get("panel")==null
+	add_renderer_button.disabled=busy or not app.editable or not selectable or target.get("renderer")!=null
+	remove_renderer_button.disabled=busy or not app.editable or not selectable or target.get("renderer")==null or target.get("playback")!=null
 	slot_button.disabled=busy or not app.editable
 	create_button.disabled=busy or not app.editable
 
 func finish_all() -> void:
 	pass
+
+func change_renderer(add: bool) -> void:
+	if busy or not app.editable or not app.objects.has(app.selected_id): return
+	var target: Dictionary=app.objects[app.selected_id]
+	if target.get("panel")!=null: return
+	if add and target.get("renderer")!=null: return
+	if not add and (target.get("renderer")==null or target.get("playback")!=null): return
+	busy=true
+	add_renderer_button.disabled=true
+	remove_renderer_button.disabled=true
+	var command: Dictionary={"kind":"structure","command":{"action":"add_component" if add else "remove_component","target":app.address_of(target),"type_id":"MeshRenderer","expected_revision":target.object_revision}}
+	if add: command["command"]["values"]={"color":[0.2,0.65,0.8,1.0],"visual":{"kind":"primitive","shape":PRIMITIVES.SHAPES[selected]}}
+	manager.command(command,func(result):
+		busy=false
+		if not result.ok: status.text=result.get("message","部品を変更できませんでした")
+		elif app.objects.has(panel_id): refresh(app.objects[panel_id]))
 
 func spawn_slot() -> void:
 	if busy or not app.editable: return

@@ -26,6 +26,21 @@ pub struct ComponentRegistration {
 }
 pub struct Registry {
     pub components: Vec<ComponentRegistration>,
+    pub attachments: Vec<AttachmentRegistration>,
+}
+
+pub struct AttachmentRegistration {
+    pub type_id: &'static str,
+    pub remove: fn(&mut ObjectView) -> Result<(), String>,
+}
+
+fn remove_mesh(object: &mut ObjectView) -> Result<(), String> {
+    if object.panel.is_some() || object.playback.is_some() || !object.scripts.is_empty() {
+        return Err("Remove dependent panel, playback, or scripts first".into());
+    }
+    object.renderer = None;
+    object.visual = Visual::None;
+    Ok(())
 }
 
 fn field(
@@ -162,6 +177,7 @@ fn no_edit(_: &mut World, _: Entity, _: &str, _: Value) {
 }
 
 pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
+    attachments: vec![AttachmentRegistration { type_id: "MeshRenderer", remove: remove_mesh }],
     components: vec![
         ComponentRegistration {
             type_id: "ItemIdentity",
@@ -388,6 +404,39 @@ pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
 });
 
 impl Registry {
+    pub fn change_component(&self, object: &mut ObjectView, type_id: &str, add: Option<&Value>) -> Result<(), String> {
+        let attachment = self.attachments.iter().find(|a| a.type_id == type_id).ok_or("Component type cannot be attached here")?;
+        let component = self.components.iter().find(|c| c.type_id == type_id).ok_or("Unregistered component type")?;
+        if let Some(values) = add {
+            if (component.present)(object) { return Err("Component is already attached".into()); }
+            let map = values.as_object().ok_or("Component values must be an object")?;
+            if map.len() != component.fields.len() { return Err("Component fields do not match the registered schema".into()); }
+            for field in &component.fields {
+                let value = map.get(&field.schema.id).ok_or("Missing component field")?;
+                (field.validate)(value)?;
+            }
+            if type_id == "MeshRenderer" && !matches!(parse::<Visual>(&values["visual"])?, Visual::Cube | Visual::Primitive { .. }) {
+                return Err("Only primitive renderers can be attached to an empty Slot".into());
+            }
+            (component.restore)(object, values)?;
+            for field in component.fields.iter().filter(|f| f.ui_order.is_some()) {
+                object.fields.push(Field {
+                    component_id: component.local_id,
+                    id: field.schema.id.clone(),
+                    label: field.schema.label.clone(),
+                    value_type: field.schema.value_type.clone(),
+                    revision: object.object_revision.clone(),
+                    value: values[&field.schema.id].clone(),
+                });
+            }
+            object.fields.sort_by_key(|f| self.field_by_id(&f.id).unwrap().1.ui_order.unwrap());
+        } else {
+            if !(component.present)(object) { return Err("Component is not attached".into()); }
+            (attachment.remove)(object)?;
+            object.fields.retain(|f| f.component_id != component.local_id);
+        }
+        Ok(())
+    }
     pub fn schemas(&self) -> Vec<ComponentSchema> {
         self.components
             .iter()

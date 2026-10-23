@@ -41,6 +41,7 @@ pub(crate) enum Mutation {
     ScriptFrame(Vec<crate::scripting::FramePatch>),
     Insert(Box<ObjectView>),
     InsertMany(Vec<ObjectView>),
+    Replace(Box<ObjectView>),
     Reparent { entity: Entity, parent: Option<Address>, local: LocalTransform },
     Delete(Address),
 }
