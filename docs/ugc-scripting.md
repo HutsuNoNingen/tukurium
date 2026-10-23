@@ -40,10 +40,14 @@ SystemはComponentをqueryし、位置・回転・スケール・色と自身の
 ## 作り方
 
 1. 物体を選択し、Inspectorの **Script Systems…** を開く。
-2. **Rotator** または **ClickColor** を選び、**+ Add component** で追加する。
+2. **Add another script** の **Rotator** / **ClickColor** を選び、**+ Add template** で追加する。自作する場合は **+ Blank script** を押して、生成されたコードを編集・貼り替える。
 3. コードを書き換え、**Apply / restart** で共有ワールドへ反映する。構文エラー時は前のコードを保持する。
 4. コードの `fields` から作られた数値・bool・文字列・vec3・色の欄を変更する。値は約180msで自動同期する。コード自体を変更するとフィールド値は新しいdefaultへ戻る。
 5. **Run on host** で停止・再開する。クリック用Systemは物体の左クリックまたは **Test click** で動かせる。
+
+**Attached scripts** はその物体に付いているスクリプトの一覧で、選択した1つのコードとパラメータを下に表示する。一覧を切り替えても、他のenabledなスクリプトは動き続ける。各項目にはenabled / pausedを表示する。**Add another script** は新しく追加するための欄で、作成済みスクリプトのライブラリではない。
+
+1つの物体に最大4つ付けられる。同じ物体内ではコードの `name` を別々にする。Blank scriptはScript1、Script2…と未使用の名前で作成する。4つに達した場合と、同名テンプレートがすでに付いている場合は追加ボタンを無効にし、理由を表示する。削除は **Remove selected** で、確認後に選択したスクリプトを取り外す。
 
 コード・パラメータの版を、実行中の姿勢や状態の更新から分ける。Systemが物体を動かしていてもパラメータ編集のrevisionは変化しない。別ユーザーのコード編集と競合した場合は拒否し、**Reload shared code** で読み直す。自分のドラフトは勝手に上書きしない。
 

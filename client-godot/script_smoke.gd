@@ -57,6 +57,26 @@ func run() -> void:
 	if not await check_until(func(): return editor.pending_id.is_empty(), "Invalid code response missing"): quit(1); return
 	if scene.objects[id].scripts[1].source != valid_source: push_error("Invalid code replaced working script"); quit(1); return
 	editor.reload_button.pressed.emit()
+	# Own scripts can be added alongside the two templates, then independently selected.
+	for count in [3,4]:
+		editor.new_button.pressed.emit()
+		if not await check_until(func(): return scene.objects[id].scripts.size() == count and editor.pending_id.is_empty(), "Blank script was not attached"): quit(1); return
+	if editor.current_script().schema.name != "Script2" or editor.component_count.text.find("4 / 4") < 0:
+		push_error("Attached script count or unique blank names are wrong"); quit(1); return
+	if not editor.new_button.disabled or not editor.attach_button.disabled:
+		push_error("Script limit is not shown by add controls"); quit(1); return
+	editor.scripts.item_selected.emit(0)
+	if editor.current_script().schema.name != "Rotator" or editor.code.text.find('name = "Rotator"') < 0:
+		push_error("Selecting an attached script did not change the editor"); quit(1); return
+	for index in [3,2]:
+		editor.scripts.item_selected.emit(index)
+		editor.remove_button.pressed.emit()
+		if not editor.remove_dialog.visible: push_error("Removal has no confirmation"); quit(1); return
+		editor.remove_dialog.hide()
+		editor.remove_dialog.confirmed.emit()
+		if not await check_until(func(): return scene.objects[id].scripts.size() == index and editor.pending_id.is_empty(), "Removing a selected blank script failed"): quit(1); return
+	if editor.new_button.disabled: push_error("Adding remains disabled below the limit"); quit(1); return
+	editor.scripts.item_selected.emit(1)
 	var screenshot := ""
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--screenshot="): screenshot = arg.trim_prefix("--screenshot=")

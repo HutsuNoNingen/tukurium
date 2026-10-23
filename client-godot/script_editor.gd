@@ -3,6 +3,8 @@ extends RefCounted
 var app
 var window: Window
 var object_title: Label
+var component_count: Label
+var add_hint: Label
 var scripts: OptionButton
 var templates: OptionButton
 var code: CodeEdit
@@ -12,6 +14,8 @@ var feedback: Label
 var apply_button: Button
 var reload_button: Button
 var attach_button: Button
+var new_button: Button
+var remove_dialog: ConfirmationDialog
 var remove_button: Button
 var click_button: Button
 var parameter_controls: Dictionary = {}
@@ -46,9 +50,12 @@ func setup(owner) -> void:
 	object_title = Label.new()
 	object_title.add_theme_font_size_override("font_size", 20)
 	stack.add_child(object_title)
+	component_count = Label.new()
+	stack.add_child(component_count)
 	var row := HBoxContainer.new()
 	stack.add_child(row)
 	scripts = OptionButton.new()
+	scripts.tooltip_text = "Select an attached script to edit. All enabled scripts keep running."
 	scripts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scripts.item_selected.connect(func(index):
 		if source_dirty:
@@ -66,25 +73,46 @@ func setup(owner) -> void:
 		if not filling: update_component(false, value))
 	row.add_child(enabled)
 	remove_button = Button.new()
-	remove_button.text = "Remove"
-	remove_button.pressed.connect(remove_component)
+	remove_button.text = "Remove selected"
+	remove_button.pressed.connect(func():
+		var component := current_script()
+		if component.is_empty(): return
+		remove_dialog.dialog_text = "Remove %s from this object? Its code, parameters and saved state will be removed." % component.schema.name
+		remove_dialog.popup_centered())
 	row.add_child(remove_button)
+	remove_dialog = ConfirmationDialog.new()
+	remove_dialog.title = "Remove script"
+	remove_dialog.ok_button_text = "Remove script"
+	remove_dialog.confirmed.connect(remove_component)
+	window.add_child(remove_dialog)
+	var add_heading := Label.new()
+	add_heading.text = "Add another script"
+	stack.add_child(add_heading)
 	var create_row := HBoxContainer.new()
 	stack.add_child(create_row)
 	templates = OptionButton.new()
+	templates.tooltip_text = "Choose starter code for a new script. This does not select an attached script."
+	templates.item_selected.connect(func(_index): refresh_buttons())
 	templates.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	create_row.add_child(templates)
 	attach_button = Button.new()
-	attach_button.text = "+ Add component"
+	attach_button.text = "+ Add template"
 	attach_button.pressed.connect(func(): add_template(templates.selected))
 	create_row.add_child(attach_button)
-	var description := Label.new()
-	description.text = "Edit Luau here. Public fields appear below. Changes run on the host and sync to everyone."
-	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	stack.add_child(description)
+	new_button = Button.new()
+	new_button.text = "+ Blank script"
+	new_button.tooltip_text = "Add your own script with a unique name, then paste or write its code."
+	new_button.pressed.connect(add_blank)
+	create_row.add_child(new_button)
+	add_hint = Label.new()
+	add_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	stack.add_child(add_hint)
+	var code_heading := Label.new()
+	code_heading.text = "Selected script · source code (Apply to save)"
+	stack.add_child(code_heading)
 	code = CodeEdit.new()
 	code.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	code.custom_minimum_size.y = 250
+	code.custom_minimum_size.y = 160
 	code.gutters_draw_line_numbers = true
 	code.indent_size = 4
 	var highlighter := CodeHighlighter.new()
@@ -104,8 +132,11 @@ func setup(owner) -> void:
 			feedback.text = "Draft · Apply / restart to run this code. Fields reset to their defaults when code changes."
 			refresh_buttons())
 	stack.add_child(code)
+	var parameters_heading := Label.new()
+	parameters_heading.text = "Public parameters · changes save automatically"
+	stack.add_child(parameters_heading)
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size.y = 120
+	scroll.custom_minimum_size.y = 80
 	stack.add_child(scroll)
 	parameters = VBoxContainer.new()
 	parameters.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -164,6 +195,13 @@ func add_template(index: int) -> void:
 	if index < 0 or index >= app.script_templates.size(): return
 	send_action({"action":"attach", "source":app.script_templates[index].source})
 
+func add_blank() -> void:
+	var names: Array = app.objects.get(target,{}).get("scripts",[]).map(func(c): return c.schema.name)
+	var number := 1
+	while names.has("Script%d" % number): number += 1
+	var source := "return {\n    name = \"Script%d\",\n    fields = {},\n    update = function(ctx, dt)\n        -- Write your behavior here. ctx.self is this object.\n    end\n}\n" % number
+	send_action({"action":"attach", "source":source})
+
 func remove_component() -> void:
 	var component := current_script()
 	if component.is_empty(): return
@@ -221,16 +259,18 @@ func refresh() -> void:
 	object_title.text = "No object selected"
 	if not object.is_empty():
 		for field in object.fields:
-			if field.id == "name": object_title.text = str(field.value)
+			if field.id == "name": object_title.text = "Object: " + str(field.value)
 	var components: Array = object.get("scripts", [])
+	component_count.text = "Attached scripts · %d / 4 — select one to edit below" % components.size()
 	var signature := ""
-	for component in components: signature += component.id + component.schema.name
+	for component in components: signature += component.id + component.schema.name + str(component.enabled)
 	filling = true
 	if signature != list_signature:
 		list_signature = signature
 		scripts.clear()
+		if components.is_empty(): scripts.add_item("No scripts attached yet")
 		for component in components:
-			scripts.add_item(component.schema.name)
+			scripts.add_item(component.schema.name + (" · enabled" if component.enabled else " · paused"))
 			scripts.set_item_metadata(scripts.item_count - 1, component.id)
 		if not components.any(func(c): return c.id == selected):
 			selected = str(components.back().id) if not components.is_empty() else ""
@@ -325,7 +365,19 @@ func build_parameters(component: Dictionary) -> void:
 func refresh_buttons() -> void:
 	var ready: bool = app.editable and pending_id.is_empty() and app.objects.has(target)
 	var component := current_script()
-	attach_button.disabled = not ready or source_dirty
+	var components: Array = app.objects.get(target,{}).get("scripts",[])
+	var full := components.size() >= 4
+	var duplicate := false
+	if templates.selected >= 0 and templates.selected < app.script_templates.size():
+		duplicate = components.any(func(c): return c.schema.name == app.script_templates[templates.selected].name)
+	attach_button.disabled = not ready or source_dirty or full or duplicate
+	attach_button.tooltip_text = "Limit reached: 4 scripts per object." if full else ("This template is already attached. Select it above to edit, or add a Blank script." if duplicate else "Attach the chosen template as a new script on this object.")
+	add_hint.text = "Up to 4 scripts per object, each with a different name. Use Blank script to write your own."
+	if duplicate: add_hint.text = "This template is already attached. Select it above, choose another template, or add a Blank script."
+	if full: add_hint.text = "4 / 4 scripts attached. Remove a script before adding another."
+	if source_dirty: add_hint.text = "Apply or Reload this code draft before adding another script."
+	new_button.disabled = not ready or source_dirty or full
+	scripts.disabled = not ready or components.is_empty()
 	apply_button.disabled = not ready or component.is_empty()
 	remove_button.disabled = not ready or component.is_empty() or source_dirty
 	enabled.disabled = not ready or component.is_empty() or source_dirty
