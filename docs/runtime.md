@@ -32,7 +32,7 @@ Flux、階層Transformはまだない。キャラクターには移動・ジャ�
 - Slot Entity：`Identity`、`ObjectRoot`、`Slot`、`LocalTransform`、`GlobalTransform`、`Revisions`。
 - 部品Entity：`Identity`、`MeshRenderer`。所属Slotの安定アドレスと色を持つ。
 
-安定アドレスは `(instance_id, local_id)`。Slotはlocal_id=1、描画部品は2。ECSのEntity番号を送信しない。複製では新しいinstance_idを作り、元の箱の値をコピーする。元と複製のrevisionは共有しない。箱は最大128個で、最後の1個を削除して空のワールドにもできる。
+安定アドレスは `(instance_id, local_id)`。Slotはlocal_id=1、描画部品は2。同期上のComponentアドレスはTransform=3、Collider=4、MediaPlayback=5、WorldPanel=6、InspectorView=7、ScriptComponents=8。これらのComponentは引き続き型付きのECSデータとして保持する。ECSのEntity番号を送信しない。複製では新しいinstance_idを作り、元の箱の値をコピーする。元と複製のrevisionは共有しない。箱は最大128個で、最後の1個を削除して空のワールドにもできる。
 
 通常の編集はフィールドrevision、複製と削除はObjectRoot全体のrevisionを確認する。名前は1〜80文字、位置は各軸±1000の有限数、色はRGBA各0〜1。同じフィールドの同時変更は先着が成功し、古い要求には現在値と理由を返す。
 
@@ -40,9 +40,13 @@ Flux、階層Transformはまだない。キャラクターには移動・ジャ�
 
 ## ワールド同期
 
-ローカルIPCは4バイトのbig-endian長さ＋UTF-8 JSON。1フレームの上限は1 MiB。現在のprotocol_versionは2で、旧版1とは接続しない。revisionとsequenceは10進文字列。
+ローカルIPCは4バイトのbig-endian長さ＋UTF-8 JSON。1フレームの上限は1 MiB。現在のprotocol_versionは3。旧プロトコルおよび旧ObjectView形式の保存データには対応しない。revisionとsequenceは10進文字列。
 
-`WorldCommit` は `world_revision`、変更・生成した箱の `upserts`、削除したSlotアドレスの `removed` を含む。毎回ワールド全体を中継へ送らず、変更した箱だけを送る。ゲストは変更全体を検証してから適用し、変更のないEntityを維持する。revisionの欠落や不正な差分では編集を止めてスナップショットを取得し直す。
+内部の `WorldCommit` を、`crates/core/src/replication.rs` の登録表で `ReplicationCommit` へ変換する。通信は `component_commit`、初回状態は `component_snapshot`。各物体はComponentの安定アドレス・型名・スキーマ版と、フィールドID・revision・値を持つ。画像・モデル・動画・パネル・Scriptも同じ形式で運ぶ。保存も同じ登録表を使い、`format_version: 1` の `ReplicatedWorld` を書き込む。
+
+登録表には型検証、編集可否、型付きECSへの書き込み、表示データとの変換をまとめた。`Edit.target` はルートではなく対象Componentのアドレスで、例えば位置編集はlocal_id=3を指定する。新しいComponentを追加する際は登録とECSの抽出処理を追加し、通信のメッセージ分岐や保存形式の処理は増やさない。再生・Scriptのような操作は引き続き専用コマンドで検証する。
+
+変更した物体だけをupsertし、複数Componentの変更は同じworld_revisionでまとめて適用する。ゲストは変更全体を検証し、不明なComponent・スキーマ版・フィールド、不正な値・revisionを拒否する。変更のないEntityは維持する。revisionの欠落や不正な差分では編集を止め、スナップショットを取得し直す。現段階では物体内の全Componentを送る。Component・フィールド単位の差分と購読範囲の最適化は未実装。
 
 Godotへは現在の小さなワールドの表示用snapshotを送る。これは今後、対象を絞った購読・描画差分へ変更できる。各読み出しでQueryを走らせず、Systemが作ったキャッシュを使う。
 
@@ -59,6 +63,14 @@ KokoSyncのGo SDKは `5a171af078d3cf85cc3364c9358e1b993f4f9835` に固定する�
 アダプターの`--address`にWebSocket URLを渡すとこの経路を選ぶ。認証情報は`KOKOSYNC_USERNAME`と`KOKOSYNC_PASSWORD`から読み、コマンドラインやログへ出さない。接続先とルームはZIPの`connection.json`に置く。明示的に接続情報を同梱したビルドは`relay-access.json`から自動ログインし、未同梱なら前面の入力画面を使ってWindowsの暗号化付きXMLで保存する。動画ツールの初回取得はGodotを起動してから別プロセスで行う。
 
 SDKの配送受理だけで編集成功とはしない。ゲストはホストのresultと対応するworld_revisionの反映を待つ。アダプターは確実配送の待機中も姿勢を処理できるよう、確実配送と最新姿勢の送出を分ける。姿勢の送信待ちは最後の1件だけを保持する。
+
+## 要求と編集セッション
+
+Godotの `request_broker.gd` がcommand_id／request_idを発行し、応答先、タイムアウト、切断時の失敗処理を共通管理する。最大128件を保持し、応答種別とIDが一致した要求だけを完了する。要求は完了時に取り除くため、重複応答でコールバックを繰り返さない。再接続で変更要求を自動再送しない。時計同期も同じ仕組みを使う。
+
+`crates/core/src/edit_sessions.rs` は、UIの種類に依存しない期限付きのフィールド占有を管理する。キーはComponentのアドレスとフィールドID。`edit_session` で取得・更新・解放し、`edit_sessions` で所有者とドラフト、キャレット、選択範囲を共有する。保存には含めない。Engine側も通常の編集と同じ応答・保留要求の処理を使う。
+
+任意の編集UIは `context: null` で利用できる。共有インスペクタは、InspectorViewの `inspector_target` を参照元contextに指定する。その参照が変わるか参照元が消えれば占有を解放する。フィールド削除、所有者の切断、6秒間の未更新でも失効する。キーボード入力先、フォーカス、IMEは各Godot内の状態で、他人のキー入力として再実行しない。
 
 ## アバターと参加者
 

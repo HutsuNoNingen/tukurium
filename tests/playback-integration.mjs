@@ -28,7 +28,7 @@ async function connect(port) {
     if(!await new Promise(r=>{socket.once('connect',()=>r(true));socket.once('error',()=>r(false));})){socket.destroy();await delay(100);continue;}
     sockets.push(socket);let buffer=Buffer.alloc(0),epoch='';const messages=[];
     socket.on('data',data=>{buffer=Buffer.concat([buffer,data]);while(buffer.length>=4&&buffer.length>=4+buffer.readUInt32BE()){const len=buffer.readUInt32BE(),e=JSON.parse(buffer.subarray(4,len+4));buffer=buffer.subarray(len+4);epoch=e.authority_epoch;messages.push(e.body);}});
-    return {messages,send(body){const data=Buffer.from(JSON.stringify({protocol_version:2,session_id:session,authority_epoch:epoch,sequence:'1',body})),header=Buffer.alloc(4);header.writeUInt32BE(data.length);socket.write(Buffer.concat([header,data]));},wait(predicate){return until(()=>messages.find(predicate),'Message timeout: '+JSON.stringify(messages.slice(-1)));}};
+    return {messages,send(body){const data=Buffer.from(JSON.stringify({protocol_version:3,session_id:session,authority_epoch:epoch,sequence:'1',body})),header=Buffer.alloc(4);header.writeUInt32BE(data.length);socket.write(Buffer.concat([header,data]));},wait(predicate){return until(()=>messages.find(predicate),'Message timeout: '+JSON.stringify(messages.slice(-1)));}};
   }
   throw Error('Engine connection failed');
 }

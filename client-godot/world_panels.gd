@@ -5,8 +5,6 @@ var app
 var panels: Dictionary = {}
 var shared_gizmos: Dictionary = {}
 var sessions: Array = []
-var requests: Dictionary = {}
-var sequence := 0
 var client_id := ""
 var capture_id := ""
 var keyboard_id := ""
@@ -17,15 +15,8 @@ func setup(application) -> void:
 	client_id = "%s-%s" % [Time.get_ticks_usec(), randi()]
 
 func command(body: Dictionary, callback: Callable = Callable()) -> String:
-	sequence += 1
-	var id := "panel-%s-%s" % [client_id, sequence]
-	if body.kind == "edit": body.edit.command_id = id
-	elif body.kind == "structure": body.command.command_id = id
-	elif body.kind == "playback": body.command.command_id = id
-	elif body.kind == "panel_input": body.input.command_id = id
-	requests[id] = {"callback":callback,"time":Time.get_ticks_msec()}
-	app.queue_message(body)
-	return id
+	var key: String = "edit" if body.kind == "edit" else ("request" if body.kind == "edit_session" else "command")
+	return app.requests.request(body,callback,[key,"command_id"],"command_id",10000)
 
 func edit(object_id: String, field: String, value: Variant, callback: Callable = Callable(), revision: String = "") -> void:
 	var object: Dictionary = app.objects.get(object_id, {})
@@ -34,7 +25,7 @@ func edit(object_id: String, field: String, value: Variant, callback: Callable =
 		return
 	var current_field := field_data(object_id, field)
 	if current_field.is_empty(): return
-	command({"kind":"edit","edit":{"target":app.address_of(object),"field_id":field,"expected_revision":str(current_field.revision) if revision.is_empty() else revision,"value":value}}, callback)
+	command({"kind":"edit","edit":{"target":app.field_address(object_id,field),"field_id":field,"expected_revision":str(current_field.revision) if revision.is_empty() else revision,"value":value}}, callback)
 
 func field_data(object_id: String, field: String) -> Dictionary:
 	for entry in app.objects.get(object_id, {}).get("fields", []):
@@ -45,21 +36,14 @@ func session_input(panel_id: String, target_id: String, field: String, action: S
 	if not app.objects.has(panel_id) or not app.objects.has(target_id):
 		if callback.is_valid(): callback.call({"ok":false,"message":"Target unavailable"})
 		return
-	command({"kind":"panel_input","input":{"client_id":client_id,"panel":app.address_of(app.objects[panel_id]),"target":app.address_of(app.objects[target_id]),"field_id":field,"action":action,"draft":draft}}, callback)
+	command({"kind":"edit_session","request":{"client_id":client_id,"context":{"source":app.field_address(panel_id,"inspector_target"),"field_id":"inspector_target"},"target":app.field_address(target_id,field),"field_id":field,"action":action,"draft":draft}}, callback)
 
 func receive(body: Dictionary) -> bool:
-	if body.get("kind") == "panel_sessions":
+	if body.get("kind") == "edit_sessions":
 		sessions = body.get("sessions", [])
 		for panel in panels.values(): panel.content.refresh_sessions()
 		return true
-	if body.get("kind") not in ["result", "panel_result"]: return false
-	var id := str(body.get("command_id", ""))
-	if not requests.has(id): return body.get("kind") == "panel_result"
-	var request: Dictionary = requests[id]
-	requests.erase(id)
-	if body.has("snapshot"): app.apply_snapshot(body.snapshot)
-	if request.callback.is_valid(): request.callback.call(body)
-	return true
+	return false
 
 func open_inspector(target_id: String = "") -> void:
 	if not app.editable: return
@@ -188,16 +172,10 @@ func route_input(event: InputEvent) -> bool:
 	return not event is InputEventMouseMotion or not capture_id.is_empty() or not app.fps_active
 
 func tick() -> void:
-	for id in requests.keys():
-		if Time.get_ticks_msec() - requests[id].time > 15000:
-			var callback: Callable = requests[id].callback
-			requests.erase(id)
-			if callback.is_valid(): callback.call({"ok":false,"message":"Request timed out"})
 	for panel in panels.values(): panel.content.tick()
 	refresh_gizmos()
 
 func disconnected() -> void:
-	requests.clear()
 	sessions.clear()
 	clear_focus()
 	for panel in panels.values(): panel.content.disconnected()

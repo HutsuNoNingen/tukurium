@@ -1,6 +1,6 @@
 //! Host-only checkpoints. Disk I/O runs off the simulation thread.
-use kokoverse_core::WorldModel;
-use kokoverse_protocol::{MAX_FRAME, Snapshot};
+use kokoverse_core::{WorldModel, replication::REGISTRY};
+use kokoverse_protocol::{MAX_FRAME, ReplicatedWorld, Snapshot};
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
@@ -23,7 +23,9 @@ pub fn read_snapshot(path: &Path) -> Result<Snapshot, String> {
     if bytes.len() > MAX_FRAME {
         return Err("Saved world exceeds size limit".into());
     }
-    let snapshot: Snapshot = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    let stored: ReplicatedWorld = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("Unsupported or invalid world file: {e}"))?;
+    let snapshot = REGISTRY.decode_world(stored)?;
     WorldModel::new().restore(snapshot.clone())?;
     Ok(snapshot)
 }
@@ -71,7 +73,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 fn write_checkpoint(path: &Path, snapshot: &Snapshot) -> Result<(), String> {
-    let bytes = serde_json::to_vec(snapshot).map_err(|e| e.to_string())?;
+    let bytes = serde_json::to_vec(&REGISTRY.encode_world(snapshot)).map_err(|e| e.to_string())?;
     if bytes.len() > MAX_FRAME {
         return Err("Saved world exceeds size limit".into());
     }
@@ -79,7 +81,7 @@ fn write_checkpoint(path: &Path, snapshot: &Snapshot) -> Result<(), String> {
     if let Ok(previous) = read_snapshot(path) {
         atomic_write(
             &backup_path(path),
-            &serde_json::to_vec(&previous).map_err(|e| e.to_string())?,
+            &serde_json::to_vec(&REGISTRY.encode_world(&previous)).map_err(|e| e.to_string())?,
         )?;
     }
     atomic_write(path, &bytes)
@@ -211,7 +213,11 @@ mod tests {
     fn invalid_world_is_not_silently_replaced() {
         let directory = Directory::new();
         fs::create_dir_all(&directory.0).unwrap();
-        fs::write(directory.world(), br#"{"world_revision":"0","objects":[]}"#).unwrap();
+        fs::write(
+            directory.world(),
+            br#"{"format_version":1,"world_revision":"0","objects":[]}"#,
+        )
+        .unwrap();
         // Empty worlds are valid; malformed snapshots and overlarge files are not.
         assert!(read_snapshot(&directory.world()).is_ok());
         fs::write(directory.world(), b"{}").unwrap();

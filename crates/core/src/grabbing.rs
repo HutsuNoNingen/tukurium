@@ -305,7 +305,9 @@ mod tests {
         m.enqueue(WorldCommand::Edit {
             edit: Edit {
                 command_id: "release".into(),
-                target: released.target,
+                target: crate::replication::REGISTRY
+                    .field_address(&released.target, "position")
+                    .unwrap(),
                 field_id: "position".into(),
                 expected_revision: released.expected_revision,
                 value: serde_json::json!(released.position),
@@ -439,7 +441,9 @@ mod tests {
         m.enqueue(WorldCommand::Edit {
             edit: Edit {
                 command_id: "remove".into(),
-                target,
+                target: crate::replication::REGISTRY
+                    .field_address(&target, "collider")
+                    .unwrap(),
                 field_id: "collider".into(),
                 expected_revision: "0".into(),
                 value: serde_json::Value::Null,

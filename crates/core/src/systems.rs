@@ -64,33 +64,24 @@ pub(crate) fn validate_commands(
                     Ok(Mutation::SetScripts{entity,value})
                 }
                 WorldCommand::Edit { edit } => {
-                    if edit.field_id=="playback" { return Err("Use playback controls to change the shared timeline".into()); }
-                    validate_value(&edit.field_id, &edit.value)?;
-                    let entity = *index.0.get(&edit.target).ok_or("Target no longer exists")?;
-                    let (_, _, revisions, root) = slots.get(entity).map_err(|_| "Expected an ObjectRoot Slot")?;
+                    let (object, component, spec) = crate::replication::REGISTRY.resolve(&snapshot.0, &edit.target, &edit.field_id)?;
+                    if spec.schema.access != kokoverse_protocol::FieldAccess::Edit {
+                        return Err("Use the component's commands to change this field".into());
+                    }
+                    (spec.validate)(&edit.value)?;
+                    let entity = index.0[&object.address];
+                    let (_, _, revisions, _) = slots.get(entity).map_err(|_| "Expected an ObjectRoot Slot")?;
                     let expected = edit.expected_revision.parse::<u64>().map_err(|_| "Invalid revision")?;
                     if expected != revisions.0.get(&edit.field_id).copied().unwrap_or(0) {
                         return Err("This field was changed by another editor. Review its current value and retry.".into());
                     }
-                    if crate::panels::FIELDS.contains(&edit.field_id.as_str()) {
-                        let object = snapshot.0.objects.iter().find(|o|o.address==edit.target).unwrap();
-                        if object.panel.is_none() { return Err("Expected a world panel".into()); }
-                        if edit.field_id == "inspector_target" && !edit.value.is_null() {
-                            let address: Address=serde_json::from_value(edit.value.clone()).unwrap();
-                            if !snapshot.0.objects.iter().any(|o|o.address==address) {return Err("Inspector target no longer exists".into());}
-                        }
-                        return Ok(Mutation::SetPanelField{entity,field:edit.field_id,value:edit.value});
+                    if edit.field_id == "inspector_target" && !edit.value.is_null() {
+                        let address: Address = serde_json::from_value(edit.value.clone()).unwrap();
+                        if !snapshot.0.objects.iter().any(|o|o.address==address) {return Err("Inspector target no longer exists".into());}
                     }
-                    Ok(match edit.field_id.as_str() {
-                        "name" => Mutation::SetName { entity, value: edit.value.as_str().unwrap().into() },
-                        "position" => Mutation::SetPosition { entity, value: serde_json::from_value(edit.value).unwrap() },
-                        "rotation" => Mutation::SetRotation { entity, value: serde_json::from_value(edit.value).unwrap() },
-                        "scale" => Mutation::SetScale { entity, value: serde_json::from_value(edit.value).unwrap() },
-                        "collider" => Mutation::SetCollider { entity, value: serde_json::from_value(edit.value).unwrap() },
-                        "color" => Mutation::SetColor { slot: entity, renderer: index.0[&root.renderer], value: serde_json::from_value(edit.value).unwrap() },
-                        _ => unreachable!(),
-                    })
+                    Ok(Mutation::SetField {entity, component_id: component.local_id, field:edit.field_id, value:edit.value})
                 }
+
                 WorldCommand::Transform { command } => {
                     let entity = *index.0.get(&command.target).ok_or("Target no longer exists")?;
                     let (_,_,revisions,_) = slots.get(entity).map_err(|_|"Expected an ObjectRoot Slot")?;
@@ -209,12 +200,13 @@ pub(crate) fn apply_commands(world: &mut World) {
         Err(error) => Err(error),
         Ok(mutation) => {
             let selected = match mutation {
-                Mutation::SetPanelField {
+                Mutation::SetField {
                     entity,
+                    component_id,
                     field,
                     value,
                 } => {
-                    crate::panels::apply_field(world, entity, &field, value);
+                    crate::replication::apply_field(world, entity, component_id, &field, value);
                     Some(world.get::<Identity>(entity).unwrap().0.clone())
                 }
                 Mutation::SetScripts { entity, value } => {
@@ -283,44 +275,6 @@ pub(crate) fn apply_commands(world: &mut World) {
                         world.get_mut::<ObjectRoot>(entity).unwrap().revision += 1;
                     }
                     None
-                }
-                Mutation::SetName { entity, value } => {
-                    world.get_mut::<Slot>(entity).unwrap().name = value;
-                    bump_field(world, entity, "name");
-                    Some(world.get::<Identity>(entity).unwrap().0.clone())
-                }
-                Mutation::SetPosition { entity, value } => {
-                    world.get_mut::<LocalTransform>(entity).unwrap().translation = value;
-                    bump_field(world, entity, "position");
-                    Some(world.get::<Identity>(entity).unwrap().0.clone())
-                }
-                Mutation::SetColor {
-                    slot,
-                    renderer,
-                    value,
-                } => {
-                    world.get_mut::<MeshRenderer>(renderer).unwrap().color = value;
-                    bump_field(world, slot, "color");
-                    Some(world.get::<Identity>(slot).unwrap().0.clone())
-                }
-                Mutation::SetRotation { entity, value } => {
-                    world.get_mut::<LocalTransform>(entity).unwrap().rotation = value;
-                    bump_field(world, entity, "rotation");
-                    Some(world.get::<Identity>(entity).unwrap().0.clone())
-                }
-                Mutation::SetScale { entity, value } => {
-                    world.get_mut::<LocalTransform>(entity).unwrap().scale = value;
-                    bump_field(world, entity, "scale");
-                    Some(world.get::<Identity>(entity).unwrap().0.clone())
-                }
-                Mutation::SetCollider { entity, value } => {
-                    if let Some(shape) = value {
-                        world.entity_mut(entity).insert(Collider(shape));
-                    } else {
-                        world.entity_mut(entity).remove::<Collider>();
-                    }
-                    bump_field(world, entity, "collider");
-                    Some(world.get::<Identity>(entity).unwrap().0.clone())
                 }
                 Mutation::SetPlayback { entity, value } => {
                     world.entity_mut(entity).insert(MediaPlayback(value));

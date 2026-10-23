@@ -19,35 +19,3 @@ pub struct InspectorView {
     pub target: Option<Address>,
     pub scroll: [f64; 2],
 }
-
-/// A bounded, ephemeral edit lease. Never serialized in world saves.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct PanelEditSession {
-    pub owner: String,
-    pub client_id: String,
-    pub panel: Address,
-    pub target: Address,
-    pub field_id: String,
-    pub draft: PanelDraft,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct PanelDraft {
-    pub part: String,
-    pub text: String,
-    pub caret: u32,
-    pub selection: [u32; 2],
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PanelInput {
-    pub command_id: String,
-    pub client_id: String,
-    pub panel: Address,
-    pub target: Address,
-    pub field_id: String,
-    pub action: String,
-    #[serde(default)]
-    pub draft: PanelDraft,
-}

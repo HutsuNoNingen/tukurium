@@ -8,6 +8,7 @@ bevy_ecs = { version = "0.17.3", default-features = false, features = ["std"] }
 kokoverse-protocol = { path = "../protocol" }
 kokoverse-scripting = { path = "../scripting" }
 serde_json.workspace = true
+serde.workspace = true
 uuid.workspace = true
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

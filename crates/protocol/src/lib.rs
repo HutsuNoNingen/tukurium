@@ -5,10 +5,12 @@ mod scripts;
 pub use scripts::*;
 mod panels;
 pub use panels::*;
+mod replication;
+pub use replication::*;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const MAX_FRAME: usize = 1024 * 1024;
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AvatarPose {
@@ -102,6 +104,7 @@ pub struct InteractionRay {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Field {
+    pub component_id: u32,
     pub id: String,
     pub label: String,
     pub value_type: String,

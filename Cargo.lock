@@ -678,6 +678,7 @@ dependencies = [
  "image",
  "kokoverse-protocol",
  "kokoverse-scripting",
+ "serde",
  "serde_json",
  "uuid",
 ]

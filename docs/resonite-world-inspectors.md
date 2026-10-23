@@ -108,6 +108,6 @@ Godotにはパネル単位でSubViewportと独立した編集UIを作る。2Dイ
 
 共有パネルが指す対象には、操作を受け取らない表示用ギズモを各クライアントで生成する。操作中のプレビューに追従し、本人の選択・操作ハンドルとは分ける。ギズモのメッシュやポインター位置をワールドへ保存する方式にはしない。
 
-入力欄は `panel_input` でホストからフィールド単位の編集占有を取得する。ドラフト・キャレット・選択範囲・編集中の人は `panel_sessions` で配信する。同じユーザーが別パネルから同じ欄を開く場合も占有を区別する。キー入力は本人のGodotだけが処理し、受信側は表示するだけ。6秒間更新がなければ占有を失効させ、対象・パネルの削除でも解放する。通常の編集要求にも占有を確認し、最終的には既存のrevision検証を通す。長いScriptソースのドラフトは引き続きローカル。
+入力欄は `edit_session` でホストからフィールド単位の編集占有を取得する。ドラフト・キャレット・選択範囲・編集中の人は `edit_sessions` で配信する。同じユーザーが別パネルから同じ欄を開く場合も占有を区別する。キー入力は本人のGodotだけが処理し、受信側は表示するだけ。6秒間更新がなければ占有を失効させ、対象・パネルの削除でも解放する。通常の編集要求にも占有を確認し、最終的には既存のrevision検証を通す。長いScriptソースのドラフトは引き続きローカル。
 
-実装箇所は `crates/core/src/panels.rs`、`panel_sessions.rs`、`crates/engine/src/panels.rs`、`client-godot/world_panel.gd`、`world_panels.gd`、`inspector_view.gd`。`tests/panels-integration.mjs --rendered` で、2つのGodotの共有入力表示、3D交点からの入力、独立した対象、スクロール、ギズモ追従、把持・回転・拡縮、ピン追従、途中参加、保存・復元、対象削除を検証する。多数パネルでの性能と日本語IMEの実機操作は未測定。
+実装箇所は `crates/core/src/panels.rs`、`edit_sessions.rs`、`crates/engine/src/edit_sessions.rs`、`client-godot/world_panel.gd`、`world_panels.gd`、`inspector_view.gd`。`tests/panels-integration.mjs --rendered` で、2つのGodotの共有入力表示、3D交点からの入力、独立した対象、スクロール、ギズモ追従、把持・回転・拡縮、ピン追従、途中参加、保存・復元、対象削除を検証する。多数パネルでの性能と日本語IMEの実機操作は未測定。

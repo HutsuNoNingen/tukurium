@@ -312,7 +312,7 @@ func commit_import(visual: Dictionary, half_height: float) -> void:
 	var point: Vector3 = active.point + Vector3.UP*(half_height+0.02)
 	var rotation := Quaternion.IDENTITY
 	if visual.kind in ["image","video"]: rotation = Quaternion(Vector3.UP,editor.camera.rotation.y)
-	editor.queue_message({"kind":"structure","command":{"command_id":str(Time.get_ticks_usec()),"action":"import_asset","name":str(active.path).get_file().get_basename().substr(0,80),"position":[point.x,point.y,point.z],"rotation":[rotation.x,rotation.y,rotation.z,rotation.w],"visual":visual}})
+	editor.requests.request({"kind":"structure","command":{"action":"import_asset","name":str(active.path).get_file().get_basename().substr(0,80),"position":[point.x,point.y,point.z],"rotation":[rotation.x,rotation.y,rotation.z,rotation.w],"visual":visual}}, editor.complete_action)
 	editor.feedback.text = "Placing " + str(active.path).get_file() + "…"
 	transfer_age = 0.0
 

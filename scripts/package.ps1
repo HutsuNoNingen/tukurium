@@ -42,7 +42,7 @@ try {
     foreach ($file in @('Godot_v4.7.2-stable_win64.exe','Godot_v4.7.2-stable_win64_console.exe')) {
         Copy-Item -LiteralPath (Join-Path '.tools/godot' $file) -Destination (Join-Path $packageRoot '.tools/godot')
     }
-    foreach ($file in @('main.gd','main.tscn','project.godot','avatar.gd','translation_gizmo.gd','asset_importer.gd','script_editor.gd','world_panel.gd','world_panels.gd','inspector_view.gd')) {
+    foreach ($file in @('main.gd','main.tscn','project.godot','avatar.gd','translation_gizmo.gd','asset_importer.gd','script_editor.gd','world_panel.gd','world_panels.gd','inspector_view.gd','request_broker.gd')) {
         Copy-Item -LiteralPath (Join-Path 'client-godot' $file) -Destination (Join-Path $packageRoot 'client-godot')
     }
     $godotOutput = & .tools/godot/Godot_v4.7.2-stable_win64_console.exe --headless --path client-godot --editor --import 2>&1
@@ -104,7 +104,7 @@ User-imported world assets are NOT included in this archive.
     $files = @(Get-ChildItem -LiteralPath $packageRoot -File -Recurse -Force | ForEach-Object {
         @{ path=$_.FullName.Substring($packageRoot.Length+1).Replace('\','/'); size=$_.Length; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
     })
-    @{ version=$name; protocol=2; relay='wss://45.77.130.146/ws'; room='kokoverse/workshop'; avatar='oekaki'; includesUserWorld=$false; includesCredentials=$includeLogin; optionalVideoTools='FFmpeg 9.0.2 downloaded in background on first launch'; rustDependencies=@($metadata.packages | Where-Object source | Select-Object name,version,license); goDependencies=$goModules | ForEach-Object { ($_ -split '\|')[0..1] -join '@' }; files=$files } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $packageRoot 'build-info.json') -Encoding UTF8
+    @{ version=$name; protocol=3; relay='wss://45.77.130.146/ws'; room='kokoverse/workshop'; avatar='oekaki'; includesUserWorld=$false; includesCredentials=$includeLogin; optionalVideoTools='FFmpeg 9.0.2 downloaded in background on first launch'; rustDependencies=@($metadata.packages | Where-Object source | Select-Object name,version,license); goDependencies=$goModules | ForEach-Object { ($_ -split '\|')[0..1] -join '@' }; files=$files } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $packageRoot 'build-info.json') -Encoding UTF8
     $archive = Join-Path $OutputDirectory ($name + '.zip')
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [IO.Compression.ZipFile]::CreateFromDirectory($stagingParent,$archive,[IO.Compression.CompressionLevel]::Optimal,$false)

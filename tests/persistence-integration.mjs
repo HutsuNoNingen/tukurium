@@ -37,7 +37,7 @@ async function connect(port){
       }
     });
     return {messages,latest:()=>messages.filter(m=>m.kind==='snapshot').at(-1),
-      send(body){const data=Buffer.from(JSON.stringify({protocol_version:2,session_id:session,authority_epoch:epoch,sequence:'1',body}));const h=Buffer.alloc(4);h.writeUInt32BE(data.length);socket.write(Buffer.concat([h,data]));},
+      send(body){const data=Buffer.from(JSON.stringify({protocol_version:3,session_id:session,authority_epoch:epoch,sequence:'1',body}));const h=Buffer.alloc(4);h.writeUInt32BE(data.length);socket.write(Buffer.concat([h,data]));},
       wait(predicate){return until(()=>messages.find(predicate),'Engine response timeout');}};
   }
   throw Error(`Engine not listening on ${port}`);
@@ -46,7 +46,7 @@ function engine(role,port,path=world,cache=assets){return start('target/release/
 function adapter(port){return start('.run/build/kokosync-adapter.exe',['--peer','auto','--session',session,'--engine',`127.0.0.1:${port+1}`,'--address',`127.0.0.1:${base+1}`,'--insecure-development']);}
 async function edit(client,field,value){
   const object=client.latest().snapshot.objects[0],command_id=randomUUID();
-  client.send({kind:'edit',edit:{command_id,target:object.address,field_id:field,expected_revision:object.fields.find(f=>f.id===field).revision,value}});
+  client.send({kind:'edit',edit:{command_id,target:{...object.address,local_id:object.fields.find(f=>f.id===field).component_id},field_id:field,expected_revision:object.fields.find(f=>f.id===field).revision,value}});
   assert.equal((await client.wait(m=>m.kind==='result'&&m.command_id===command_id)).ok,true);
 }
 async function save(client){
@@ -110,7 +110,8 @@ try {
   const stopped=await stopScript(restarted,base+6);
   assert.equal(stopped.exitCode,0,stopped.logs);assert.match(stopped.logs,/World saved/);
   await until(()=>restarted.exitCode!==null||restarted.signalCode!==null,'Stop did not terminate engine');
-  assert.deepEqual(readWorld(),shutdownExpected,'Stop.bat must flush latest revision before killing the engine');
+  assert.equal(readWorld().format_version,1);
+  assert.equal(readWorld().world_revision,shutdownExpected.world_revision,'Stop.bat must flush latest revision before killing the engine');
   console.log('PASS: automatic host saves; guest preserves its checkpoint; crash restart restores objects and asset bytes; Stop.bat flushes latest edits');
 
   // Corrupt only the primary checkpoint; recovery must keep the good backup.
@@ -118,7 +119,8 @@ try {
   writeFileSync(world,'truncated');
   const recovered=engine('host',base+8),recovery=await connect(base+8);
   await until(()=>recovery.latest()?.editable,'Backup recovery did not start');
-  assert.deepEqual(recovery.latest().snapshot,backup);
+  assert.equal(recovery.latest().snapshot.world_revision,backup.world_revision);
+  assert.deepEqual(recovery.latest().snapshot.objects.map(o=>o.address),backup.objects.map(o=>o.address));
   assert.equal((await save(recovery)).ok,true);
   assert.deepEqual(JSON.parse(readFileSync(world+'.bak')),backup);
   rmSync(world+'.bak');mkdirSync(world+'.bak');

@@ -41,7 +41,7 @@ async function connect(port) {
     return {
       socket, messages,
       send(body) {
-        const data = Buffer.from(JSON.stringify({ protocol_version: 2, session_id: session, authority_epoch: epoch, sequence: '1', body }));
+        const data = Buffer.from(JSON.stringify({ protocol_version: 3, session_id: session, authority_epoch: epoch, sequence: '1', body }));
         const header = Buffer.alloc(4); header.writeUInt32BE(data.length);
         socket.write(Buffer.concat([header, data]));
       },
@@ -62,7 +62,7 @@ async function connect(port) {
 const snapshot = m => m.kind === 'snapshot' && m.editable;
 const revision = n => m => snapshot(m) && m.snapshot.world_revision === String(n);
 const edit = (world, field, value, id = randomUUID()) => ({ kind: 'edit', edit: {
-  command_id: id, target: world.objects[0].address, field_id: field,
+  command_id: id, target: {...world.objects[0].address,local_id:world.objects[0].fields.find(f=>f.id===field).component_id}, field_id: field,
   expected_revision: world.objects[0].fields.find(f => f.id === field).revision, value
 }});
 const fieldValue = (world, name) => world.objects[0].fields.find(f => f.id === name).value;
@@ -209,7 +209,7 @@ try {
         const line = testEvents.slice(0,end).trim(); testEvents = testEvents.slice(end+1);
         if (line.startsWith('GIZMO_CONFLICT ')) {
           const event = JSON.parse(line.slice('GIZMO_CONFLICT '.length));
-          host.send({kind:'edit',edit:{command_id:randomUUID(),target:event.target,field_id:'position',expected_revision:event.revision,value:event.value}});
+          host.send({kind:'edit',edit:{command_id:randomUUID(),target:{...event.target,local_id:3},field_id:'position',expected_revision:event.revision,value:event.value}});
         }
         if (line.startsWith('REMOTE_PREVIEW ')) {
           const preview = JSON.parse(line.slice('REMOTE_PREVIEW '.length));
@@ -279,11 +279,11 @@ try {
   let aisle = 0;
   for(const object of host.latest().objects.filter(o=>o.visual.kind==='cube' && o.address.instance_id!==grabTarget.instance_id)) {
     const nextRevision = Number(host.latest().world_revision)+1;
-    host.send({kind:'edit',edit:{command_id:randomUUID(),target:object.address,field_id:'position',expected_revision:object.fields.find(f=>f.id==='position').revision,value:[player[0]+20+aisle++*3,0.75,player[2]]}});
+    host.send({kind:'edit',edit:{command_id:randomUUID(),target:{...object.address,local_id:3},field_id:'position',expected_revision:object.fields.find(f=>f.id==='position').revision,value:[player[0]+20+aisle++*3,0.75,player[2]]}});
     await guest.wait(revision(nextRevision));
   }
   let currentBox = host.latest().objects.find(o=>o.address.instance_id===grabTarget.instance_id);
-  host.send({kind:'edit',edit:{command_id:randomUUID(),target:grabTarget,field_id:'position',expected_revision:currentBox.fields.find(f=>f.id==='position').revision,value:[player[0],0.75,player[2]-3]}});
+  host.send({kind:'edit',edit:{command_id:randomUUID(),target:{...grabTarget,local_id:3},field_id:'position',expected_revision:currentBox.fields.find(f=>f.id==='position').revision,value:[player[0],0.75,player[2]-3]}});
   await guest.wait(revision(Number(host.latest().world_revision)+1));
   let aim = 0;
   guest.send(playerInput([0,0],{yaw:aim}));
@@ -327,7 +327,7 @@ try {
     currentBox=host.latest().objects.find(o=>o.address.instance_id===grabTarget.instance_id);
     const changed=currentBox.world_position.map((v,i)=>i===1?v+0.2:v);
     const conflictAt=guest.messages.length;
-    host.send({kind:'edit',edit:{command_id:randomUUID(),target:grabTarget,field_id:'position',expected_revision:currentBox.fields.find(f=>f.id==='position').revision,value:changed}});
+    host.send({kind:'edit',edit:{command_id:randomUUID(),target:{...grabTarget,local_id:3},field_id:'position',expected_revision:currentBox.fields.find(f=>f.id==='position').revision,value:changed}});
     await guest.wait(m=>guest.messages.indexOf(m)>=conflictAt && m.kind==='grab_state' && !m.grab);
     console.log('PASS: Rust position/rotation/scale previews reach the other engine, atomic release commits and cancel preserves the world');
   } finally {clearInterval(keepInput);guest.send(playerInput([0,0],{active:false}));}

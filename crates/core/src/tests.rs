@@ -6,7 +6,9 @@ fn edit(model: &WorldModel, field: &str, value: Value) -> WorldCommand {
     WorldCommand::Edit {
         edit: Edit {
             command_id: "test".into(),
-            target: object.address.clone(),
+            target: replication::REGISTRY
+                .field_address(&object.address, field)
+                .unwrap(),
             field_id: field.into(),
             expected_revision: object
                 .fields
@@ -94,22 +96,15 @@ fn transform_commit_is_atomic_and_replicates_all_fields() {
 }
 
 #[test]
-fn old_saved_world_is_upgraded_without_changing_identity_or_revision() {
+fn old_saved_world_is_rejected_without_mutating_the_world() {
     let mut model = WorldModel::new();
-    let mut old = model.snapshot();
-    let address = old.objects[0].address.clone();
+    let before = model.snapshot();
+    let mut old = before.clone();
     old.objects[0]
         .fields
         .retain(|f| ["name", "position", "color"].contains(&f.id.as_str()));
-    old.objects[0].collider = None;
-    model.restore(old).unwrap();
-    let upgraded = model.snapshot();
-    assert_eq!(upgraded.world_revision, "0");
-    assert_eq!(upgraded.objects[0].address, address);
-    assert_eq!(upgraded.objects[0].fields.len(), 7);
-    assert_eq!(upgraded.objects[0].world_rotation, [0.0, 0.0, 0.0, 1.0]);
-    assert_eq!(upgraded.objects[0].world_scale, [1.0; 3]);
-    assert!(upgraded.objects[0].collider.as_ref().unwrap().solid);
+    assert!(model.restore(old).is_err());
+    assert_eq!(model.snapshot(), before);
 }
 
 #[test]
@@ -159,7 +154,7 @@ fn duplicate_is_independent_and_delete_cleans_both_entities() {
     let command = WorldCommand::Edit {
         edit: Edit {
             command_id: "edit".into(),
-            target: copy.clone(),
+            target: replication::REGISTRY.field_address(&copy, "color").unwrap(),
             field_id: "color".into(),
             expected_revision: "0".into(),
             value: json!([1, 0, 0, 1]),
@@ -548,7 +543,7 @@ fn invalid_and_conflicting_playback_operations_are_atomic() {
 }
 
 #[test]
-fn legacy_video_snapshot_gains_playback_and_invalid_state_is_rejected() {
+fn legacy_video_snapshot_and_invalid_state_are_rejected() {
     let (mut model, address) = video_model();
     let mut old = model.snapshot();
     for object in &mut old.objects {
@@ -556,8 +551,7 @@ fn legacy_video_snapshot_gains_playback_and_invalid_state_is_rejected() {
         object.playback = None;
     }
     model.set_media_time(200.0);
-    model.restore(old).unwrap();
-    assert_eq!(playback_state(&model, &address).anchor_seconds, 200.0);
+    assert!(model.restore(old).is_err());
     let before = model.snapshot();
     for invalid in [-1.0, f64::INFINITY] {
         let mut snapshot = before.clone();

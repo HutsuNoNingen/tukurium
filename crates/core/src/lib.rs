@@ -1,11 +1,12 @@
 //! A renderer-independent ECS world with a scheduled command/transform/output pipeline.
 mod collision;
 mod components;
+pub mod edit_sessions;
 mod grabbing;
 pub mod locomotion;
-pub mod panel_sessions;
 pub mod panels;
 pub mod presence;
+pub mod replication;
 mod resources;
 pub mod scripting;
 pub mod systems;
@@ -407,22 +408,7 @@ impl WorldModel {
     }
 
     /// Validate everything before touching the live ECS. Used at initial synchronization.
-    pub fn restore(&mut self, mut snapshot: Snapshot) -> Result<(), String> {
-        // Upgrade saved position-only worlds without changing their revisions or stable IDs.
-        for object in &mut snapshot.objects {
-            if object.fields.len() == 3
-                && ["name", "position", "color"]
-                    .iter()
-                    .all(|id| object.fields.iter().any(|f| f.id == *id))
-            {
-                set_default_collider(object);
-                sync_object_fields(object);
-            }
-            if object.fields.len() == 6 && !object.fields.iter().any(|f| f.id == "playback") {
-                initialize_playback(object, self.world.resource::<MediaClock>().0);
-                sync_object_fields(object);
-            }
-        }
+    pub fn restore(&mut self, snapshot: Snapshot) -> Result<(), String> {
         validate_snapshot(&snapshot)?;
         let mut replacement = Self::empty();
         *replacement.world.resource_mut::<MediaClock>() = *self.world.resource::<MediaClock>();
@@ -523,15 +509,19 @@ impl WorldModel {
 
 pub(crate) fn field(
     id: &str,
-    label: &str,
-    value_type: &str,
+    _label: &str,
+    _value_type: &str,
     value: Value,
     revs: &Revisions,
 ) -> Field {
+    let (component, spec) = replication::REGISTRY
+        .field_by_id(id)
+        .expect("registered field");
     Field {
+        component_id: component.local_id,
         id: id.into(),
-        label: label.into(),
-        value_type: value_type.into(),
+        label: spec.schema.label.clone(),
+        value_type: spec.schema.value_type.clone(),
         revision: revs.0.get(id).unwrap_or(&0).to_string(),
         value,
     }
@@ -712,7 +702,14 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
             .parse::<u64>()
             .map_err(|_| "Invalid object revision")?;
         if object_revision > revision
-            || object.fields.len() != if object.panel.is_some() { 11 } else { 7 }
+            || object.fields.len()
+                != replication::REGISTRY
+                    .components
+                    .iter()
+                    .filter(|c| (c.present)(object))
+                    .flat_map(|c| &c.fields)
+                    .filter(|f| f.ui_order.is_some())
+                    .count()
             || matches!(object.visual, kokoverse_protocol::Visual::Video { .. })
                 != object.playback.is_some()
         {
@@ -725,21 +722,11 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
                 .revision
                 .parse::<u64>()
                 .map_err(|_| "Invalid field revision")?;
-            let expected_type = match f.id.as_str() {
-                "name" => "string",
-                "position" => "vec3",
-                "rotation" => "quat",
-                "scale" => "vec3",
-                "collider" => "collider",
-                "playback" => "playback",
-                "panel_size" => "panel_size",
-                "panel_pin" => "panel_pin",
-                "panel_scroll" => "panel_scroll",
-                "inspector_target" => "address",
-                _ => "color",
-            };
+            let (component, spec) = replication::REGISTRY.field(f.component_id, &f.id)?;
             if field_revision > object_revision
-                || f.value_type != expected_type
+                || f.value_type != spec.schema.value_type
+                || f.label != spec.schema.label
+                || !(component.present)(object)
                 || !fields.insert(&f.id)
             {
                 return Err("Invalid field schema".into());
@@ -860,58 +847,7 @@ pub(crate) fn validate_image(data_url: &str) -> Result<kokoverse_protocol::Visua
 }
 
 pub(crate) fn validate_value(field: &str, value: &Value) -> Result<(), String> {
-    if panels::FIELDS.contains(&field) {
-        return panels::validate_field(field, value);
-    }
-    let valid = match field {
-        "name" => value
-            .as_str()
-            .is_some_and(|s| !s.trim().is_empty() && s.chars().count() <= 80),
-        "rotation" => serde_json::from_value::<[f64; 4]>(value.clone()).is_ok_and(|q| {
-            q.iter().all(|v| v.is_finite())
-                && (q.iter().map(|v| v * v).sum::<f64>() - 1.0).abs() < 0.0001
-        }),
-        "scale" => serde_json::from_value::<[f64; 3]>(value.clone())
-            .is_ok_and(|s| s.iter().all(|v| v.is_finite() && (0.05..=20.0).contains(v))),
-        "collider" => {
-            value.is_null()
-                || serde_json::from_value::<kokoverse_protocol::ColliderSpec>(value.clone())
-                    .is_ok_and(|c| {
-                        c.half_extents
-                            .iter()
-                            .all(|v| v.is_finite() && (0.001..=50.0).contains(v))
-                    })
-        }
-        "playback" => {
-            value.is_null()
-                || serde_json::from_value::<kokoverse_protocol::VideoPlayback>(value.clone())
-                    .is_ok_and(|p| {
-                        p.position_seconds.is_finite()
-                            && (0.0..=1e12).contains(&p.position_seconds)
-                            && p.anchor_seconds.is_finite()
-                            && (0.0..=1e12).contains(&p.anchor_seconds)
-                    })
-        }
-        "position" | "color" => value.as_array().is_some_and(|a| {
-            a.len() == if field == "position" { 3 } else { 4 }
-                && a.iter().all(|v| {
-                    v.as_f64().is_some_and(|n| {
-                        n.is_finite()
-                            && if field == "position" {
-                                n.abs() <= 1000.0
-                            } else {
-                                (0.0..=1.0).contains(&n)
-                            }
-                    })
-                })
-        }),
-        _ => false,
-    };
-    if valid {
-        Ok(())
-    } else {
-        Err(format!("Invalid value for {field}"))
-    }
+    replication::REGISTRY.validate_value(field, value)
 }
 
 #[cfg(test)]

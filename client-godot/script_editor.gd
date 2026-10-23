@@ -154,11 +154,9 @@ func current_script() -> Dictionary:
 
 func send_action(action: Dictionary) -> void:
 	if not app.editable or not pending_id.is_empty() or not app.objects.has(target): return
-	pending_id = "script-%d-%d" % [Time.get_ticks_usec(), randi()]
 	pending_action = action.action
-	action.command_id = pending_id
 	action.target = app.address_of(app.objects[target])
-	app.queue_message({"kind":"script", "command":action})
+	pending_id = app.requests.request({"kind":"script", "command":action}, receive_result)
 	feedback.text = "Waiting for host…"
 	refresh_buttons()
 
@@ -202,7 +200,6 @@ func disconnected() -> void:
 	refresh_buttons()
 
 func receive_result(body: Dictionary) -> bool:
-	if pending_id.is_empty() or body.get("command_id", "") != pending_id: return false
 	pending_id = ""
 	if body.ok:
 		if pending_action == "attach":
@@ -347,4 +344,4 @@ func interact(id: String) -> void:
 	var object: Dictionary = app.objects[id]
 	if object.get("collider") == null: return
 	if not object.get("scripts", []).any(func(c): return c.enabled and c.schema.has_interact): return
-	app.queue_message({"kind":"script", "command":{"command_id":"interact-%d-%d" % [Time.get_ticks_usec(), randi()], "target":app.address_of(object), "action":"interact"}})
+	app.requests.request({"kind":"script", "command":{"target":app.address_of(object), "action":"interact"}}, Callable())

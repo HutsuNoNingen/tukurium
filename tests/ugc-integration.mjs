@@ -18,7 +18,7 @@ async function connect(port){
     if(!await new Promise(r=>{socket.once('connect',()=>r(true));socket.once('error',()=>r(false));})){socket.destroy();await delay(50);continue;}
     sockets.push(socket);const messages=[];let buffer=Buffer.alloc(0),epoch='';
     socket.on('data',d=>{buffer=Buffer.concat([buffer,d]);while(buffer.length>=4&&buffer.length>=buffer.readUInt32BE()+4){const n=buffer.readUInt32BE(),e=JSON.parse(buffer.subarray(4,n+4));buffer=buffer.subarray(n+4);epoch=e.authority_epoch;messages.push(e.body);}});
-    return {messages,latest:()=>messages.filter(m=>m.kind==='snapshot').at(-1),send(body){const data=Buffer.from(JSON.stringify({protocol_version:2,session_id:session,authority_epoch:epoch,sequence:'1',body}));const h=Buffer.alloc(4);h.writeUInt32BE(data.length);socket.write(Buffer.concat([h,data]));},wait(test){return until(()=>messages.find(test),'UGC response timed out');}};
+    return {messages,latest:()=>messages.filter(m=>m.kind==='snapshot').at(-1),send(body){const data=Buffer.from(JSON.stringify({protocol_version:3,session_id:session,authority_epoch:epoch,sequence:'1',body}));const h=Buffer.alloc(4);h.writeUInt32BE(data.length);socket.write(Buffer.concat([h,data]));},wait(test){return until(()=>messages.find(test),'UGC response timed out');}};
   }throw Error('Engine did not start');
 }
 async function peer(role,index){const port=base+2+index*2;const child=start('target/release/kokoverse-engine.exe',['--role',role,'--session',session,'--port',String(port),'--transport-port',String(port+1),'--asset-dir',resolve(work,`assets-${index}`),...(role==='host'?['--save',saved]:[])]);const client=await connect(port);start('.run/build/kokosync-adapter.exe',['--session',session,'--peer',role==='host'?'host':`guest-${index}`,'--engine',`127.0.0.1:${port+1}`,'--address',relay||`127.0.0.1:${base+1}`,...(relay?[]:['--insecure-development'])]);await until(()=>client.latest()?.editable,'Peer did not sync');return {child,client,port};}
@@ -69,7 +69,8 @@ try {
   const late=await peer('guest',2);
   assert.deepEqual(late.client.latest().snapshot,host.client.latest().snapshot);
   const request_id=randomUUID();host.client.send({kind:'save_world',request_id});assert.equal((await host.client.wait(m=>m.kind==='save_result'&&m.request_id===request_id)).ok,true);
-  const expected=JSON.parse(readFileSync(saved));
+  const expected=host.client.latest().snapshot;
+  assert.equal(JSON.parse(readFileSync(saved)).format_version,1);
   start('target/release/kokoverse-engine.exe',['--role','host','--session',session,'--port',String(base+8),'--transport-port',String(base+9),'--save',saved,'--asset-dir',resolve(work,'restored-assets')]);
   const restored=await connect(base+8);await until(()=>restored.latest(),'Restored snapshot missing');
   assert.deepEqual(restored.latest().snapshot,expected);

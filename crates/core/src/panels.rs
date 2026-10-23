@@ -166,7 +166,7 @@ pub(crate) fn create(
     Ok(object)
 }
 
-pub(crate) fn apply_field(world: &mut World, entity: Entity, field: &str, value: Value) {
+pub(crate) fn write_field(world: &mut World, entity: Entity, field: &str, value: Value) {
     match field {
         "panel_size" => {
             world.get_mut::<WorldPanel>(entity).unwrap().0.size =
@@ -193,6 +193,10 @@ pub(crate) fn apply_field(world: &mut World, entity: Entity, field: &str, value:
         }
         _ => unreachable!(),
     }
+}
+
+pub(crate) fn apply_field(world: &mut World, entity: Entity, field: &str, value: Value) {
+    write_field(world, entity, field, value);
     bump_field(world, entity, field);
 }
 
@@ -271,9 +275,9 @@ pub(crate) fn follow_users(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{WorldModel, panel_sessions::PanelSessions};
+    use crate::{WorldModel, edit_sessions::EditSessions};
     use kokoverse_protocol::{
-        Edit, PanelDraft, PanelInput, StructuralCommand, StructuralOperation, WorldCommand,
+        Edit, EditDraft, EditSessionRequest, StructuralCommand, StructuralOperation, WorldCommand,
     };
 
     fn panel(model: &mut WorldModel, target: Address) -> Address {
@@ -303,7 +307,9 @@ mod tests {
             .enqueue(WorldCommand::Edit {
                 edit: Edit {
                     command_id: "scroll".into(),
-                    target: a.clone(),
+                    target: crate::replication::REGISTRY
+                        .field_address(&a, "panel_scroll")
+                        .unwrap(),
                     field_id: "panel_scroll".into(),
                     expected_revision: "0".into(),
                     value: json!([0.0, 0.6]),
@@ -386,15 +392,20 @@ mod tests {
         let a = panel(&mut model, target.clone());
         let b = panel(&mut model, target.clone());
         let now = std::time::Instant::now();
-        let mut leases = PanelSessions::default();
-        let request = PanelInput {
+        let mut leases = EditSessions::default();
+        let request = EditSessionRequest {
             command_id: "1".into(),
             client_id: "a".into(),
-            panel: a,
+            context: Some(kokoverse_protocol::EditContext {
+                source: crate::replication::REGISTRY
+                    .field_address(&a, "inspector_target")
+                    .unwrap(),
+                field_id: "inspector_target".into(),
+            }),
             target: target.clone(),
             field_id: "name".into(),
             action: "begin".into(),
-            draft: PanelDraft::default(),
+            draft: EditDraft::default(),
         };
         leases
             .apply("alice", request.clone(), &model.snapshot(), now)
@@ -402,14 +413,16 @@ mod tests {
         let mut end_payload = serde_json::to_value(&request).unwrap();
         end_payload["action"] = json!("end");
         end_payload["draft"] = json!({});
-        let end: PanelInput = serde_json::from_value(end_payload).unwrap();
+        let end: EditSessionRequest = serde_json::from_value(end_payload).unwrap();
         leases.apply("alice", end, &model.snapshot(), now).unwrap();
         assert!(leases.views().is_empty());
         leases
             .apply("alice", request.clone(), &model.snapshot(), now)
             .unwrap();
         let mut other = request.clone();
-        other.panel = b;
+        other.context.as_mut().unwrap().source = crate::replication::REGISTRY
+            .field_address(&b, "inspector_target")
+            .unwrap();
         other.client_id = "b".into();
         assert!(
             leases

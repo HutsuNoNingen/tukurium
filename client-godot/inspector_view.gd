@@ -340,7 +340,7 @@ func refresh_sessions() -> void:
 	for field in controls:
 		var remote: Dictionary = {}
 		for session in manager.sessions:
-			if session.target.instance_id == target_id and session.field_id == field and (session.client_id != manager.client_id or session.panel.instance_id != panel_id):
+			if session.target.instance_id == target_id and session.field_id == field and (session.client_id != manager.client_id or session.get("context") == null or session.context.source.instance_id != panel_id):
 				remote = session
 		var readonly: bool = not manager.app.editable or not remote.is_empty()
 		for control in controls[field]:

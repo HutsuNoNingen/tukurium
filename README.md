@@ -6,6 +6,8 @@ Rust / bevy_ecs のEngineとGodotの表示クライアントを別プロセス�
 
 アバターの移動・ジャンプ・重力も各PCのRust ECSが固定60Hzで計算する。Godotは操作入力を送り、返ってきた姿勢を補間して表示する。表示クライアントを閉じても、Engineは着地まで計算を続ける。
 
+通信と保存は登録済みComponentの共通形式に統一した。値の型検証・編集可否はRustの登録表で定義し、共有パネルの編集占有も汎用のフィールド編集セッションとして扱う。Godotの要求・応答は共通Brokerで対応付ける。現行はprotocol v3・保存format v1で、旧形式のデータ移行は行わない。構成と拡張箇所は [runtime.md](docs/runtime.md) を参照。
+
 ## 起動（Windows x64）
 
 PowerShellで、このフォルダーから実行する。

@@ -13,35 +13,11 @@ pub(crate) struct MediaClock(pub f64);
 pub(crate) struct InputQueue(pub VecDeque<(u64, WorldCommand)>);
 
 pub(crate) enum Mutation {
-    SetPanelField {
+    SetField {
         entity: Entity,
+        component_id: u32,
         field: String,
         value: serde_json::Value,
-    },
-    SetName {
-        entity: Entity,
-        value: String,
-    },
-    SetPosition {
-        entity: Entity,
-        value: [f64; 3],
-    },
-    SetColor {
-        slot: Entity,
-        renderer: Entity,
-        value: [f64; 4],
-    },
-    SetRotation {
-        entity: Entity,
-        value: [f64; 4],
-    },
-    SetScale {
-        entity: Entity,
-        value: [f64; 3],
-    },
-    SetCollider {
-        entity: Entity,
-        value: Option<kokoverse_protocol::ColliderSpec>,
     },
     SetTransform {
         entity: Entity,

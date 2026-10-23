@@ -6,6 +6,8 @@ const TRANSLATION_GIZMO = preload("res://translation_gizmo.gd")
 const ASSET_IMPORTER = preload("res://asset_importer.gd")
 const SCRIPT_EDITOR = preload("res://script_editor.gd")
 const WORLD_PANELS = preload("res://world_panels.gd")
+const REQUEST_BROKER = preload("res://request_broker.gd")
+var requests = REQUEST_BROKER.new()
 var world_panels = WORLD_PANELS.new()
 var script_editor = SCRIPT_EDITOR.new()
 var script_templates: Array = []
@@ -23,7 +25,6 @@ var clock_ready := false
 var clock_offset := 0.0
 var clock_best_rtt := INF
 var clock_next_ping := 0.0
-var clock_requests: Dictionary = {}
 var tcp := StreamPeerTCP.new()
 var received := PackedByteArray()
 var outgoing := PackedByteArray()
@@ -127,6 +128,7 @@ func _ready() -> void:
 		if argument.begins_with("--session="): session = argument.trim_prefix("--session=")
 		if argument.begins_with("--capture="): capture_path = argument.trim_prefix("--capture=")
 	build_world()
+	requests.send = queue_message
 	add_child(world_panels)
 	world_panels.setup(self)
 	build_ui()
@@ -556,9 +558,8 @@ func send_field_edit(edit: Dictionary) -> void:
 	feedback.text = "Syncing…"
 	var command := edit.duplicate(true)
 	command.erase("due")
-	command.target = {"instance_id":edit.target.instance_id,"local_id":int(edit.target.local_id)}
-	command.command_id = str(Time.get_ticks_usec())
-	queue_message({"kind":"edit","edit":command})
+	command.target = field_address(edit.target.instance_id, edit.field_id)
+	requests.request({"kind":"edit","edit":command}, complete_action, ["edit","command_id"])
 
 func submit(id: String, value: Variant) -> void:
 	if not editable or pending or current.is_empty(): return
@@ -664,7 +665,7 @@ func submit_structure(action: String, target: Dictionary = {}) -> void:
 	pending = true
 	pending_action = action
 	feedback.text = "Applying…"
-	queue_message({"kind":"structure", "command":command})
+	requests.request({"kind":"structure", "command":command}, complete_action)
 
 func confirm_delete() -> void:
 	if current.is_empty(): return
@@ -702,11 +703,11 @@ func import_image(path: String) -> void:
 	pending = true
 	pending_action = "create_image"
 	feedback.text = "Sharing image…"
-	queue_message({"kind":"structure", "command":{"command_id":str(Time.get_ticks_usec()), "action":"create_image", "data_url":prefix + Marshalls.raw_to_base64(data)}})
+	requests.request({"kind":"structure", "command":{"action":"create_image", "data_url":prefix + Marshalls.raw_to_base64(data)}}, complete_action)
 
 func queue_message(body: Dictionary) -> void:
 	sequence += 1
-	var data := JSON.stringify({"protocol_version":2, "session_id":session,
+	var data := JSON.stringify({"protocol_version":3, "session_id":session,
 		"authority_epoch":epoch, "sequence":str(sequence), "body":body}).to_utf8_buffer()
 	var frame := PackedByteArray()
 	frame.resize(4)
@@ -726,6 +727,7 @@ func connect_engine() -> void:
 	retry_at = Time.get_ticks_msec() + 2000
 
 func disconnect_engine(message: String) -> void:
+	requests.disconnected()
 	script_editor.disconnected()
 	avatar_restore_started = false
 	reset_media_clock()
@@ -782,7 +784,7 @@ func finish_hand_grab() -> void:
 	grab_releasing = true
 	pending = true
 	pending_action = "grab"
-	queue_message({"kind":"grab","action":"release"})
+	requests.request({"kind":"grab","action":"release"}, complete_action, ["command_id"])
 
 func cancel_hand_grab() -> void:
 	if connected and (grab_waiting or not hand_grab.is_empty()) and not grab_releasing:
@@ -844,23 +846,14 @@ func reset_media_clock() -> void:
 	clock_ready = false
 	clock_best_rtt = INF
 	clock_next_ping = 0.0
-	clock_requests.clear()
 
 func update_media_clock() -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	if not connected or not editable or now < clock_next_ping: return
 	clock_next_ping = now + 2.0
-	for key in clock_requests.keys():
-		if now - float(clock_requests[key]) > 10.0: clock_requests.erase(key)
-	var request := str(Time.get_ticks_usec())
-	clock_requests[request] = now
-	queue_message({"kind":"clock_ping","request_id":request,"client_time":now})
+	requests.request({"kind":"clock_ping","client_time":now}, accept_clock.bind(now), ["request_id"], "request_id", 5000, "clock_pong")
 
-func accept_clock(body: Dictionary) -> void:
-	var request := str(body.get("request_id",""))
-	if not clock_requests.has(request): return
-	var sent: float = clock_requests[request]
-	clock_requests.erase(request)
+func accept_clock(body: Dictionary, sent: float) -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	var rtt := now - sent
 	var server := float(body.get("server_time",-1.0))
@@ -879,7 +872,7 @@ func send_playback(action: String, values: Dictionary = {}) -> void:
 	command.merge(values)
 	pending = true
 	pending_action = "playback"
-	queue_message({"kind":"playback","command":command})
+	requests.request({"kind":"playback","command":command}, complete_action)
 
 func update_video_controls() -> void:
 	if not video_controls.visible or current.get("playback") == null: return
@@ -896,6 +889,7 @@ func update_video_controls() -> void:
 	filling = false
 
 func _process(delta: float) -> void:
+	requests.tick()
 	script_editor.tick()
 	tcp.poll()
 	var state := tcp.get_status()
@@ -998,19 +992,19 @@ func _process(delta: float) -> void:
 		get_tree().quit()
 
 func accept_message(message: Dictionary) -> void:
-	if message.get("protocol_version") != 2 or message.get("session_id") != session: return
+	if message.get("protocol_version") != 3 or message.get("session_id") != session: return
 	if epoch != message.authority_epoch:
 		reset_media_clock()
 		avatar_restore_started = false
 	epoch = message.authority_epoch
 	var body: Dictionary = message.body
+	if body.get("kind") == "result" and body.has("snapshot"): apply_snapshot(body.snapshot)
+	if requests.receive(body): return
 	if world_panels.receive(body): return
 	if str(body.get("kind","")).begins_with("asset_"):
 		asset_importer.receive(body)
 		return
 	match body.get("kind"):
-		"clock_pong":
-			accept_clock(body)
 		"script_statuses":
 			script_statuses = body.statuses
 			script_editor.refresh()
@@ -1077,6 +1071,7 @@ func accept_message(message: Dictionary) -> void:
 			status_label.text = body.message
 			editable = body.editable
 			if not editable:
+				requests.disconnected()
 				world_panels.disconnected()
 				script_editor.disconnected()
 				avatar_restore_started = false
@@ -1089,34 +1084,31 @@ func accept_message(message: Dictionary) -> void:
 				pending_edit.clear()
 				inspector_edits.clear()
 				dirty.clear()
-		"result":
-			if script_editor.receive_result(body):
-				if body.has("snapshot"): apply_snapshot(body.snapshot)
-				return
-			if pending_action == "gizmo": restore_gizmo_visual()
-			pending = false
-			if pending_action == "edit" and not pending_edit.is_empty():
-				var key := inspector_key(pending_edit.target,pending_edit.field_id)
-				if not body.ok: inspector_edits.erase(key)
-				if not current.is_empty() and current.address == pending_edit.target and not inspector_edits.has(key):
-					dirty.erase(pending_edit.field_id)
-			else: dirty.clear()
-			feedback.text = "Applied to the shared world." if body.ok else body.get("message", "Edit rejected")
-			if body.has("snapshot"): apply_snapshot(body.snapshot)
-			else: refresh_fields()
-			if pending_action == "edit" and body.ok and not pending_edit.is_empty():
-				var key := inspector_key(pending_edit.target,pending_edit.field_id)
-				if inspector_edits.has(key) and objects.has(pending_edit.target.instance_id):
-					for field in objects[pending_edit.target.instance_id].fields:
-						if field.id == pending_edit.field_id:
-							inspector_edits[key].expected_revision = field.revision
-							if not current.is_empty() and current.address == pending_edit.target: dirty[field.id] = field.revision
-			pending_edit.clear()
-			if body.ok and pending_action in ["create", "create_image", "duplicate"] and body.get("selected") is Dictionary:
-				select_object(body.selected.instance_id)
-				focus_selected()
-			pending_action = ""
-			asset_importer.on_result(body)
+
+func complete_action(body: Dictionary) -> void:
+	if pending_action == "gizmo": restore_gizmo_visual()
+	pending = false
+	if pending_action == "edit" and not pending_edit.is_empty():
+		var key := inspector_key(pending_edit.target,pending_edit.field_id)
+		if not body.ok: inspector_edits.erase(key)
+		if not current.is_empty() and current.address == pending_edit.target and not inspector_edits.has(key):
+			dirty.erase(pending_edit.field_id)
+	else: dirty.clear()
+	feedback.text = "Applied to the shared world." if body.ok else body.get("message", "Edit rejected")
+	refresh_fields()
+	if pending_action == "edit" and body.ok and not pending_edit.is_empty():
+		var key := inspector_key(pending_edit.target,pending_edit.field_id)
+		if inspector_edits.has(key) and objects.has(pending_edit.target.instance_id):
+			for field in objects[pending_edit.target.instance_id].fields:
+				if field.id == pending_edit.field_id:
+					inspector_edits[key].expected_revision = field.revision
+					if not current.is_empty() and current.address == pending_edit.target: dirty[field.id] = field.revision
+	pending_edit.clear()
+	if body.ok and pending_action in ["create", "create_image", "duplicate"] and body.get("selected") is Dictionary:
+		select_object(body.selected.instance_id)
+		focus_selected()
+	pending_action = ""
+	asset_importer.on_result(body)
 
 func apply_snapshot(snapshot: Dictionary) -> void:
 	if gizmo.dragging:
@@ -1406,3 +1398,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		look = false
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		release_player_input()
+
+func field_address(object_id: String, field_id: String) -> Dictionary:
+	for field in objects.get(object_id, {}).get("fields", []):
+		if field.id == field_id: return {"instance_id":object_id,"local_id":int(field.component_id)}
+	return {}

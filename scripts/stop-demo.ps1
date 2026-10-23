@@ -18,7 +18,7 @@ if (Test-Path $recordPath) {
                 $stream = $client.GetStream()
                 $stream.WriteTimeout = 5000
                 $requestId = [guid]::NewGuid().ToString('N')
-                $request = @{protocol_version=2;session_id=$connection.session;authority_epoch='';sequence='0';body=@{kind='save_world';request_id=$requestId}} | ConvertTo-Json -Depth 4 -Compress
+                $request = @{protocol_version=3;session_id=$connection.session;authority_epoch='';sequence='0';body=@{kind='save_world';request_id=$requestId}} | ConvertTo-Json -Depth 4 -Compress
                 $bytes = [Text.Encoding]::UTF8.GetBytes($request)
                 $header = [BitConverter]::GetBytes([Net.IPAddress]::HostToNetworkOrder([int]$bytes.Length))
                 $stream.Write($header,0,4)

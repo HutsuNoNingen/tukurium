@@ -19,7 +19,7 @@ func run() -> void:
 			push_error("Remote panel changed the observer's selected object"); quit(1); return
 		for session in scene.world_panels.sessions:
 			if session.draft.text != "World panel edit ": continue
-			var view = scene.world_panels.panels[session.panel.instance_id].content
+			var view = scene.world_panels.panels[session.context.source.instance_id].content
 			var line: LineEdit = view.controls.name[0]
 			if line.editable or line.text != session.draft.text or line.caret_column != session.draft.caret:
 				push_error("Remote draft/caret/read-only state differ"); quit(1); return
