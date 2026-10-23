@@ -5,11 +5,14 @@ var window: Window
 var object_title: Label
 var component_count: Label
 var add_hint: Label
-var scripts: OptionButton
+var scripts: ItemList
 var templates: OptionButton
 var code: CodeEdit
 var parameters: VBoxContainer
-var enabled: CheckBox
+var selected_title: Label
+var run_status: Label
+var run_button: Button
+var pause_button: Button
 var feedback: Label
 var apply_button: Button
 var reload_button: Button
@@ -36,8 +39,8 @@ func setup(owner) -> void:
 	app = owner
 	window = Window.new()
 	window.title = "Script Systems · Luau"
-	window.min_size = Vector2i(720, 560)
-	window.size = Vector2i(920, 720)
+	window.min_size = Vector2i(900, 640)
+	window.size = Vector2i(1080, 760)
 	window.close_requested.connect(window.hide)
 	app.add_child(window)
 	var margin := MarginContainer.new()
@@ -50,28 +53,23 @@ func setup(owner) -> void:
 	object_title = Label.new()
 	object_title.add_theme_font_size_override("font_size", 20)
 	stack.add_child(object_title)
+	var split := HSplitContainer.new()
+	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	split.split_offset = 260
+	stack.add_child(split)
+	var sidebar := VBoxContainer.new()
+	sidebar.custom_minimum_size.x = 240
+	sidebar.add_theme_constant_override("separation", 10)
+	split.add_child(sidebar)
 	component_count = Label.new()
-	stack.add_child(component_count)
-	var row := HBoxContainer.new()
-	stack.add_child(row)
-	scripts = OptionButton.new()
-	scripts.tooltip_text = "Select an attached script to edit. All enabled scripts keep running."
-	scripts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scripts.item_selected.connect(func(index):
-		if source_dirty:
-			feedback.text = "Apply the draft or Reload before changing components."
-			for i in scripts.item_count:
-				if scripts.get_item_metadata(i) == selected: scripts.select(i)
-			return
-		selected = str(scripts.get_item_metadata(index))
-		config_signature = ""
-		refresh())
-	row.add_child(scripts)
-	enabled = CheckBox.new()
-	enabled.text = "Run on host"
-	enabled.toggled.connect(func(value):
-		if not filling: update_component(false, value))
-	row.add_child(enabled)
+	sidebar.add_child(component_count)
+	scripts = ItemList.new()
+	scripts.tooltip_text = "Select a script to edit. Other running scripts keep running."
+	scripts.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scripts.custom_minimum_size.y = 140
+	scripts.add_theme_constant_override("v_separation", 12)
+	scripts.item_selected.connect(select_script)
+	sidebar.add_child(scripts)
 	remove_button = Button.new()
 	remove_button.text = "Remove selected"
 	remove_button.pressed.connect(func():
@@ -79,37 +77,59 @@ func setup(owner) -> void:
 		if component.is_empty(): return
 		remove_dialog.dialog_text = "Remove %s from this object? Its code, parameters and saved state will be removed." % component.schema.name
 		remove_dialog.popup_centered())
-	row.add_child(remove_button)
+	sidebar.add_child(remove_button)
 	remove_dialog = ConfirmationDialog.new()
 	remove_dialog.title = "Remove script"
 	remove_dialog.ok_button_text = "Remove script"
 	remove_dialog.confirmed.connect(remove_component)
 	window.add_child(remove_dialog)
+	sidebar.add_child(HSeparator.new())
 	var add_heading := Label.new()
-	add_heading.text = "Add another script"
-	stack.add_child(add_heading)
-	var create_row := HBoxContainer.new()
-	stack.add_child(create_row)
+	add_heading.text = "Add a script"
+	sidebar.add_child(add_heading)
 	templates = OptionButton.new()
-	templates.tooltip_text = "Choose starter code for a new script. This does not select an attached script."
+	templates.tooltip_text = "Choose starter code for a new script."
 	templates.item_selected.connect(func(_index): refresh_buttons())
-	templates.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	create_row.add_child(templates)
+	sidebar.add_child(templates)
 	attach_button = Button.new()
 	attach_button.text = "+ Add template"
 	attach_button.pressed.connect(func(): add_template(templates.selected))
-	create_row.add_child(attach_button)
+	sidebar.add_child(attach_button)
 	new_button = Button.new()
 	new_button.text = "+ Blank script"
 	new_button.tooltip_text = "Add your own script with a unique name, then paste or write its code."
 	new_button.pressed.connect(add_blank)
-	create_row.add_child(new_button)
+	sidebar.add_child(new_button)
 	add_hint = Label.new()
 	add_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	stack.add_child(add_hint)
+	add_hint.add_theme_font_size_override("font_size", 13)
+	sidebar.add_child(add_hint)
+	var editor := VBoxContainer.new()
+	editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	editor.custom_minimum_size.x = 570
+	editor.add_theme_constant_override("separation", 10)
+	split.add_child(editor)
+	var toolbar := HBoxContainer.new()
+	editor.add_child(toolbar)
+	selected_title = Label.new()
+	selected_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	selected_title.add_theme_font_size_override("font_size", 20)
+	toolbar.add_child(selected_title)
+	run_button = Button.new()
+	run_button.text = "Run"
+	run_button.tooltip_text = "Run the saved script on the host. Saved state is preserved."
+	run_button.pressed.connect(func(): update_component(false, true))
+	toolbar.add_child(run_button)
+	pause_button = Button.new()
+	pause_button.text = "Pause"
+	pause_button.tooltip_text = "Pause this script for everyone. Saved state is preserved."
+	pause_button.pressed.connect(func(): update_component(false, false))
+	toolbar.add_child(pause_button)
+	run_status = Label.new()
+	editor.add_child(run_status)
 	var code_heading := Label.new()
-	code_heading.text = "Selected script · source code (Apply to save)"
-	stack.add_child(code_heading)
+	code_heading.text = "Source code · Apply to save"
+	editor.add_child(code_heading)
 	code = CodeEdit.new()
 	code.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	code.custom_minimum_size.y = 160
@@ -129,27 +149,27 @@ func setup(owner) -> void:
 	code.text_changed.connect(func():
 		if not filling:
 			source_dirty = true
-			feedback.text = "Draft · Apply / restart to run this code. Fields reset to their defaults when code changes."
+			feedback.text = "Draft · Apply code to save; Run / Pause stays as shown above. Fields reset when code changes."
 			refresh_buttons())
-	stack.add_child(code)
+	editor.add_child(code)
 	var parameters_heading := Label.new()
 	parameters_heading.text = "Public parameters · changes save automatically"
-	stack.add_child(parameters_heading)
+	editor.add_child(parameters_heading)
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size.y = 80
-	stack.add_child(scroll)
+	editor.add_child(scroll)
 	parameters = VBoxContainer.new()
 	parameters.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(parameters)
 	feedback = Label.new()
 	feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	feedback.custom_minimum_size.y = 48
-	stack.add_child(feedback)
+	editor.add_child(feedback)
 	var actions := HBoxContainer.new()
-	stack.add_child(actions)
+	editor.add_child(actions)
 	apply_button = Button.new()
-	apply_button.text = "Apply / restart"
-	apply_button.pressed.connect(func(): update_component(true, enabled.button_pressed))
+	apply_button.text = "Apply code"
+	apply_button.pressed.connect(func(): update_component(true, bool(current_script().get("enabled", false))))
 	actions.add_child(apply_button)
 	reload_button = Button.new()
 	reload_button.text = "Reload shared code"
@@ -176,7 +196,30 @@ func open(id: String) -> void:
 		list_signature = ""
 		queued_parameters.clear()
 	refresh()
-	window.popup_centered(Vector2i(920, 720))
+	window.popup_centered(Vector2i(1080, 760))
+
+func select_script(index: int) -> void:
+	if index < 0 or index >= scripts.item_count: return
+	if source_dirty or not queued_parameters.is_empty() or not pending_id.is_empty():
+		feedback.text = "Apply or Reload the code draft before switching scripts." if source_dirty else "Wait for the parameter changes to save before switching scripts."
+		for i in scripts.item_count:
+			if scripts.get_item_metadata(i) == selected: scripts.select(i)
+		return
+	selected = str(scripts.get_item_metadata(index))
+	scripts.select(index)
+	config_signature = ""
+	last_error = ""
+	feedback.text = ""
+	refresh()
+
+func script_error(id: String) -> String:
+	for status in app.script_statuses:
+		if status.script_id == id and status.get("error") is String: return status.error
+	return ""
+
+func execution_label(component: Dictionary) -> String:
+	if not script_error(str(component.id)).is_empty(): return "Error"
+	return "Running" if component.enabled else "Paused"
 
 func current_script() -> Dictionary:
 	for component in app.objects.get(target, {}).get("scripts", []):
@@ -229,7 +272,7 @@ func queue_parameter(id: String, value: Variant) -> void:
 
 func tick() -> void:
 	if not queued_parameters.is_empty() and pending_id.is_empty() and Time.get_ticks_msec() >= flush_at:
-		update_component(false, enabled.button_pressed)
+		update_component(false, bool(current_script().get("enabled", false)))
 
 func disconnected() -> void:
 	if not pending_id.is_empty(): feedback.text = "Connection interrupted. Review the shared component before retrying."
@@ -261,16 +304,19 @@ func refresh() -> void:
 		for field in object.fields:
 			if field.id == "name": object_title.text = "Object: " + str(field.value)
 	var components: Array = object.get("scripts", [])
-	component_count.text = "Attached scripts · %d / 4 — select one to edit below" % components.size()
+	component_count.text = "Attached scripts · %d / 4" % components.size()
 	var signature := ""
-	for component in components: signature += component.id + component.schema.name + str(component.enabled)
+	for component in components: signature += component.id + component.schema.name + str(component.enabled) + script_error(component.id)
 	filling = true
 	if signature != list_signature:
 		list_signature = signature
 		scripts.clear()
-		if components.is_empty(): scripts.add_item("No scripts attached yet")
+		if components.is_empty():
+			scripts.add_item("No scripts attached yet")
+			scripts.set_item_disabled(0, true)
 		for component in components:
-			scripts.add_item(component.schema.name + (" · enabled" if component.enabled else " · paused"))
+			scripts.add_item(component.schema.name + "  ·  " + execution_label(component))
+			scripts.set_item_tooltip(scripts.item_count - 1, script_error(component.id))
 			scripts.set_item_metadata(scripts.item_count - 1, component.id)
 		if not components.any(func(c): return c.id == selected):
 			selected = str(components.back().id) if not components.is_empty() else ""
@@ -281,6 +327,9 @@ func refresh() -> void:
 		templates.clear()
 		for template in app.script_templates: templates.add_item(template.name)
 	var component := current_script()
+	selected_title.text = str(component.get("schema", {}).get("name", "Select a script"))
+	run_status.text = "Add a template or a blank script from the left." if component.is_empty() else execution_label(component) + " · execution on host"
+	run_status.modulate = Color("ed9f93") if not script_error(selected).is_empty() else (Color("82d9d0") if component.get("enabled", false) else Color("d6bb87"))
 	if component.is_empty():
 		source_dirty = false
 		code.text = "Add a component template to begin."
@@ -290,7 +339,6 @@ func refresh() -> void:
 			config_signature = component.id + component.revision
 			base_revision = component.revision
 			code.text = component.source
-			enabled.button_pressed = component.enabled
 			build_parameters(component)
 		elif component.revision != base_revision:
 			feedback.text = "Shared code changed while this draft was open. Reload before retrying."
@@ -371,16 +419,19 @@ func refresh_buttons() -> void:
 	if templates.selected >= 0 and templates.selected < app.script_templates.size():
 		duplicate = components.any(func(c): return c.schema.name == app.script_templates[templates.selected].name)
 	attach_button.disabled = not ready or source_dirty or full or duplicate
-	attach_button.tooltip_text = "Limit reached: 4 scripts per object." if full else ("This template is already attached. Select it above to edit, or add a Blank script." if duplicate else "Attach the chosen template as a new script on this object.")
+	attach_button.tooltip_text = "Limit reached: 4 scripts per object." if full else ("This template is already attached. Select it on the left to edit, or add a Blank script." if duplicate else "Attach the chosen template as a new script on this object.")
 	add_hint.text = "Up to 4 scripts per object, each with a different name. Use Blank script to write your own."
-	if duplicate: add_hint.text = "This template is already attached. Select it above, choose another template, or add a Blank script."
+	if duplicate: add_hint.text = "This template is already attached. Select it on the left, choose another template, or add a Blank script."
 	if full: add_hint.text = "4 / 4 scripts attached. Remove a script before adding another."
 	if source_dirty: add_hint.text = "Apply or Reload this code draft before adding another script."
 	new_button.disabled = not ready or source_dirty or full
-	scripts.disabled = not ready or components.is_empty()
+	for i in scripts.item_count: scripts.set_item_disabled(i, not ready or components.is_empty())
 	apply_button.disabled = not ready or component.is_empty()
 	remove_button.disabled = not ready or component.is_empty() or source_dirty
-	enabled.disabled = not ready or component.is_empty() or source_dirty
+	var can_control := ready and not component.is_empty() and not source_dirty
+	run_button.disabled = not can_control or (component.get("enabled", false) and script_error(selected).is_empty())
+	pause_button.disabled = not can_control or not component.get("enabled", false)
+	reload_button.disabled = not ready or component.is_empty()
 	code.editable = ready and not component.is_empty()
 	parameters.mouse_filter = Control.MOUSE_FILTER_STOP if source_dirty else Control.MOUSE_FILTER_PASS
 	parameters.modulate.a = 0.5 if source_dirty else 1.0

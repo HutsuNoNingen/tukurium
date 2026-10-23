@@ -30,12 +30,20 @@ func run() -> void:
 		quit(1); return
 	editor.parameter_controls.speed.value = 120
 	if not await check_until(func(): return scene.objects[id].scripts[0].parameters.speed == 120 and editor.pending_id.is_empty(), "Public field did not auto-sync"): quit(1); return
-	editor.enabled.button_pressed = false
+	editor.pause_button.pressed.emit()
 	if not await check_until(func(): return not scene.objects[id].scripts[0].enabled and editor.pending_id.is_empty(), "Pause script failed"): quit(1); return
 	await create_timer(0.15).timeout
 	first_rotation = scene.objects[id].world_rotation.duplicate()
 	await create_timer(0.2).timeout
 	if scene.objects[id].world_rotation != first_rotation: push_error("Disabled script still runs"); quit(1); return
+	if not editor.pause_button.disabled or editor.run_button.disabled or editor.run_status.text.find("Paused") < 0:
+		push_error("Paused execution controls do not match shared state"); quit(1); return
+	editor.run_button.pressed.emit()
+	if not await check_until(func(): return scene.objects[id].scripts[0].enabled and editor.pending_id.is_empty(), "Resume script failed"): quit(1); return
+	first_rotation = scene.objects[id].world_rotation.duplicate()
+	if not await check_until(func(): return scene.objects[id].world_rotation != first_rotation, "Resumed script did not move"): quit(1); return
+	editor.pause_button.pressed.emit()
+	if not await check_until(func(): return not scene.objects[id].scripts[0].enabled and editor.pending_id.is_empty(), "Second pause failed"): quit(1); return
 	editor.add_template(1)
 	if not await check_until(func(): return scene.objects[id].scripts.size() == 2 and editor.pending_id.is_empty(), "Second script missing"): quit(1); return
 	editor.click_button.pressed.emit()
@@ -51,8 +59,23 @@ func run() -> void:
 	if not await check_until(func(): return not scene.objects[id].scripts[1].state.get("active", true), "World click did not invoke script"): quit(1); return
 	editor.click_button.pressed.emit()
 	if not await check_until(func(): return scene.objects[id].scripts[1].state.get("active", false), "Second click did not run"): quit(1); return
+	editor.pause_button.pressed.emit()
+	if not await check_until(func(): return not scene.objects[id].scripts[1].enabled and editor.pending_id.is_empty(), "Click script pause failed"): quit(1); return
+	if not scene.objects[id].scripts[1].state.get("active", false): push_error("Pause cleared script state"); quit(1); return
+	editor.run_button.pressed.emit()
+	if not await check_until(func(): return scene.objects[id].scripts[1].enabled and editor.pending_id.is_empty(), "Click script resume failed"): quit(1); return
+	if not scene.objects[id].scripts[1].state.get("active", false): push_error("Resume cleared script state"); quit(1); return
 	var valid_source: String = scene.objects[id].scripts[1].source
+	if not editor.scripts is ItemList or editor.scripts.global_position.x >= editor.code.global_position.x:
+		push_error("Attached scripts are not to the left of the code editor"); quit(1); return
 	editor.code.text = "return { invalid source"
+	editor.code.text_changed.emit()
+	var draft_id: String = editor.selected
+	editor.scripts.item_selected.emit(0)
+	if editor.selected != draft_id or editor.code.text != "return { invalid source":
+		push_error("Selecting another script discarded the code draft"); quit(1); return
+	if not editor.run_button.disabled or not editor.pause_button.disabled:
+		push_error("Execution controls should not discard an unapplied draft"); quit(1); return
 	editor.apply_button.pressed.emit()
 	if not await check_until(func(): return editor.pending_id.is_empty(), "Invalid code response missing"): quit(1); return
 	if scene.objects[id].scripts[1].source != valid_source: push_error("Invalid code replaced working script"); quit(1); return

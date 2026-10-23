@@ -54,17 +54,17 @@ func run() -> void:
 	key(root, KEY_ENTER, true)
 	key(root, KEY_ENTER, false)
 	if not await wait_for(func(): return scene.objects.size() == 2, "Enter no longer activates buttons"): quit(1); return
-	# A separate script Window also uses ui_accept; keep its checkboxes unchanged.
+	# A separate script Window also uses ui_accept; Space must not pause a script.
 	var editor = scene.script_editor
 	editor.open(object_id)
 	editor.add_template(1)
 	if not await wait_for(func(): return editor.pending_id.is_empty() and not editor.current_script().is_empty(), "Script UI not ready"): quit(1); return
-	editor.enabled.grab_focus()
-	var enabled: bool = editor.enabled.button_pressed
+	editor.pause_button.grab_focus()
+	var enabled: bool = editor.current_script().enabled
 	key(editor.window, KEY_SPACE, true)
 	key(editor.window, KEY_SPACE, false)
 	await create_timer(0.15).timeout
-	if editor.enabled.button_pressed != enabled: push_error("Space toggled a checkbox in a child Window"); quit(1); return
+	if editor.current_script().enabled != enabled: push_error("Space paused a script in a child Window"); quit(1); return
 	editor.code.grab_focus()
 	editor.code.set_caret_line(0)
 	editor.code.set_caret_column(0)
