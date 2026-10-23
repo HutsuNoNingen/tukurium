@@ -78,12 +78,21 @@ func field_driver(object_id: String, field: String) -> Dictionary:
 		if script.id == script_id: return script
 	return {}
 
+func panel_spawn_position(distance: float) -> Vector3:
+	var origin: Vector3 = app.camera.global_position
+	var forward: Vector3 = -app.camera.global_basis.z
+	var hit: Dictionary = app.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(origin,origin+forward*distance))
+	if not hit.is_empty() and hit.collider.has_meta("object_id") and panels.has(str(hit.collider.get_meta("object_id"))):
+		# Opening a tool while looking at another must not put it behind that surface.
+		distance = maxf(0.6,origin.distance_to(hit.position)-0.4)
+	return origin + forward*distance
+
 func open_inspector(target_id: String = "", desktop: bool = false) -> void:
 	if not app.editable: return
 	if desktop:
 		open_window(target_id)
 		return
-	var position: Vector3 = app.camera.global_position - app.camera.global_basis.z * 2.1
+	var position := panel_spawn_position(2.1)
 	var q: Quaternion = app.camera.global_basis.get_rotation_quaternion()
 	var target: Variant = app.address_of(app.objects[target_id]) if app.objects.has(target_id) else null
 	command({"kind":"structure","command":{"action":"create_inspector","target":target,"position":[position.x,position.y,position.z],"rotation":[q.x,q.y,q.z,q.w]}}, func(result):
@@ -102,7 +111,7 @@ func close_panel(id: String) -> void:
 
 func open_creation() -> void:
 	if not app.editable: return
-	var position: Vector3 = app.camera.global_position - app.camera.global_basis.z * 2.6
+	var position := panel_spawn_position(2.6)
 	var q: Quaternion = app.camera.global_basis.get_rotation_quaternion()
 	command({"kind":"structure","command":{"action":"create_creation_panel","position":[position.x,position.y,position.z],"rotation":[q.x,q.y,q.z,q.w]}}, func(result):
 		if not result.ok: app.feedback.text = result.get("message","Cannot open creation panel"))

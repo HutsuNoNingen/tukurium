@@ -26,7 +26,11 @@ var apply_button: Button
 var reload_button: Button
 var attach_button: Button
 var new_button: Button
-var remove_dialog: ConfirmationDialog
+var remove_confirmation: PanelContainer
+var remove_message: Label
+var remove_confirm_button: Button
+var remove_cancel_button: Button
+var removal: Dictionary = {}
 var remove_button: Button
 var click_button: Button
 var parameter_controls: Dictionary = {}
@@ -86,17 +90,29 @@ func setup(owner, mount: Control = null) -> void:
 	sidebar.add_child(scripts)
 	remove_button = Button.new()
 	remove_button.text = "Remove selected"
-	remove_button.pressed.connect(func():
-		var component := current_script()
-		if component.is_empty(): return
-		remove_dialog.dialog_text = "Remove %s from this object? Its code, parameters and saved state will be removed." % component.schema.name
-		remove_dialog.popup_centered())
+	remove_button.focus_mode = Control.FOCUS_NONE
+	remove_button.pressed.connect(request_removal)
 	sidebar.add_child(remove_button)
-	remove_dialog = ConfirmationDialog.new()
-	remove_dialog.title = "Remove script"
-	remove_dialog.ok_button_text = "Remove script"
-	remove_dialog.confirmed.connect(remove_component)
-	surface.add_child(remove_dialog)
+	# Keep confirmation inside this surface. An exclusive Window under a 3D
+	# SubViewport can block the main viewport without receiving its laser input.
+	remove_confirmation = PanelContainer.new()
+	sidebar.add_child(remove_confirmation)
+	var confirmation_body := VBoxContainer.new()
+	remove_confirmation.add_child(confirmation_body)
+	remove_message = Label.new()
+	remove_message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	confirmation_body.add_child(remove_message)
+	remove_cancel_button = Button.new()
+	remove_cancel_button.text = "Cancel"
+	remove_cancel_button.focus_mode = Control.FOCUS_NONE
+	remove_cancel_button.pressed.connect(cancel_removal)
+	confirmation_body.add_child(remove_cancel_button)
+	remove_confirm_button = Button.new()
+	remove_confirm_button.text = "Remove script"
+	remove_confirm_button.focus_mode = Control.FOCUS_NONE
+	remove_confirm_button.pressed.connect(remove_component)
+	confirmation_body.add_child(remove_confirm_button)
+	remove_confirmation.hide()
 	sidebar.add_child(HSeparator.new())
 	var add_heading := Label.new()
 	add_heading.text = "Add a script"
@@ -207,6 +223,7 @@ func setup(owner, mount: Control = null) -> void:
 
 func open(id: String) -> void:
 	if target != id:
+		cancel_removal()
 		target = id
 		selected = ""
 		source_dirty = false
@@ -274,8 +291,23 @@ func add_blank() -> void:
 
 func remove_component() -> void:
 	var component := current_script()
-	if component.is_empty(): return
+	var requested := removal
+	cancel_removal()
+	if component.is_empty() or requested.get("target") != target or requested.get("script_id") != component.id or requested.get("revision") != component.revision:
+		feedback.text = "The selected script changed. Choose Remove again."
+		return
 	send_action({"action":"remove", "script_id":component.id, "expected_revision":component.revision})
+
+func request_removal() -> void:
+	var component := current_script()
+	if component.is_empty() or remove_button.disabled: return
+	removal = {"target":target,"script_id":component.id,"revision":component.revision}
+	remove_message.text = "Remove %s? Its code, parameters and saved state will be deleted." % component.schema.name
+	remove_confirmation.show()
+
+func cancel_removal() -> void:
+	removal = {}
+	if remove_confirmation != null: remove_confirmation.hide()
 
 func update_component(apply_code: bool, run: bool) -> void:
 	var component := current_script()
@@ -302,6 +334,7 @@ func tick() -> void:
 		update_component(false, bool(current_script().get("enabled", false)))
 
 func disconnected() -> void:
+	cancel_removal()
 	if not pending_id.is_empty(): feedback.text = "Connection interrupted. Review the shared component before retrying."
 	pending_id = ""
 	queued_parameters.clear()
@@ -357,6 +390,8 @@ func refresh() -> void:
 		templates.clear()
 		for template in app.script_templates: templates.add_item(template.name)
 	var component := current_script()
+	if not removal.is_empty() and (removal.get("target") != target or removal.get("script_id") != component.get("id") or removal.get("revision") != component.get("revision")):
+		cancel_removal()
 	selected_title.text = str(component.get("schema", {}).get("name", "Select a script"))
 	run_status.text = "Add a template or a blank script from the left." if component.is_empty() else execution_label(component) + (" · local Drive" if component.get("schema", {}).get("has_drive", false) else " · shared Write on host")
 	run_status.modulate = Color("ed9f93") if not script_error(selected).is_empty() else (Color("82d9d0") if component.get("enabled", false) else Color("d6bb87"))

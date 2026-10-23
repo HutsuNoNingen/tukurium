@@ -10,6 +10,30 @@ func until(test: Callable, message: String) -> bool:
 	push_error(message)
 	return false
 
+func mouse(button: int, pressed: bool, point: Vector2) -> void:
+	var event := InputEventMouseButton.new()
+	event.position = point
+	event.button_index = button
+	event.pressed = pressed
+	root.push_input(event,true)
+
+func fps_click(scene, panel, control: Control) -> void:
+	await process_frame
+	var point := control.get_global_rect().get_center()
+	var local := Vector3((point.x/panel.viewport.size.x-0.5)*panel.mesh.size.x,(0.5-point.y/panel.viewport.size.y)*panel.mesh.size.y,0.025)
+	var direction: Vector3 = (panel.to_global(local)-scene.camera.global_position).normalized()
+	var motion := InputEventMouseMotion.new()
+	motion.position = root.size*0.5
+	motion.relative = Vector2(wrapf(scene.orbit_yaw-atan2(-direction.x,-direction.z),-PI,PI),scene.orbit_pitch-asin(direction.y))/0.003
+	root.push_input(motion,true)
+	await process_frame
+	await process_frame
+	var hit: Dictionary = scene.world_panels.pick(root.size*0.5)
+	if hit.get("id","") != panel.panel_id:
+		push_error("Panel control is occluded: expected="+panel.panel_id+" hit="+str(hit.get("id","none"))); quit(1); return
+	mouse(MOUSE_BUTTON_LEFT,true,root.size*0.5)
+	mouse(MOUSE_BUTTON_LEFT,false,root.size*0.5)
+
 func run() -> void:
 	var scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
@@ -64,5 +88,46 @@ func run() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--screenshot="):
 			panels[0].viewport.get_texture().get_image().save_png(arg.trim_prefix("--screenshot="))
+	# Use the actual FPS ray/input path for removal and creation, not signal-only tests.
+	scene.world_panels.close_panel(panels[1].panel_id)
+	if not await until(func(): return scene.world_panels.panels.size()==1,"Extra inspector did not close"): quit(1); return
+	var panel = panels[0]
+	scene.set_view_mode(1)
+	scene.orbit_yaw = 0
+	scene.orbit_pitch = 0
+	var position: Vector3 = scene.player_position + Vector3(0,1.15,-2)
+	scene.world_panels.edit(panel.panel_id,"position",[position.x,position.y,position.z])
+	scene.world_panels.edit(panel.panel_id,"rotation",[0,0,0,1])
+	if not await until(func(): return panel.position.distance_to(position)<0.01 and not a.editor.remove_button.disabled,"Removal controls not ready"): quit(1); return
+	await fps_click(scene,panel,a.editor.remove_button)
+	if root.find_children("*","Window",true,false).any(func(w): return w.visible and w.exclusive):
+		push_error("Script removal opened an exclusive subwindow that blocks world input"); quit(1); return
+	if not await until(func(): return a.editor.remove_confirmation.visible,"Inline removal confirmation did not open"): quit(1); return
+	if not scene.fps_active or scene.gameplay_keyboard_blocked(): push_error("Removal confirmation blocks FPS movement"); quit(1); return
+	var before: Vector3 = scene.player_target_position
+	Input.action_press("move_right")
+	var moved: bool = await until(func(): return scene.player_target_position.distance_to(before)>0.15,"Removal confirmation froze movement")
+	Input.action_release("move_right")
+	if not moved: quit(1); return
+	await fps_click(scene,panel,a.editor.remove_cancel_button)
+	if a.editor.remove_confirmation.visible or scene.objects[target].scripts.is_empty(): push_error("Cancel removed the script or left confirmation open"); quit(1); return
+	await fps_click(scene,panel,a.editor.remove_button)
+	await fps_click(scene,panel,a.editor.remove_confirm_button)
+	if not await until(func(): return scene.objects[target].get("scripts",[]).is_empty() and a.editor.pending_id.is_empty(),"FPS script removal failed"): quit(1); return
+	# The New entry must open an operable world panel even immediately after removal.
+	mouse(MOUSE_BUTTON_MIDDLE,true,root.size*0.5)
+	mouse(MOUSE_BUTTON_MIDDLE,false,root.size*0.5)
+	if not scene.hud.ring.visible: push_error("Ring blocked after script removal"); quit(1); return
+	var new_point: Vector2 = scene.hud.ring.center + Vector2(0,125)
+	mouse(MOUSE_BUTTON_LEFT,true,new_point)
+	mouse(MOUSE_BUTTON_LEFT,false,new_point)
+	if not await until(func(): return scene.world_panels.panels.values().any(func(p): return not p.inspector_content),"New object dialog did not appear after script removal"): quit(1); return
+	var creation = scene.world_panels.panels.values().filter(func(p): return not p.inspector_content)[0]
+	var creation_id: String = creation.panel_id
+	if scene.gameplay_keyboard_blocked() or not scene.fps_active: push_error("New object panel blocks FPS"); quit(1); return
+	var count: int = scene.objects.size()
+	await fps_click(scene,creation,creation.content.create_button)
+	if not await until(func(): return not scene.objects.has(creation_id) and scene.objects.size()==count,"Creating an object after script removal failed"): quit(1); return
+	print("SCRIPT DIALOGS PASS: inline cancel/remove, FPS movement, New panel and creation")
 	print("SHARED SCRIPT SMOKE PASS: concurrent drafts, multiple cursors, Apply and syntax errors")
 	quit(0)

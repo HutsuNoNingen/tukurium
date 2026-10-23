@@ -36,6 +36,7 @@ var tcp := StreamPeerTCP.new()
 var received := PackedByteArray()
 var outgoing := PackedByteArray()
 var port := 47000
+var close_with_engine := false
 var session := "demo"
 var epoch := ""
 var sequence := 0
@@ -133,6 +134,7 @@ func _ready() -> void:
 			key.physical_keycode = bindings[action]
 			InputMap.action_add_event(action, key)
 	for argument in OS.get_cmdline_user_args():
+		if argument == "--close-with-engine": close_with_engine = true
 		if argument.begins_with("--port="): port = int(argument.trim_prefix("--port="))
 		if argument.begins_with("--session="): session = argument.trim_prefix("--session=")
 		if argument.begins_with("--capture="): capture_path = argument.trim_prefix("--capture=")
@@ -766,10 +768,14 @@ func connect_engine() -> void:
 	received.clear()
 	outgoing.clear()
 	tcp = StreamPeerTCP.new()
-	tcp.connect_to_host("127.0.0.1", port)
+	var error := tcp.connect_to_host("127.0.0.1", port)
+	if close_with_engine and error != OK:
+		get_tree().quit()
 	retry_at = Time.get_ticks_msec() + 2000
 
 func disconnect_engine(message: String) -> void:
+	if close_with_engine and connected:
+		get_tree().quit()
 	requests.disconnected()
 	script_editor.disconnected()
 	avatar_restore_started = false
@@ -936,6 +942,9 @@ func _process(delta: float) -> void:
 	script_editor.tick()
 	tcp.poll()
 	var state := tcp.get_status()
+	if close_with_engine and state == StreamPeerTCP.STATUS_ERROR:
+		get_tree().quit()
+		return
 	if state == StreamPeerTCP.STATUS_CONNECTED:
 		if not connected:
 			connected = true

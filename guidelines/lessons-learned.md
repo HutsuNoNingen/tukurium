@@ -82,3 +82,33 @@ GodotのMeshはピック判定やパネル入力との互換性のため同じ�
 - 通信・保存の確認：ゲストの親移動プレビューをホストで受信、途中参加、保存復元。共有パネルの入力・保持も回帰テストで確認。
 - コード：[render_hierarchy.gd](../client-godot/render_hierarchy.gd)、[hierarchy.rs](../crates/core/src/hierarchy.rs)。
 - テスト：[render_hierarchy_smoke.gd](../client-godot/render_hierarchy_smoke.gd)、[hierarchy-integration.mjs](../tests/hierarchy-integration.mjs)。確認日：2026-10-24。
+
+## Remove Scriptを押すと操作できなくなる
+
+3Dインスペクタ内のScriptエディタが、削除確認にConfirmationDialogを使っていた。
+SubViewport内の排他的なWindowがメイン画面の入力を止め、レーザーで確認ボタンを押せなくなった。
+削除確認は同じパネル内のControlで表示する。キャンセル・確定も通常のパネル入力で操作し、確認中の移動を止めない。
+対象のScript、オブジェクト、revisionが変わった場合は確認を取り消す。
+
+- 確認：FPSの実入力で削除確認を開く、確認中に歩く、キャンセル、再度開いて削除、その後に新規作成する。
+- コード：[script_editor.gd](../client-godot/script_editor.gd)。テスト：[shared_script_smoke.gd](../client-godot/shared_script_smoke.gd)、[script-documents-integration.mjs](../tests/script-documents-integration.mjs)。
+
+## 新規作成パネルがインスペクタの奥に隠れる
+
+新規作成はカメラから2.6m、インスペクタは2.1mの位置に出していた。
+インスペクタを見ながら新規作成すると、手前のインスペクタが新しいパネルを隠し、クリックも遮っていた。
+パネルを開くときは視線上の既存パネルを調べ、見つかった場合はその手前へ出す。
+これは表示用の出現位置で、生成したパネルの共有・保持・寿命は既存のWorldPanelに従う。
+
+- 確認：インスペクタを見たままリングメニューから新規作成し、FPSで作成ボタンを押して物体を置けること。
+- コード：[world_panels.gd](../client-godot/world_panels.gd)。テスト：[shared_script_smoke.gd](../client-godot/shared_script_smoke.gd)。
+
+## 配布の基準をGitのHEADだけで決めない
+
+前回の配布に含まれていたセッション管理・ライブラリ・ログ窓が未コミットだったため、HEADだけから作った次の配布で欠落した。
+ビルド前に前回のbuild-info.jsonと起動スクリプトを確認し、維持する機能を決める。
+作業ツリーの変更を除外する場合も、その機能を前回すでに配布していないか確認する。未コミットであることだけを除外理由にしない。
+梱包後は前回の機能、今回の修正、起動方法を配布物で検証する。ZIPと実行用フォルダーを別バージョンで作り、利用中のフォルダーへ上書きしない。
+
+- 確認：セッション管理、ライブラリ、表示されるEngineログ、再起動、3Dパネルの入力。
+- 比較元：`Kokoverse-Windows-x64-20261024-020925`。欠落した配布：`Kokoverse-Windows-x64-20261024-023500`。確認日：2026-10-24。

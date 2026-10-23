@@ -51,6 +51,9 @@ func run() -> void:
 	var tint: Color = scene.render_nodes[id].material_override.albedo_color
 	if not tint.is_equal_approx(Color(1, 0.3, 0.1, 1)): push_error("Click color did not reach renderer"); quit(1); return
 	scene.gizmo.clear_target()
+	# Startup FPS consumes its first click to capture the cursor. This assertion
+	# exercises a world interaction, so use the free-camera picking mode.
+	scene.set_view_mode(2)
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = true
@@ -94,9 +97,8 @@ func run() -> void:
 	for index in [3,2]:
 		editor.scripts.item_selected.emit(index)
 		editor.remove_button.pressed.emit()
-		if not editor.remove_dialog.visible: push_error("Removal has no confirmation"); quit(1); return
-		editor.remove_dialog.hide()
-		editor.remove_dialog.confirmed.emit()
+		if not editor.remove_confirmation.visible: push_error("Removal has no confirmation"); quit(1); return
+		editor.remove_confirm_button.pressed.emit()
 		if not await check_until(func(): return scene.objects[id].scripts.size() == index and editor.pending_id.is_empty(), "Removing a selected blank script failed"): quit(1); return
 	if editor.new_button.disabled: push_error("Adding remains disabled below the limit"); quit(1); return
 	editor.scripts.item_selected.emit(1)
