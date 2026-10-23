@@ -203,3 +203,10 @@ Godotのパレットから `WorldText` の白色 `[1.0,1.0,1.0,1.0]` を送る�
 
 - 再現・確認：空Slotに文字を追加し、色を同期、付け外し、途中参加を [creation-integration.mjs](../tests/creation-integration.mjs) の `--rendered` で確認する。整数の色値はRustの [tests.rs](../crates/core/src/tests.rs) でも確認する。
 - コード：[lib.rs](../crates/core/src/lib.rs)、[replication.rs](../crates/core/src/replication.rs)。確認日：2026-10-24。
+
+## 描画部品のないSlotも作成位置を明示する
+
+空Slotを原点へ固定して作ると、後から付けた `WorldText` が床に隠れ、パレット操作は成功していても利用者には見えなかった。作成パネルは視点前方の水平位置と目線の高さを渡し、Rustはそのワールド位置を検証してから親Slotの相対座標に変換する。メッシュの有無ではなく、配置と画面での見え方も描画付きテストで確認する。
+
+- 再現・確認：[creation-integration.mjs](../tests/creation-integration.mjs) の `--rendered` で作成・付け外し後に視点をSlotへ向けたスクリーンショットを確認する。親付きSlotのワールド位置は [tests.rs](../crates/core/src/tests.rs) で確認する。
+- コード：[creation_panel.gd](../client-godot/creation_panel.gd)、[systems.rs](../crates/core/src/systems.rs)。確認日：2026-10-24。

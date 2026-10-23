@@ -160,12 +160,19 @@ func run() -> void:
 	if not await until(func(): return scene.objects[slot_id].get("world_text")==null and not scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not detach"): quit(1); return
 	await click_control(scene,surface,panel.add_text_button)
 	if not await until(func(): return scene.objects[slot_id].get("world_text")!=null and scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not reattach"): quit(1); return
+	scene.world_panels.close_panel(surface.panel_id)
+	if not await until(func(): return scene.world_panels.panels.is_empty(),"Component palette did not close"): quit(1); return
+	var text_direction: Vector3=(scene.render_nodes[slot_id].global_position-scene.camera.global_position).normalized()
+	var look := InputEventMouseMotion.new()
+	look.position=root.size*0.5
+	look.relative=Vector2(wrapf(scene.orbit_yaw-atan2(-text_direction.x,-text_direction.z),-PI,PI),scene.orbit_pitch-asin(text_direction.y))/0.003
+	root.push_input(look,true)
+	await process_frame
+	await process_frame
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--screenshot="):
 			await RenderingServer.frame_post_draw
 			root.get_texture().get_image().save_png(arg.trim_prefix("--screenshot=").replace(".png","-text.png"))
-	scene.world_panels.close_panel(surface.panel_id)
-	if not await until(func(): return scene.world_panels.panels.is_empty(),"Component palette did not close"): quit(1); return
 	scene.hud.open_creation()
 	if not await until(func(): return scene.world_panels.panels.size()==1,"Creation panel did not reopen for Esc"): quit(1); return
 	id=scene.world_panels.panels.keys()[0]

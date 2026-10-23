@@ -287,7 +287,7 @@ pub struct StructuralCommand {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum StructuralOperation {
-    CreateSlot { parent: Option<Address> },
+    CreateSlot { parent: Option<Address>, position: [f64; 3] },
     AddComponent { target: Address, type_id: String, expected_revision: String, values: Value },
     RemoveComponent { target: Address, type_id: String, expected_revision: String },
     CreateChild { parent: Address },

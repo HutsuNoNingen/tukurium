@@ -167,20 +167,23 @@ pub(crate) fn validate_commands(
                             prepare_component_change(&snapshot.0, &target, &type_id, &expected_revision, Some(&values)),
                         StructuralOperation::RemoveComponent { target, type_id, expected_revision } =>
                             prepare_component_change(&snapshot.0, &target, &type_id, &expected_revision, None),
-                        StructuralOperation::CreateSlot { parent } => {
+                        StructuralOperation::CreateSlot { parent, position } => {
                             if slots.iter().count() >= MAX_OBJECTS { return Err("Object limit reached (128)".into()); }
-                            let mut object = new_object("Slot".into(), [0.0, 0.0, 0.0], [1.0; 4]);
+                            validate_value("position", &serde_json::json!(position))?;
+                            let mut object = new_object("Slot".into(), position, [1.0; 4]);
                             crate::hierarchy::validate_parent(&snapshot.0, &object.address, &parent)?;
                             if let Some(parent_object) = parent.as_ref().and_then(|p| snapshot.0.objects.iter().find(|o| &o.address == p)) {
-                                object.world_position = parent_object.world_position;
                                 object.world_rotation = parent_object.world_rotation;
                                 object.world_scale = parent_object.world_scale;
                             }
+                            let local = crate::hierarchy::relative(crate::hierarchy::global_of(&object), crate::hierarchy::parent_transform(&snapshot.0, &parent)?);
+                            validate_value("position", &serde_json::json!(local.translation))?;
                             object.renderer = None;
                             object.visual = kokoverse_protocol::Visual::None;
                             object.collider = None;
                             object.parent = parent;
                             object.fields.retain(|f| f.id != "color");
+                            object.fields.iter_mut().find(|f| f.id == "position").unwrap().value = serde_json::json!(local.translation);
                             crate::sync_object_fields(&mut object);
                             Ok(Mutation::Insert(Box::new(object)))
                         }

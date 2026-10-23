@@ -230,7 +230,9 @@ func spawn_slot() -> void:
 	slot_button.disabled=true
 	create_button.disabled=true
 	status.text="作成中…"
-	manager.command({"kind":"structure","command":{"action":"create_slot","parent":null}},func(result):
+	var position: Vector3=app.camera.global_position-app.camera.global_basis.z*4.0
+	position.y=app.player_position.y+1.6
+	manager.command({"kind":"structure","command":{"action":"create_slot","parent":null,"position":[position.x,position.y,position.z]}},func(result):
 		busy=false
 		slot_button.disabled=not app.editable
 		create_button.disabled=not app.editable

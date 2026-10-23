@@ -40,7 +40,7 @@ fn empty_slots_replicate_duplicate_and_restore_without_mesh_renderers() {
     let mut guest = WorldModel::new();
     guest.restore(host.snapshot()).unwrap();
     let parent = host.snapshot().objects[0].address.clone();
-    let created = run(&mut host, structure(StructuralOperation::CreateSlot { parent: Some(parent.clone()) }));
+    let created = run(&mut host, structure(StructuralOperation::CreateSlot { parent: Some(parent.clone()), position: [1.0, 2.0, 3.0] }));
     let id = created.selected.unwrap();
     guest.apply_commit(created.result.unwrap()).unwrap();
     assert_eq!(guest.snapshot(), host.snapshot());
@@ -49,6 +49,7 @@ fn empty_slots_replicate_duplicate_and_restore_without_mesh_renderers() {
     assert_eq!(slot.visual, kokoverse_protocol::Visual::None);
     assert!(slot.fields.iter().all(|f| f.id != "color"));
     assert_eq!(slot.parent, Some(parent));
+    assert_eq!(slot.world_position, [1.0, 2.0, 3.0]);
     let copy = run(&mut host, structure(StructuralOperation::Duplicate { target: id, expected_revision: slot.object_revision }));
     guest.apply_commit(copy.result.unwrap()).unwrap();
     assert_eq!(guest.snapshot(), host.snapshot());
@@ -65,7 +66,7 @@ fn renderer_component_attaches_and_detaches_with_revision_and_schema_checks() {
     let mut host = WorldModel::new();
     let mut guest = WorldModel::new();
     guest.restore(host.snapshot()).unwrap();
-    let created = run(&mut host, structure(StructuralOperation::CreateSlot { parent: None }));
+    let created = run(&mut host, structure(StructuralOperation::CreateSlot { parent: None, position: [0.0, 1.5, 0.0] }));
     let id = created.selected.unwrap();
     guest.apply_commit(created.result.unwrap()).unwrap();
     let initial = host.snapshot().objects.into_iter().find(|o| o.address == id).unwrap();
@@ -107,7 +108,7 @@ fn world_text_is_editable_and_survives_replication_duplication_and_restore() {
     let mut host = WorldModel::new();
     let mut guest = WorldModel::new();
     guest.restore(host.snapshot()).unwrap();
-    let created = run(&mut host, structure(StructuralOperation::CreateSlot { parent: None }));
+    let created = run(&mut host, structure(StructuralOperation::CreateSlot { parent: None, position: [0.0, 1.5, 0.0] }));
     let id = created.selected.unwrap();
     guest.apply_commit(created.result.unwrap()).unwrap();
     let revision = host.snapshot().objects.iter().find(|o| o.address == id).unwrap().object_revision.clone();
