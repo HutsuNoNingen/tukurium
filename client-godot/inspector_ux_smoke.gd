@@ -15,11 +15,20 @@ func run() -> void:
 	root.add_child(scene)
 	if not await until(func(): return scene.editable and not scene.current.is_empty(), "Scene not ready"): quit(1); return
 	if scene.inspector_shell.visible: push_error("Legacy inspector should start closed"); quit(1); return
+	var initial_count: int = scene.objects.size()
+	var initial_target: String = scene.selected_id
 	scene.world_panels.open_inspector(scene.selected_id, true)
 	if not await until(func(): return scene.world_panels.windows.size() == 1, "Native inspector did not open"): quit(1); return
-	var panel = scene.world_panels.panels.values()[0]
-	var window: Window = scene.world_panels.windows[panel.panel_id]
+	await create_timer(0.2).timeout
+	if not scene.world_panels.panels.is_empty() or scene.objects.size() != initial_count:
+		push_error("Opening a desktop inspector created a world object"); quit(1); return
+	var window: Window = scene.world_panels.windows.values()[0]
 	var view = window.get_meta("inspector")
+	# Shared panels are created only by their own action.
+	scene.world_panels.open_inspector(initial_target)
+	if not await until(func(): return scene.world_panels.panels.size() == 1, "World panel did not open"): quit(1); return
+	var panel = scene.world_panels.panels.values()[0]
+	if scene.world_panels.windows.size() != 1: push_error("World panel created another native window"); quit(1); return
 	var world_view = panel.content
 	if window.get_window_id() == root.get_window_id() or view == world_view:
 		push_error("Inspector is not an independent native view"); quit(1); return
@@ -56,6 +65,7 @@ func run() -> void:
 	line.grab_focus()
 	if not await until(func(): return view.edits.has("name") and view.edits.name.granted, "Native field lease not granted"): quit(1); return
 	if not await until(func(): return not world_view.controls.name[0].editable,"Spatial view did not respect native editor lease"): quit(1); return
+	if not line.editable: push_error("Context-free desktop lease locked its own editor"); quit(1); return
 	line.select_all()
 	for character in "Native shared inspector":
 		var event := InputEventKey.new()
@@ -104,12 +114,40 @@ func run() -> void:
 	if scene.world_panels.field_data(inspected_target,"name").value != "Native closed safely":
 		push_error("Closing the window lost the last edit"); quit(1); return
 	if panel.content != world_view or panel.viewport.get_parent() != panel: push_error("Close replaced the shared view"); quit(1); return
-	scene.world_panels.open_window(panel.panel_id)
+	scene.world_panels.open_window(inspected_target)
 	await process_frame
-	# Remote deletion must close the local window and dispose its viewport safely.
+	# Removing a world panel must not close an independent local inspector.
 	scene.world_panels.close_panel(panel.panel_id)
-	if not await until(func(): return scene.world_panels.windows.is_empty() and scene.world_panels.panels.is_empty(), "Deleting panel leaked native window"): quit(1); return
-	print("INSPECTOR UX SMOKE PASS: independent desktop layout, native frame, resize, world aspect, shared editing, driver navigation and close")
+	if not await until(func(): return scene.world_panels.panels.is_empty(), "World panel did not close"): quit(1); return
+	if scene.world_panels.windows.size() != 1: push_error("Deleting world panel closed local inspector"); quit(1); return
+	var local_view = scene.world_panels.windows.values()[0].get_meta("inspector")
+	local_view.choose_target("")
+	if not await until(func(): return local_view.target_id.is_empty(), "Local target did not clear"): quit(1); return
+	local_view.choose_target(inspected_target)
+	if not await until(func(): return local_view.target_id == inspected_target, "Local target did not restore"): quit(1); return
+	# Multiple local windows have independent selections and create no world objects.
+	scene.world_panels.open_window("")
+	var extra_id: String = scene.world_panels.windows.keys()[1]
+	if scene.world_panels.windows[extra_id].get_meta("inspector").target_id != "" or local_view.target_id != inspected_target or scene.objects.size() != initial_count:
+		push_error("Local windows share their selection or create world objects"); quit(1); return
+	var created := {}
+	scene.world_panels.command({"kind":"structure","command":{"action":"create"}}, func(result): created.merge(result))
+	if not await until(func(): return created.has("selected") and scene.objects.has(created.selected.instance_id), "Temporary target not created"): quit(1); return
+	var extra_view = scene.world_panels.windows[extra_id].get_meta("inspector")
+	extra_view.choose_target(created.selected.instance_id)
+	if not await until(func(): return extra_view.target_id == created.selected.instance_id, "Second local target not selected"): quit(1); return
+	if local_view.target_id != inspected_target: push_error("Second local selection changed first window"); quit(1); return
+	var removed: Dictionary = scene.objects[extra_view.target_id]
+	var deletion := {}
+	scene.world_panels.command({"kind":"structure","command":{"action":"delete","target":scene.address_of(removed),"expected_revision":removed.object_revision}},func(result): deletion.merge(result))
+	if not await until(func(): return deletion.has("ok"), "Delete response missing"): quit(1); return
+	if not deletion.ok: push_error("Delete failed: " + str(deletion.get("message", ""))); quit(1); return
+	if not await until(func(): return extra_view.target_id.is_empty(), "Deleted target did not clear in local view"): quit(1); return
+	if scene.world_panels.windows.size() != 2: push_error("Deleting inspected target closed its local window"); quit(1); return
+	scene.world_panels.close_window(extra_id)
+	scene.world_panels.close_window(local_view.panel_id)
+	if not scene.world_panels.windows.is_empty(): push_error("Local windows did not close"); quit(1); return
+	print("INSPECTOR UX SMOKE PASS: desktop-only creation, independent selections, native resize, shared edits, world tabs and separate lifetimes")
 	scene.queue_free()
 	await process_frame
 	await process_frame

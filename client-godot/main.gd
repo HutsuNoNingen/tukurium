@@ -290,7 +290,7 @@ func build_ui() -> void:
 	var window_inspector := Button.new()
 	window_inspector.text = "Inspector ↗"
 	window_inspector.focus_mode = Control.FOCUS_NONE
-	window_inspector.tooltip_text = "Open a shared inspector in a desktop window · Ctrl+Shift+I"
+	window_inspector.tooltip_text = "Open a local 2D inspector · Ctrl+Shift+I"
 	window_inspector.pressed.connect(func(): world_panels.open_inspector(selected_id, true))
 	row.add_child(window_inspector)
 	status_label = label("Connecting…", 14, Color("6ed3dc"))

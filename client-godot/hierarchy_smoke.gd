@@ -15,8 +15,7 @@ func run() -> void:
 	var parent: String = scene.selected_id
 	scene.world_panels.open_inspector(parent,true)
 	if not await until(func(): return scene.world_panels.windows.size()==1,"No window"): quit(1); return
-	var panel = scene.world_panels.panels.values()[0]
-	var view = scene.world_panels.windows[panel.panel_id].get_meta("inspector")
+	var view = scene.world_panels.windows.values()[0].get_meta("inspector")
 	view.hierarchy.child_button.pressed.emit()
 	if not await until(func(): return view.target_id!=parent and not view.target_id.is_empty(),"Child not selected"): quit(1); return
 	var child: String = view.target_id
@@ -28,7 +27,8 @@ func run() -> void:
 	if expected.is_empty(): push_error("No inherited transform"); quit(1); return
 	if scene.render_nodes[child].position.distance_to(Vector3(expected.position[0],expected.position[1],expected.position[2]))>0.02: push_error("Renderer disagrees with Rust"); quit(1); return
 	view.hierarchy.set_root(scene.objects[parent].address)
-	if not await until(func(): return scene.objects[panel.panel_id].inspector.tree.root!=null,"Root not shared"): quit(1); return
+	if not await until(func(): return view.panel_state.inspector.tree.root!=null,"Local hierarchy root did not change"): quit(1); return
+	if not scene.world_panels.panels.is_empty(): push_error("Local hierarchy created a world panel"); quit(1); return
 	var tree_root: TreeItem = view.hierarchy.tree.get_root()
 	if tree_root.get_metadata(0)!=parent: push_error("Hierarchy root is wrong"); quit(1); return
 	# Drive is local; detaching must preserve the authoritative base pose.

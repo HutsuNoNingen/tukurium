@@ -14,7 +14,6 @@ var component_schemas: Array = []
 var drive_sources: Dictionary = {}
 var evaluated_transforms: Dictionary = {}
 var windows: Dictionary = {}
-var pending_window := ""
 var pending_panel_close: Dictionary = {}
 var carried_reference: Dictionary = {}
 
@@ -41,10 +40,11 @@ func field_data(object_id: String, field: String) -> Dictionary:
 	return {}
 
 func session_input(panel_id: String, target_id: String, field: String, action: String, draft: Dictionary, callback: Callable = Callable(), editor_id: String = "") -> void:
-	if not app.objects.has(panel_id) or not app.objects.has(target_id):
+	if (not app.objects.has(panel_id) and not windows.has(panel_id)) or not app.objects.has(target_id):
 		if callback.is_valid(): callback.call({"ok":false,"message":"Target unavailable"})
 		return
-	command({"kind":"edit_session","request":{"client_id":client_id if editor_id.is_empty() else editor_id,"context":{"source":app.field_address(panel_id,"inspector_target"),"field_id":"inspector_target"},"target":app.field_address(target_id,field),"field_id":field,"action":action,"draft":draft}}, callback)
+	var context: Variant = null if windows.has(panel_id) else {"source":app.field_address(panel_id,"inspector_target"),"field_id":"inspector_target"}
+	command({"kind":"edit_session","request":{"client_id":client_id if editor_id.is_empty() else editor_id,"context":context,"target":app.field_address(target_id,field),"field_id":field,"action":action,"draft":draft}}, callback)
 
 func receive(body: Dictionary) -> bool:
 	if body.get("kind") == "snapshot":
@@ -80,12 +80,14 @@ func field_driver(object_id: String, field: String) -> Dictionary:
 
 func open_inspector(target_id: String = "", desktop: bool = false) -> void:
 	if not app.editable: return
+	if desktop:
+		open_window(target_id)
+		return
 	var position: Vector3 = app.camera.global_position - app.camera.global_basis.z * 2.1
 	var q: Quaternion = app.camera.global_basis.get_rotation_quaternion()
 	var target: Variant = app.address_of(app.objects[target_id]) if app.objects.has(target_id) else null
 	command({"kind":"structure","command":{"action":"create_inspector","target":target,"position":[position.x,position.y,position.z],"rotation":[q.x,q.y,q.z,q.w]}}, func(result):
-		if not result.ok: app.feedback.text = str(result.get("message", "Cannot open inspector"))
-		elif desktop: pending_window = result.selected.instance_id)
+		if not result.ok: app.feedback.text = str(result.get("message", "Cannot open inspector")))
 
 func close_panel(id: String) -> void:
 	if not app.objects.has(id): return
@@ -105,7 +107,6 @@ func duplicate_panel(id: String) -> void:
 func sync() -> void:
 	for id in panels.keys():
 		if not app.objects.has(id):
-			close_window(id, true)
 			panels[id].content.finish_all()
 			panels.erase(id)
 			if capture_id == id: capture_id = ""
@@ -113,17 +114,12 @@ func sync() -> void:
 	for id in app.objects:
 		if app.objects[id].get("panel") != null and panels.has(id):
 			panels[id].refresh(app.objects[id])
-			if windows.has(id): windows[id].get_meta("inspector").refresh(app.objects[id])
+	for window in windows.values(): window.get_meta("inspector").refresh_local()
 	refresh_gizmos()
 
-func open_window(id: String) -> void:
-	if not panels.has(id): return
+func open_window(target_id: String = "") -> void:
 	app.release_cursor()
-	if windows.has(id):
-		windows[id].set_meta("closing", false)
-		windows[id].show()
-		windows[id].grab_focus()
-		return
+	var id := "desktop-%s-%s" % [Time.get_ticks_usec(), randi()]
 	var window := Window.new()
 	window.hide()
 	window.title = "Kokoverse · Inspector"
@@ -148,7 +144,7 @@ func open_window(id: String) -> void:
 	window.set_meta("inspector", view)
 	window.set_meta("closing", false)
 	windows[id] = window
-	view.refresh(app.objects[id])
+	view.set_initial_target(target_id)
 	window.show()
 	window.grab_focus()
 
@@ -267,9 +263,6 @@ func route_input(event: InputEvent) -> bool:
 	return not event is InputEventMouseMotion or not capture_id.is_empty() or not app.fps_active
 
 func tick() -> void:
-	if not pending_window.is_empty() and panels.has(pending_window):
-		open_window(pending_window)
-		pending_window = ""
 	for view in views(): view.tick()
 	for id in windows.keys():
 		if windows[id].get_meta("closing") and not windows[id].get_meta("inspector").has_active_edits(): close_window(id)

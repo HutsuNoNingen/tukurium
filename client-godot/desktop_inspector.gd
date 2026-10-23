@@ -4,6 +4,27 @@ extends "res://inspector_view.gd"
 var active_tab := 0
 var pending_tab := -1
 var local_script := ""
+var local_state := {"inspector":{"target":null,"tree":{"root":null,"collapsed":[]}}}
+
+func set_initial_target(id: String) -> void:
+	local_state.inspector.target = manager.app.address_of(manager.app.objects[id]) if manager.app.objects.has(id) else null
+	refresh_local()
+
+func refresh_local() -> void:
+	var target: Variant = local_state.inspector.target
+	if target != null and not manager.app.objects.has(target.instance_id):
+		local_state.inspector.target = null
+	refresh(local_state)
+
+func write_view_field(field: String, value: Variant, callback: Callable = Callable()) -> void:
+	match field:
+		"inspector_target":
+			local_state.inspector.target = value
+			local_script = ""
+			scroll.scroll_vertical = 0
+		"inspector_tree": local_state.inspector.tree = value
+	refresh_local()
+	if callback.is_valid(): callback.call({"ok":true})
 
 func build_layout() -> void:
 	var margin := MarginContainer.new()
@@ -22,7 +43,6 @@ func build_layout() -> void:
 	target_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	target_picker.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	header.add_child(target_picker)
-	add_button(header, "Delete shared panel", func(): manager.close_panel(panel_id)).tooltip_text = "Delete this inspector for everyone. The Windows close button only closes this window."
 	var actions := HBoxContainer.new()
 	actions.add_theme_constant_override("separation", 8)
 	column.add_child(actions)

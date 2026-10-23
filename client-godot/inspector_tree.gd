@@ -57,7 +57,7 @@ func setup(view) -> void:
 		var address: Dictionary = manager.app.address_of(manager.app.objects[item.get_metadata(0)])
 		next.collapsed.erase(address)
 		if item.collapsed: next.collapsed.append(address)
-		manager.edit(inspector.panel_id,"inspector_tree",next))
+		inspector.write_view_field("inspector_tree",next))
 	child_button = view.add_button(self,"+ Child",func():
 		if manager.app.objects.has(view.target_id):
 			manager.command({"kind":"structure","command":{"action":"create_child","parent":manager.app.address_of(manager.app.objects[view.target_id])}},func(result):
@@ -74,7 +74,7 @@ func setup(view) -> void:
 func set_root(address: Variant) -> void:
 	var next := tree_state.duplicate(true)
 	next["root"] = address
-	manager.edit(inspector.panel_id,"inspector_tree",next)
+	inspector.write_view_field("inspector_tree",next)
 
 func move_object(id: String, parent_id: Variant) -> void:
 	var object: Dictionary = manager.app.objects.get(id,{})

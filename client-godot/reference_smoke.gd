@@ -47,7 +47,9 @@ func run() -> void:
 	destination = target_view.script_view.editor.parameter_controls.source
 	if destination._can_drop_data(Vector2.ZERO,{"kind":"kokoverse_reference","reference":{"kind":"slot","target":scene.objects[source].address}}): push_error("Wrong reference kind accepted"); quit(1); return
 	# Independent native and spatial views must occupy separate editor sessions.
-	var world_target = scene.world_panels.panels[target_view.panel_id].content
+	scene.world_panels.open_inspector(target)
+	if not await until(func(): return scene.world_panels.panels.size()==2,"Explicit target world panel missing"): quit(1); return
+	var world_target = scene.world_panels.panels.values()[1].content
 	if world_target.input_client_id==target_view.input_client_id: push_error("Native and spatial editors share an input owner"); quit(1); return
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--screenshot="):

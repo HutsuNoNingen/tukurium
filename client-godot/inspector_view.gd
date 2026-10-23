@@ -73,7 +73,7 @@ func build_layout() -> void:
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 	add_button(header, "+", func(): manager.duplicate_panel(panel_id))
-	add_button(header, "↗", func(): manager.open_window(panel_id)).tooltip_text = "Open in a desktop window"
+	add_button(header, "↗", func(): manager.open_inspector(target_id, true)).tooltip_text = "Inspect this object in a separate local window"
 	add_button(header, "×", func(): manager.close_panel(panel_id)).tooltip_text = "Delete this shared inspector for everyone"
 	column.add_child(target_picker)
 	var actions := HBoxContainer.new()
@@ -101,7 +101,7 @@ func connect_view() -> void:
 func build_actions(actions: Container) -> void:
 	add_button(actions, "Select / Gizmo", func():
 		if not target_id.is_empty(): manager.app.select_object(target_id))
-	add_button(actions, "New inspector", func(): manager.open_inspector(target_id))
+	add_button(actions, "New 2D window" if desktop else "New 3D panel", func(): manager.open_inspector(target_id, desktop))
 	var receiver = REFERENCE_CHIP.new()
 	receiver.manager = manager
 	receiver.text = "Drop reference"
@@ -265,7 +265,7 @@ func build_field(field: Dictionary) -> void:
 					return null if value == null else {"kind":"kokoverse_reference","reference":{"kind":"slot","target":value}}
 				reference.pressed.connect(func():
 					var value: Variant = manager.field_data(target_id,field.id).value
-					if value != null: manager.open_inspector(value.instance_id))
+					if value != null: manager.open_inspector(value.instance_id, desktop))
 				if field.id == "parent":
 					reference.accepts = func(data): return data is Dictionary and data.get("kind") == "kokoverse_reference" and data.get("reference",{}).get("kind") == "slot"
 					reference.received = func(data): hierarchy.move_object(target_id,data.reference.target.instance_id)
@@ -523,7 +523,7 @@ func tick() -> void:
 		var value := scroll_pending
 		scroll_pending = -1.0
 		scroll_inflight = true
-		manager.edit(panel_id, "panel_scroll", [0.0,value], func(result):
+		write_view_field("panel_scroll", [0.0,value], func(result):
 			scroll_inflight = false
 			if not result.ok: message.text = "Scroll changed elsewhere; scroll again")
 	for field in edits.keys():
@@ -549,11 +549,11 @@ func tick() -> void:
 		return
 	if edits.is_empty() and not script_view.busy() and target_change_pending:
 		target_change_pending = false
-		manager.edit(panel_id, "inspector_target", pending_target)
+		write_view_field("inspector_target", pending_target)
 	if edits.is_empty() and not script_view.busy() and pending_shared_tab >= 0:
 		var selected := pending_shared_tab
 		pending_shared_tab = -1
-		manager.edit(panel_id, "inspector_scripts_open", selected == 1)
+		write_view_field("inspector_scripts_open", selected == 1)
 	if edits.is_empty() and not script_view.busy() and not requested_script.is_empty():
 		var id := requested_script
 		requested_script = ""
@@ -561,10 +561,13 @@ func tick() -> void:
 	refresh_sessions()
 
 func show_requested_script(id: String) -> void:
-	if id == "*": manager.edit(panel_id,"inspector_scripts_open",true)
+	if id == "*": write_view_field("inspector_scripts_open",true)
 	else:
-		manager.edit(panel_id,"inspector_script_id",id,func(result):
-			if result.ok: manager.edit(panel_id,"inspector_scripts_open",true))
+		write_view_field("inspector_script_id",id,func(result):
+			if result.ok: write_view_field("inspector_scripts_open",true))
+
+func write_view_field(field: String, value: Variant, callback: Callable = Callable()) -> void:
+	manager.edit(panel_id, field, value, callback)
 
 func has_active_edits() -> bool:
 	return not edits.is_empty() or script_view.busy()
@@ -590,7 +593,9 @@ func refresh_sessions() -> void:
 	for field in controls:
 		var remote: Dictionary = {}
 		for session in manager.sessions:
-			if session.target.instance_id == target_id and session.field_id == field and (session.client_id != input_client_id or session.get("context") == null or session.context.source.instance_id != panel_id):
+			var context: Variant = session.get("context")
+			var same_context: bool = context == null if desktop else context != null and context.source.instance_id == panel_id
+			if session.target.instance_id == target_id and session.field_id == field and (session.client_id != input_client_id or not same_context):
 				remote = session
 		var readonly: bool = not manager.app.editable or not remote.is_empty() or not manager.field_driver(target_id, field).is_empty()
 		for control in controls[field]:
