@@ -9,6 +9,8 @@ var asset_status = ASSET_STATUS.new()
 const SCRIPT_EDITOR = preload("res://script_editor.gd")
 const WORLD_PANELS = preload("res://world_panels.gd")
 const REQUEST_BROKER = preload("res://request_broker.gd")
+const WORLD_HUD = preload("res://world_hud.gd")
+var hud = WORLD_HUD.new()
 var requests = REQUEST_BROKER.new()
 var world_panels = WORLD_PANELS.new()
 var script_editor = SCRIPT_EDITOR.new()
@@ -140,6 +142,9 @@ func _ready() -> void:
 	asset_status.setup(self)
 	add_child(asset_importer)
 	asset_importer.configure(self)
+	add_child(hud)
+	hud.setup(self)
+	set_view_mode(1)
 	connect_engine()
 
 func build_world() -> void:
@@ -264,6 +269,7 @@ func build_ui() -> void:
 	crosshair.visible = false
 	root.add_child(crosshair)
 	var header := panel(root, 24, 22, 1256, 92)
+	header.get_parent().hide()
 	header.get_parent().set_anchors_preset(Control.PRESET_TOP_WIDE)
 	header.get_parent().offset_right = -24
 	var row := HBoxContainer.new()
@@ -296,6 +302,8 @@ func build_ui() -> void:
 	status_label = label("Connecting…", 14, Color("6ed3dc"))
 	row.add_child(status_label)
 	var tree := panel(root, 24, 112, 264, 510)
+	tree.get_parent().name = "LegacyWorldSidebar"
+	tree.get_parent().hide()
 	tree.add_child(label("WORLD", 12, Color("8ca7b6")))
 	var session_label := label("Workshop / " + session, 16)
 	session_label.clip_text = true
@@ -336,6 +344,7 @@ func build_ui() -> void:
 	object_count = label("Waiting for world…", 12, Color("8ca7b6"))
 	tree.add_child(object_count)
 	var people := panel(root, 24, 530, 264, 700)
+	people.get_parent().hide()
 	people.add_child(label("PEOPLE", 12, Color("8ca7b6")))
 	nickname = LineEdit.new()
 	nickname.placeholder_text = "Your display name"
@@ -445,7 +454,7 @@ func build_ui() -> void:
 		for spin in collider_inputs: spin.apply()
 		var shape: Variant = {"half_extents":[collider_inputs[0].value,collider_inputs[1].value,collider_inputs[2].value],"solid":collider_solid.button_pressed} if collider_enabled.button_pressed else null
 		submit("collider",shape))
-	feedback = label("Changes sync automatically.", 13, Color("9cb5c2"))
+	feedback = label("", 13, Color("9cb5c2"))
 	feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	inspector.add_child(feedback)
 	video_controls = VBoxContainer.new()
@@ -479,10 +488,6 @@ func build_ui() -> void:
 	inspector.add_child(video_controls)
 	inspector.move_child(video_controls,4)
 	video_controls.visible = false
-	var help := panel(root, 24, -82, 650, -22)
-	help.get_parent().anchor_top = 1.0
-	help.get_parent().anchor_bottom = 1.0
-	help.add_child(label("WASD Move · Space Jump · V View · RMB Hold · E Rotate\nWheel Distance · Shift+Wheel Scale · Shift+E Yaw · LMB Straighten · Esc Cursor", 12))
 	script_editor.setup(self)
 
 func add_vector_editor(parent: Node, title: String, field_id: String, minimum: float, maximum: float, step: float) -> Array[SpinBox]:
@@ -1323,6 +1328,7 @@ func set_view_mode(mode: int) -> void:
 	view_mode.release_focus()
 
 func gameplay_keyboard_blocked() -> bool:
+	if hud.blocking(): return true
 	if world_panels.has_window_focus(): return true
 	if world_panels.text_focused(): return true
 	var focus := get_viewport().gui_get_focus_owner()
@@ -1359,6 +1365,10 @@ func refresh_fields() -> void:
 	filling = false
 
 func _input(event: InputEvent) -> void:
+	if hud.handle_input(event):
+		get_viewport().set_input_as_handled()
+		return
+	if hud.blocking(): return
 	if world_panels.route_input(event):
 		get_viewport().set_input_as_handled()
 		return
@@ -1373,7 +1383,7 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_I:
 		var focus := get_viewport().gui_get_focus_owner()
 		if fps_active or not (focus is LineEdit or focus is TextEdit):
-			inspector_toggle.button_pressed = not inspector_toggle.button_pressed
+			world_panels.open_inspector(selected_id, true)
 			get_viewport().set_input_as_handled()
 			return
 	# Captured FPS mouse input belongs to the viewport, even over an inspector panel.
@@ -1382,6 +1392,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 func _unhandled_input(event: InputEvent) -> void:
+	if hud.blocking(): return
 	if event is InputEventKey and event.keycode == KEY_ESCAPE and event.pressed:
 		release_cursor()
 		get_viewport().set_input_as_handled()
@@ -1428,7 +1439,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			select_object(hit_id)
 			script_editor.interact(hit_id)
 	if event is InputEventKey and event.keycode == KEY_F and event.pressed: focus_selected()
-	if event is InputEventKey and event.keycode == KEY_V and event.pressed: set_view_mode((view_mode.selected + 1) % 3)
 	if event is InputEventKey and event.keycode == KEY_SPACE and event.pressed and not event.echo: try_jump()
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT:
 		look = event.pressed

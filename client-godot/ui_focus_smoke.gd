@@ -23,6 +23,8 @@ func run() -> void:
 	root.add_child(scene)
 	if not await wait_for(func(): return scene.editable and scene.player_initialized, "Scene not ready"): quit(1); return
 	scene.inspector_toggle.button_pressed = true
+	# Keep testing keyboard activation after removing the old WORLD sidebar.
+	scene.duplicate_button.reparent(scene.name_input.get_parent())
 	var object_id: String = scene.selected_id
 	for checkbox in [scene.collider_enabled, scene.collider_solid]:
 		if not await wait_for(func(): return scene.grounded, "Player did not land"): quit(1); return

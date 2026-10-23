@@ -20,7 +20,7 @@ func request(body: Dictionary, completed: Callable, id_path: Array = ["command",
 		if not container.has(key): container[key] = {}
 		container = container[key]
 	container[id_path[-1]] = id
-	requests[id] = {"completed":completed,"response_id":response_id,"response_kind":response_kind,"deadline":int(now.call())+timeout_ms}
+	requests[id] = {"completed":completed,"response_id":response_id,"response_kind":response_kind,"kind":payload.get("kind",""),"deadline":int(now.call())+timeout_ms}
 	send.call(payload)
 	return id
 

@@ -96,7 +96,7 @@ func connect_view() -> void:
 	scroll.get_v_scroll_bar().value_changed.connect(on_scroll)
 	message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	message.add_theme_font_size_override("font_size", 16 if desktop else 18)
-	message.text = "Changes are shared with everyone" if desktop else "Shared panel · FPS: RMB hold · Wheel distance · E rotate"
+	message.text = ""
 
 func build_actions(actions: Container) -> void:
 	add_button(actions, "Select / Gizmo", func():
@@ -617,7 +617,7 @@ func refresh_sessions() -> void:
 		filling = true
 		fill_values()
 		filling = false
-		if message.text.begins_with("Editing:"): message.text = "Shared panel · FPS: RMB hold · E rotate"
+		if message.text.begins_with("Editing:"): message.text = ""
 
 func on_scroll(_value: float) -> void:
 	if filling or panel_state.is_empty() or not manager.app.editable: return
