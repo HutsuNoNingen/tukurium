@@ -64,6 +64,7 @@ try {
     if ($includeLogin) { $bundledAccess | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $packageRoot 'relay-access.json') -Encoding UTF8 }
     Get-ChildItem -LiteralPath 'distribution/scripts' -File | Copy-Item -Destination (Join-Path $packageRoot 'scripts')
     Copy-Item -LiteralPath 'scripts/setup-media.ps1' -Destination (Join-Path $packageRoot 'scripts')
+    Copy-Item -LiteralPath 'scripts/start-instance.ps1' -Destination (Join-Path $packageRoot 'scripts')
     Copy-Item -LiteralPath 'scripts/stop-demo.ps1' -Destination (Join-Path $packageRoot 'scripts/stop.ps1')
 
     # Preserve license notices without copying toolchains, credentials or user assets.

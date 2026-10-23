@@ -35,6 +35,7 @@ $required = @(
     'client-godot/service_panel.gd',
     'scripts/start-local.ps1',
     'scripts/start-online.ps1',
+    'scripts/start-instance.ps1',
     'scripts/stop-local.ps1',
     'scripts/stop-online.ps1',
     'scripts/process-lifecycle.ps1',
@@ -46,7 +47,7 @@ foreach ($file in $required) {
 }
 ```
 
-`distribution/Start.bat` が `scripts/start-online.ps1` を呼び、`distribution/connection.json` に次の接続先があることも確認する。
+`distribution/Start.bat` が `scripts/start-instance.ps1` を経由して `scripts/start-online.ps1` を呼ぶことを確認する。`distribution/connection.json` の接続先は次のとおり。
 `session: workshop` は従来版向けの設定で、通常起動を固定ルームへ戻す指定ではない。
 
 | 用途 | 現在の接続先 |
@@ -186,7 +187,7 @@ if (Test-Path -LiteralPath (Join-Path $unpacked '.run')) { throw 'Runtime data w
 前回の `build-info.json` とも比較する。通常の管理API版では次が揃っていることを確認する。
 
 - `bin/kokoverse-engine.exe`、`bin/kokoverse-asset-server.exe`、`bin/kokosync-adapter.exe`、`bin/kokosync-relay.exe`
-- `Start.bat` → `scripts/start-online.ps1` → `scripts/start-local.ps1` の起動経路
+- `Start.bat` → `scripts/start-instance.ps1` → `scripts/start-online.ps1` → `scripts/start-local.ps1` の起動経路
 - `client-godot/service_panel.gd`、`scripts/process-lifecycle.ps1`、`client-godot/render_hierarchy.gd`
 - `build-info.json` の `sessionMode: managed`、管理API・中継の接続先、`includesUserWorld: false`、`includesCredentials: false`
 
@@ -235,9 +236,19 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 if ($LASTEXITCODE -ne 0) { throw 'Packaged launcher test failed' }
 ```
 
-Engineのログ窓が見えること、Startの再実行で重複起動しないこと、Godotを閉じても再接続できることを確認する。
+Engineのログ窓が見えること、同じプロファイルを明示した再実行では既存の画面に戻ること、Godotを閉じても再接続できることを確認する。
 ログ窓の×による保存・終了と、終了後の再起動も検証する。
 UIの配布確認では、HN入力、セッション作成・参加、ライブラリ、FPSでの3Dパネル操作も確認する。
+
+`Start.bat` は押すたびに別インスタンスを起動する。こちらのテストでは実際のバッチを同時に2回起動し、プロファイル・ポート・Engine・Godotが分かれることを確認する。さらに、片方だけを終了し、空いたプロファイルをデータを残して再利用できることを確認する。
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+    -File ./tests/multi-instance-smoke.ps1 -PackageRoot $packageRoot
+if ($LASTEXITCODE -ne 0) { throw 'Multi-instance test failed' }
+```
+
+このテストは一時コピーで実行し、本人情報も専用の一時フォルダーへ分ける。
 
 テスト後の梱包用フォルダーには `.run/` ができる。そのフォルダーを再圧縮しない。
 配布にはテスト前に作ったZIPを使い、展開済み版もそのZIPから作る。

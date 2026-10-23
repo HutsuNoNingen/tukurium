@@ -112,3 +112,13 @@ SubViewport内の排他的なWindowがメイン画面の入力を止め、レー
 
 - 確認：セッション管理、ライブラリ、表示されるEngineログ、再起動、3Dパネルの入力。
 - 比較元：`Kokoverse-Windows-x64-20261024-020925`。欠落した配布：`Kokoverse-Windows-x64-20261024-023500`。確認日：2026-10-24。
+
+## Start.batの多重起動ではプロファイルの割り当てを排他制御する
+
+Start.batは呼び出すたびに別のインスタンスを起動し、空いているdefault、instance-2、instance-3…を使う。
+起動処理全体を排他制御し、同時に押しても同じ枠を選ばないようにする。明示的なプロファイル起動とも競合しないよう、選んだ枠のロックを取得してから起動する。
+稼働判定には記録された実行ファイル・PID・起動時刻を使う。記録が読めない枠は避け、保存データを上書きしない。
+終了した枠は既存データを残して再利用する。`start-online.ps1 -Profile ...` の明示的な再接続とは入口を分ける。
+
+- コード：[start-instance.ps1](../scripts/start-instance.ps1)。
+- 確認：[multi-instance-smoke.ps1](../tests/multi-instance-smoke.ps1)で実際のStart.batを同時に実行し、個別停止と保存データを残した再利用を検証する。
