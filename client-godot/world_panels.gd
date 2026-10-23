@@ -9,6 +9,10 @@ var client_id := ""
 var capture_id := ""
 var keyboard_id := ""
 var hover_id := ""
+var component_schemas: Array = []
+var drive_sources: Dictionary = {}
+var windows: Dictionary = {}
+var pending_window := ""
 
 func setup(application) -> void:
 	app = application
@@ -39,6 +43,13 @@ func session_input(panel_id: String, target_id: String, field: String, action: S
 	command({"kind":"edit_session","request":{"client_id":client_id,"context":{"source":app.field_address(panel_id,"inspector_target"),"field_id":"inspector_target"},"target":app.field_address(target_id,field),"field_id":field,"action":action,"draft":draft}}, callback)
 
 func receive(body: Dictionary) -> bool:
+	if body.get("kind") == "snapshot":
+		component_schemas = body.get("component_schemas", [])
+		update_drive_sources(body.get("drive_frame", {}))
+	elif body.get("kind") == "drive_frame":
+		update_drive_sources(body.frame)
+	elif body.get("kind") == "status" and not body.get("editable", false):
+		drive_sources.clear()
 	if body.get("kind") == "script_document_state":
 		for panel in panels.values(): panel.content.script_view.receive(body.document)
 		return true
@@ -48,13 +59,25 @@ func receive(body: Dictionary) -> bool:
 		return true
 	return false
 
-func open_inspector(target_id: String = "") -> void:
+func update_drive_sources(frame: Dictionary) -> void:
+	drive_sources.clear()
+	for object in frame.get("objects", []):
+		drive_sources[object.target.instance_id] = object.get("sources", {})
+
+func field_driver(object_id: String, field: String) -> Dictionary:
+	var script_id: String = drive_sources.get(object_id, {}).get(field, "")
+	for script in app.objects.get(object_id, {}).get("scripts", []):
+		if script.id == script_id: return script
+	return {}
+
+func open_inspector(target_id: String = "", desktop: bool = false) -> void:
 	if not app.editable: return
 	var position: Vector3 = app.camera.global_position - app.camera.global_basis.z * 2.1
 	var q: Quaternion = app.camera.global_basis.get_rotation_quaternion()
 	var target: Variant = app.address_of(app.objects[target_id]) if app.objects.has(target_id) else null
 	command({"kind":"structure","command":{"action":"create_inspector","target":target,"position":[position.x,position.y,position.z],"rotation":[q.x,q.y,q.z,q.w]}}, func(result):
-		if not result.ok: app.feedback.text = str(result.get("message", "Cannot open inspector")))
+		if not result.ok: app.feedback.text = str(result.get("message", "Cannot open inspector"))
+		elif desktop: pending_window = result.selected.instance_id)
 
 func close_panel(id: String) -> void:
 	if not app.objects.has(id): return
@@ -83,6 +106,7 @@ func pin_panel(id: String) -> void:
 func sync() -> void:
 	for id in panels.keys():
 		if not app.objects.has(id):
+			close_window(id)
 			panels[id].content.finish_all()
 			panels.erase(id)
 			if capture_id == id: capture_id = ""
@@ -90,6 +114,51 @@ func sync() -> void:
 	for id in app.objects:
 		if app.objects[id].get("panel") != null and panels.has(id): panels[id].refresh(app.objects[id])
 	refresh_gizmos()
+
+func open_window(id: String) -> void:
+	if not panels.has(id): return
+	app.release_cursor()
+	if windows.has(id):
+		windows[id].grab_focus()
+		return
+	var panel = panels[id]
+	panel.clear_focus()
+	var window := Window.new()
+	window.hide()
+	window.title = "Kokoverse · Shared inspector"
+	window.force_native = true
+	window.size = panel.viewport.size
+	window.min_size = Vector2i(620, 500)
+	window.transient = false
+	window.close_requested.connect(close_window.bind(id))
+	window.focus_entered.connect(func(): app.release_cursor())
+	app.add_child(window)
+	var container := SubViewportContainer.new()
+	container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	container.stretch = true
+	window.add_child(container)
+	panel.viewport.reparent(container)
+	panel.viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	windows[id] = window
+	window.show()
+	window.grab_focus()
+
+func close_window(id: String) -> void:
+	if not windows.has(id): return
+	var window: Window = windows[id]
+	if panels.has(id) and is_instance_valid(panels[id]):
+		var panel = panels[id]
+		panel.clear_focus()
+		panel.viewport.reparent(panel)
+		panel.viewport.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE
+	windows.erase(id)
+	window.hide()
+	window.queue_free()
+
+func has_window_focus() -> bool:
+	for window in windows.values():
+		if window.has_focus(): return true
+	return false
 
 func create_surface(id: String):
 	var panel = WORLD_PANEL.new()
@@ -175,6 +244,9 @@ func route_input(event: InputEvent) -> bool:
 	return not event is InputEventMouseMotion or not capture_id.is_empty() or not app.fps_active
 
 func tick() -> void:
+	if not pending_window.is_empty() and panels.has(pending_window):
+		open_window(pending_window)
+		pending_window = ""
 	for panel in panels.values(): panel.content.tick()
 	refresh_gizmos()
 

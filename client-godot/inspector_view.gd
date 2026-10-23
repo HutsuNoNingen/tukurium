@@ -27,6 +27,11 @@ var remote_fields: Dictionary = {}
 var target_change_pending := false
 var pending_target: Variant = null
 var close_when_ready := false
+var field_container: VBoxContainer
+var drive_labels: Dictionary = {}
+var drive_buttons: Dictionary = {}
+var field_signature := ""
+var requested_script := ""
 
 func setup(controller, id: String) -> void:
 	manager = controller
@@ -52,6 +57,7 @@ func setup(controller, id: String) -> void:
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 	add_button(header, "+", func(): manager.duplicate_panel(panel_id))
+	add_button(header, "↗", func(): manager.open_window(panel_id)).tooltip_text = "Open in a desktop window"
 	pin_button = add_button(header, "Pin", func(): manager.pin_panel(panel_id))
 	add_button(header, "×", func(): manager.close_panel(panel_id))
 	column.add_child(target_picker)
@@ -100,7 +106,7 @@ func heading(text: String) -> void:
 	var label := Label.new()
 	label.text = text
 	label.add_theme_color_override("font_color", Color("9cc6d4"))
-	fields_box.add_child(label)
+	field_container.add_child(label)
 
 func line_field(parent: Node, field: String, part: String) -> LineEdit:
 	var line := LineEdit.new()
@@ -123,7 +129,7 @@ func vector_field(field: String, label: String, parts: Array) -> void:
 	heading(label)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
-	fields_box.add_child(row)
+	field_container.add_child(row)
 	for i in range(parts.size()):
 		var column := VBoxContainer.new()
 		column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -139,21 +145,56 @@ func build_fields() -> void:
 		fields_box.remove_child(child)
 		child.queue_free()
 	controls.clear()
+	drive_labels.clear()
+	drive_buttons.clear()
+	field_container = fields_box
 	if target_id.is_empty() or not manager.app.objects.has(target_id):
 		heading("Choose an object above. Deleted targets are cleared.")
 		return
-	for field in manager.app.objects[target_id].fields:
+	var object: Dictionary = manager.app.objects[target_id]
+	for schema in manager.component_schemas:
+		var fields: Array = object.fields.filter(func(field): return int(field.component_id) == int(schema.local_id))
+		if fields.is_empty(): continue
+		component_section(str(schema.type_id))
+		for field in fields: build_field(field)
+	component_section("Scripts")
+	if object.get("scripts", []).is_empty(): heading("No scripts attached")
+	for script in object.get("scripts", []):
+		var row := HBoxContainer.new()
+		field_container.add_child(row)
+		var label := Label.new()
+		label.text = script.schema.name + (" · Running" if script.enabled else " · Paused")
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.add_theme_font_size_override("font_size", 21)
+		row.add_child(label)
+		add_button(row, "Edit", open_script.bind(str(script.id)))
+	add_button(field_container, "Manage scripts", open_script.bind(""))
+
+func component_section(name: String) -> void:
+	var section := VBoxContainer.new()
+	section.add_theme_constant_override("separation", 6)
+	fields_box.add_child(section)
+	var rule := HSeparator.new()
+	section.add_child(rule)
+	var label := Label.new()
+	label.text = name
+	label.add_theme_font_size_override("font_size", 23)
+	label.add_theme_color_override("font_color", Color("5ac8c5"))
+	section.add_child(label)
+	field_container = section
+
+func build_field(field: Dictionary) -> void:
 		match field.value_type:
 			"string":
 				heading(field.label)
-				line_field(fields_box, field.id, "0")
+				line_field(field_container, field.id, "0")
 			"vec3": vector_field(field.id, field.label, ["X", "Y", "Z"])
 			"quat": vector_field(field.id, field.label + " · degrees", ["X", "Y", "Z"])
 			"color": vector_field(field.id, field.label, ["R", "G", "B", "A"])
 			"collider":
 				heading("Collider")
 				var row := HBoxContainer.new()
-				fields_box.add_child(row)
+				field_container.add_child(row)
 				controls[field.id] = []
 				for label in ["Enabled / grabbable", "Solid"]:
 					var check := CheckBox.new()
@@ -167,12 +208,51 @@ func build_fields() -> void:
 				if field.value is Dictionary:
 					heading("Video · shared playback")
 					var row := HBoxContainer.new()
-					fields_box.add_child(row)
+					field_container.add_child(row)
 					add_button(row, "Play", func(): playback("play"))
 					add_button(row, "Pause", func(): playback("pause"))
 					add_button(row, "Restart", func(): playback("restart"))
 			_:
 				heading(field.label + " · " + JSON.stringify(field.value))
+		if field.id in ["position", "rotation", "scale", "color"]:
+			var info := Label.new()
+			info.add_theme_font_size_override("font_size", 18)
+			info.add_theme_color_override("font_color", Color("c5a5ed"))
+			info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			field_container.add_child(info)
+			drive_labels[field.id] = info
+			var button := add_button(field_container, "", open_driver.bind(str(field.id)))
+			button.add_theme_font_size_override("font_size", 20)
+			drive_buttons[field.id] = button
+
+func open_driver(field: String) -> void:
+	var driver: Dictionary = manager.field_driver(target_id, field)
+	if not driver.is_empty(): open_script(str(driver.id))
+
+func open_script(id: String) -> void:
+	finish_all()
+	requested_script = id if not id.is_empty() else "*"
+
+func value_text(value: Variant, kind: String) -> String:
+	if kind == "quat" and value is Array:
+		var angles := Quaternion(value[0],value[1],value[2],value[3]).get_euler()
+		return "%.1f°, %.1f°, %.1f°" % [rad_to_deg(angles.x),rad_to_deg(angles.y),rad_to_deg(angles.z)]
+	if value is Array:
+		return ", ".join(value.map(func(v): return String.num(float(v), 3)))
+	return str(value)
+
+func refresh_drives() -> void:
+	for field in drive_labels:
+		var driver: Dictionary = manager.field_driver(target_id, field)
+		drive_labels[field].visible = not driver.is_empty()
+		drive_buttons[field].visible = not driver.is_empty()
+		if driver.is_empty(): continue
+		var data: Dictionary = manager.field_data(target_id, field)
+		drive_labels[field].text = "Local Drive · " + ("running" if driver.enabled else "paused") + "\nShared base: " + value_text(data.value, data.value_type)
+		drive_buttons[field].text = "Open " + driver.schema.name + " →"
+		if edits.has(field):
+			edits[field].dirty = false
+			edits[field].release = true
 
 func playback(action: String) -> void:
 	var field: Dictionary = manager.field_data(target_id, "playback")
@@ -197,17 +277,21 @@ func refresh(object: Dictionary) -> void:
 			target_picker.add_item(entry[1])
 			picker_ids.append(entry[0])
 	var new_target: String = object.inspector.target.instance_id if object.inspector.get("target") != null else ""
-	if new_target != target_id or not built:
+	var inspected: Dictionary = manager.app.objects.get(new_target, {})
+	var next_signature := JSON.stringify([inspected.get("fields", []).map(func(f): return [f.component_id,f.id,f.value_type]),inspected.get("scripts", []).map(func(s): return [s.id,s.schema.name,s.enabled])])
+	if new_target != target_id or not built or (next_signature != field_signature and edits.is_empty()):
 		for field in edits:
 			# A target switch ends the old lease; never redirect a draft to the new target.
 			manager.session_input(panel_id, target_id, field, "end", {})
 		edits.clear()
 		scroll_pending = -1.0
 		target_id = new_target
+		field_signature = next_signature
 		build_fields()
 		built = true
 	target_picker.select(maxi(0, picker_ids.find(target_id)))
 	fill_values()
+	refresh_drives()
 	var bar := scroll.get_v_scroll_bar()
 	if scroll_pending < 0 and not scroll_inflight:
 		scroll.scroll_vertical = int(float(object.inspector.scroll[1]) * maxf(0.0, bar.max_value - bar.page))
@@ -225,7 +309,7 @@ func fill_values() -> void:
 		if edits.has(field): continue
 		var data: Dictionary = manager.field_data(target_id, field)
 		if data.is_empty(): continue
-		var value: Variant = data.value
+		var value: Variant = manager.app.driven_objects.get(target_id, {}).get(field, data.value)
 		var parts: Array = controls[field]
 		if field == "collider":
 			parts[0].button_pressed = value != null
@@ -240,6 +324,7 @@ func fill_values() -> void:
 
 func start_edit(field: String, control: Control, one_shot: bool = false) -> void:
 	if filling or not manager.app.editable or target_id.is_empty(): return
+	if not manager.field_driver(target_id, field).is_empty(): return
 	if edits.has(field):
 		edits[field].release = one_shot
 		return
@@ -303,6 +388,11 @@ func edit_result(result: Dictionary, field: String) -> void:
 
 func tick() -> void:
 	script_view.tick()
+	refresh_drives()
+	if not drive_labels.is_empty():
+		filling = true
+		fill_values()
+		filling = false
 	if not manager.app.editable: return
 	var now := Time.get_ticks_msec()
 	if scroll_pending >= 0 and not scroll_inflight and now >= scroll_due:
@@ -336,6 +426,13 @@ func tick() -> void:
 	if edits.is_empty() and not script_view.busy() and target_change_pending:
 		target_change_pending = false
 		manager.edit(panel_id, "inspector_target", pending_target)
+	if edits.is_empty() and not script_view.busy() and not requested_script.is_empty():
+		var id := requested_script
+		requested_script = ""
+		if id == "*": manager.edit(panel_id,"inspector_scripts_open",true)
+		else:
+			manager.edit(panel_id,"inspector_script_id",id,func(result):
+				if result.ok: manager.edit(panel_id,"inspector_scripts_open",true))
 	refresh_sessions()
 
 func has_active_edits() -> bool:
@@ -363,7 +460,7 @@ func refresh_sessions() -> void:
 		for session in manager.sessions:
 			if session.target.instance_id == target_id and session.field_id == field and (session.client_id != manager.client_id or session.get("context") == null or session.context.source.instance_id != panel_id):
 				remote = session
-		var readonly: bool = not manager.app.editable or not remote.is_empty()
+		var readonly: bool = not manager.app.editable or not remote.is_empty() or not manager.field_driver(target_id, field).is_empty()
 		for control in controls[field]:
 			if control is LineEdit: control.editable = not readonly
 			elif control is BaseButton: control.disabled = readonly

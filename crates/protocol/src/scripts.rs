@@ -101,4 +101,6 @@ pub struct DriveFrame {
 pub struct DrivenObject {
     pub target: Address,
     pub values: BTreeMap<String, Value>,
+    /// Local provenance for inspector navigation; never replicated or persisted.
+    pub sources: BTreeMap<String, String>,
 }

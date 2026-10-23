@@ -41,7 +41,8 @@ func setup(controller, id: String) -> void:
 	add_child(body)
 
 func refresh(object: Dictionary) -> void:
-	viewport.size = Vector2i(int(object.panel.size[0]), int(object.panel.size[1]))
+	if not manager.windows.has(panel_id):
+		viewport.size = Vector2i(int(object.panel.size[0]), int(object.panel.size[1]))
 	content.refresh(object)
 
 func canvas_point(global_point: Vector3) -> Vector2:

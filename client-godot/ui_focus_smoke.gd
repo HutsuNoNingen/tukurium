@@ -22,6 +22,7 @@ func run() -> void:
 	var scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
 	if not await wait_for(func(): return scene.editable and scene.player_initialized, "Scene not ready"): quit(1); return
+	scene.inspector_toggle.button_pressed = true
 	var object_id: String = scene.selected_id
 	for checkbox in [scene.collider_enabled, scene.collider_solid]:
 		if not await wait_for(func(): return scene.grounded, "Player did not land"): quit(1); return

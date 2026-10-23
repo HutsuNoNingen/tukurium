@@ -282,11 +282,17 @@ func build_ui() -> void:
 	inspector_toggle = Button.new()
 	inspector_toggle.text = "Inspector [I]"
 	inspector_toggle.toggle_mode = true
-	inspector_toggle.button_pressed = true
+	inspector_toggle.button_pressed = false
 	inspector_toggle.toggled.connect(func(visible):
 		inspector_shell.visible = visible
 		inspector_toggle.release_focus())
 	row.add_child(inspector_toggle)
+	var window_inspector := Button.new()
+	window_inspector.text = "Inspector ↗"
+	window_inspector.focus_mode = Control.FOCUS_NONE
+	window_inspector.tooltip_text = "Open a shared inspector in a desktop window · Ctrl+Shift+I"
+	window_inspector.pressed.connect(func(): world_panels.open_inspector(selected_id, true))
+	row.add_child(window_inspector)
 	status_label = label("Connecting…", 14, Color("6ed3dc"))
 	row.add_child(status_label)
 	var tree := panel(root, 24, 112, 264, 510)
@@ -353,6 +359,7 @@ func build_ui() -> void:
 	people.add_child(people_label)
 	var inspector_panel := panel(root, -340, 112, -24, 708)
 	inspector_shell = inspector_panel.get_parent()
+	inspector_shell.hide()
 	inspector_panel.get_parent().anchor_left = 1.0
 	inspector_panel.get_parent().anchor_right = 1.0
 	var inspector_scroll := ScrollContainer.new()
@@ -1313,6 +1320,7 @@ func set_view_mode(mode: int) -> void:
 	view_mode.release_focus()
 
 func gameplay_keyboard_blocked() -> bool:
+	if world_panels.has_window_focus(): return true
 	if world_panels.text_focused(): return true
 	var focus := get_viewport().gui_get_focus_owner()
 	if focus is LineEdit or focus is TextEdit: return true
@@ -1352,7 +1360,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.physical_keycode == KEY_I and not gameplay_keyboard_blocked():
-		world_panels.open_inspector(selected_id)
+		world_panels.open_inspector(selected_id, event.shift_pressed)
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey and (event.keycode == KEY_SPACE or event.physical_keycode == KEY_SPACE) and not gameplay_keyboard_blocked():

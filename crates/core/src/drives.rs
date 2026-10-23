@@ -121,6 +121,7 @@ pub(crate) fn evaluate(world: &mut World) {
     // Read the shared base and publish typed ECS components. No shared field is changed.
     for object in &snapshot.objects {
         let mut values = BTreeMap::new();
+        let mut sources = BTreeMap::new();
         for script in object.scripts.iter().filter(|s| s.schema.has_drive) {
             let Some(cached) = runtime.cache.get(&script.id) else {
                 continue;
@@ -134,6 +135,7 @@ pub(crate) fn evaluate(world: &mut World) {
                 if let Some(field) = cached.values.keys().find(|k| values.contains_key(*k)) {
                     error = Some(format!("Field {field} is already driven by another script"));
                 } else {
+                    sources.extend(cached.values.keys().map(|field| (field.clone(), script.id.clone())));
                     values.extend(cached.values.clone());
                 }
             }
@@ -153,6 +155,7 @@ pub(crate) fn evaluate(world: &mut World) {
             frame.objects.push(DrivenObject {
                 target: object.address.clone(),
                 values,
+                sources,
             });
         }
     }
@@ -265,6 +268,7 @@ mod tests {
         model.set_media_time(110.0);
         model.advance(Duration::ZERO);
         assert_eq!(model.drive_frame().objects[0].values["rotation"], rotation);
+        assert_eq!(model.drive_frame().objects[0].sources["rotation"], model.snapshot().objects[0].scripts[0].id);
         update(&mut model, true);
         model.advance(Duration::ZERO);
         assert_eq!(model.drive_frame().objects[0].values["rotation"], rotation);
@@ -362,5 +366,6 @@ mod tests {
                 .unwrap()
                 .contains("already driven")
         );
+        assert_eq!(model.drive_frame().objects[0].sources["color"], model.snapshot().objects[0].scripts[0].id);
     }
 }
