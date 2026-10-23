@@ -30,6 +30,7 @@ try {
   assert.equal(godot.exitCode,0,godot.logs);assert.doesNotMatch(godot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(godot.logs,/CREATION SMOKE PASS/);
   const shapes=['box','sphere','capsule','cylinder','cone','torus','grid','quad'];
   await until(()=>shapes.every(shape=>host.client.latest().snapshot.objects.some(o=>o.visual.kind==='primitive'&&o.visual.shape===shape)),'Primitives did not reach host');
+  await until(()=>host.client.latest().snapshot.objects.some(o=>o.visual.kind==='none'&&o.renderer===undefined&&o.collider===null),'Empty Slot did not reach host');
   const observed=host.client.messages.filter(m=>m.kind==='snapshot').flatMap(m=>m.snapshot.objects);
   const manipulated=observed.find(o=>o.creation && o.world_scale[0]>1.05 && Math.abs(o.world_rotation[1])>0.01);
   assert.ok(manipulated?.panel && manipulated.collider && !manipulated.inspector,'Grabbed creation surface did not reach host');
@@ -41,6 +42,7 @@ try {
   await until(()=>host.client.latest().snapshot.objects.filter(o=>o.creation).length===2,'Shared creation panel did not duplicate');
   const late=await peer('guest',2);
   await until(()=>shapes.every(shape=>late.client.latest().snapshot.objects.some(o=>o.visual.kind==='primitive'&&o.visual.shape===shape)),'Late join missed primitives');
+  assert.ok(late.client.latest().snapshot.objects.some(o=>o.visual.kind==='none'&&o.renderer===undefined),'Late join missed empty Slot');
   await until(()=>late.client.latest().snapshot.objects.filter(o=>o.creation?.shape==='box').length===2,'Late join missed creation panels or selection');
   const copy=host.client.latest().snapshot.objects.find(o=>o.creation&&o.address.instance_id!==panel.address.instance_id);
   host.client.send({kind:'structure',command:{command_id:randomUUID(),action:'delete',target:copy.address,expected_revision:copy.object_revision}});

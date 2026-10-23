@@ -8,7 +8,7 @@ pub struct Identity(pub Address);
 #[derive(Component)]
 pub struct ObjectRoot {
     pub revision: u64,
-    pub renderer: Address,
+    pub renderer: Option<Address>,
     pub item_identity: Option<kokoverse_protocol::ItemIdentity>,
 }
 

@@ -182,3 +182,10 @@ FPSで3Dパネルを右クリック保持したままミドルクリックする
 
 - 再現・確認：3Dパネルを右クリックで保持し、右ボタンを押したままミドルボタンを押して離す。保持・マウス捕捉が続き、リングが閉じたままであることを確認してから右ボタンで確定する。修正前はこの順序で [panels-integration.mjs](../tests/panels-integration.mjs) が失敗した。
 - コード：[world_hud.gd](../client-godot/world_hud.gd)、[panels_smoke.gd](../client-godot/panels_smoke.gd)。確認日：2026-10-24。
+
+## 描画部品を持たないSlotでは表示用フィールドを参照しない
+
+空のSlotを作成して選択すると、個人インスペクタの `refresh_fields()` が存在しない `color` フィールドを読んでGodotのスクリプトエラーになった。`MeshRenderer` の有無で `color` の存在を決め、色入力もその場で無効化する。描画ノードはメッシュを持たない状態を許し、選択枠を表示しない。
+
+- 再現・確認：共有作成パネルから空のSlotを作り、選択、2クライアント同期、途中参加を [creation-integration.mjs](../tests/creation-integration.mjs) の `--rendered` で確認する。
+- コード：[main.gd](../client-godot/main.gd)、[systems.rs](../crates/core/src/systems.rs)。確認日：2026-10-24。

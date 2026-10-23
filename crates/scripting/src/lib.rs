@@ -363,16 +363,11 @@ impl Program {
         readable_fields: &BTreeMap<String, Value>,
     ) -> Result<Output, String> {
         let run = || -> mlua::Result<Output> {
-            let color: [f64; 4] = serde_json::from_value(
-                object
-                    .fields
-                    .iter()
-                    .find(|f| f.id == "color")
-                    .unwrap()
-                    .value
-                    .clone(),
-            )
-            .map_err(|e| error(e.to_string()))?;
+            let color: [f64; 4] = object.fields.iter().find(|f| f.id == "color")
+                .map(|field| serde_json::from_value(field.value.clone()))
+                .transpose()
+                .map_err(|e| error(e.to_string()))?
+                .unwrap_or([1.0; 4]);
             let output = Arc::new(Mutex::new(Output {
                 position: object.world_position,
                 rotation: object.world_rotation,

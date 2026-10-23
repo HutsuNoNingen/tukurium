@@ -7,6 +7,7 @@ var app
 var cards: Array[Button] = []
 var selected := 0
 var create_button: Button
+var slot_button: Button
 var status: Label
 var busy := false
 
@@ -96,6 +97,12 @@ func build_ui() -> void:
 	status=label("",18)
 	status.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	footer.add_child(status)
+	slot_button=Button.new()
+	slot_button.text="空のSlotを作成"
+	slot_button.custom_minimum_size=Vector2(190,48)
+	slot_button.focus_mode=Control.FOCUS_NONE
+	slot_button.pressed.connect(spawn_slot)
+	footer.add_child(slot_button)
 	create_button=Button.new()
 	create_button.custom_minimum_size=Vector2(210,48)
 	create_button.focus_mode=Control.FOCUS_NONE
@@ -149,15 +156,32 @@ func refresh(object: Dictionary) -> void:
 	var index: int=PRIMITIVES.SHAPES.find(object.creation.shape)
 	if index>=0: show_selection(index)
 	for card in cards: card.disabled=not app.editable
+	slot_button.disabled=busy or not app.editable
 	create_button.disabled=busy or not app.editable
 
 func finish_all() -> void:
 	pass
 
+func spawn_slot() -> void:
+	if busy or not app.editable: return
+	busy=true
+	slot_button.disabled=true
+	create_button.disabled=true
+	status.text="作成中…"
+	manager.command({"kind":"structure","command":{"action":"create_slot","parent":null}},func(result):
+		busy=false
+		slot_button.disabled=not app.editable
+		create_button.disabled=not app.editable
+		if result.ok:
+			app.select_object(result.selected.instance_id)
+			manager.close_panel(panel_id)
+		else: status.text=result.get("message","作成できませんでした"))
+
 func spawn_selected(index: int = -1) -> void:
 	if busy or not app.editable: return
 	busy=true
 	create_button.disabled=true
+	slot_button.disabled=true
 	status.text="作成中…"
 	var chosen: int=selected if index<0 else index
 	var shape: String=PRIMITIVES.SHAPES[chosen]
@@ -167,6 +191,7 @@ func spawn_selected(index: int = -1) -> void:
 	manager.command({"kind":"structure","command":{"action":"import_asset","name":name_text,"position":[position.x,position.y,position.z],"rotation":[0,0,0,1],"visual":{"kind":"primitive","shape":shape}}},func(result):
 		busy=false
 		create_button.disabled=not app.editable
+		slot_button.disabled=not app.editable
 		if result.ok:
 			app.select_object(result.selected.instance_id)
 			manager.close_panel(panel_id)

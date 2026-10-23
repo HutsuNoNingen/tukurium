@@ -386,7 +386,7 @@ impl WorldModel {
     ) -> Result<WorldCommit, String> {
         let id = Uuid::new_v4().to_string();
         object.address.instance_id = id.clone();
-        object.renderer.instance_id = id;
+        if let Some(renderer) = &mut object.renderer { renderer.instance_id = id; }
         object.object_revision = "0".into();
         object.item_identity = Some(identity);
         object.world_position = position;
@@ -648,10 +648,10 @@ pub(crate) fn new_object(name: String, position: [f64; 3], color: [f64; 4]) -> O
             instance_id: id.clone(),
             local_id: 1,
         },
-        renderer: Address {
+        renderer: Some(Address {
             instance_id: id,
             local_id: 2,
-        },
+        }),
         object_revision: "0".into(),
         world_position: position,
         world_rotation: kokoverse_protocol::identity_rotation(),
@@ -717,6 +717,7 @@ pub(crate) fn new_object(name: String, position: [f64; 3], color: [f64; 4]) -> O
 
 pub(crate) fn set_default_collider(object: &mut ObjectView) {
     let half_extents = match &object.visual {
+        kokoverse_protocol::Visual::None => [0.0; 3],
         kokoverse_protocol::Visual::Cube => [0.75; 3],
         kokoverse_protocol::Visual::Primitive { shape } => shape.half_extents(),
         kokoverse_protocol::Visual::Panel => crate::panels::half_extents(
@@ -811,8 +812,8 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
         }
         if Uuid::parse_str(&object.address.instance_id).is_err()
             || object.address.local_id != 1
-            || object.renderer.instance_id != object.address.instance_id
-            || object.renderer.local_id != 2
+            || object.renderer.as_ref().is_some_and(|r| r.instance_id != object.address.instance_id || r.local_id != 2)
+            || object.renderer.is_some() == matches!(object.visual, kokoverse_protocol::Visual::None)
             || !ids.insert(&object.address)
         {
             return Err("Invalid ObjectRoot ownership".into());
@@ -874,6 +875,7 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
 
 pub fn validate_visual(visual: &kokoverse_protocol::Visual) -> Result<(), String> {
     match visual {
+        kokoverse_protocol::Visual::None => Ok(()),
         kokoverse_protocol::Visual::Cube
         | kokoverse_protocol::Visual::Primitive { .. }
         | kokoverse_protocol::Visual::Panel => Ok(()),

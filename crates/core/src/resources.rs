@@ -133,19 +133,19 @@ pub(crate) fn insert_object(world: &mut World, object: ObjectView) {
     world
         .entity_mut(slot)
         .insert(ScriptComponents(object.scripts.clone()));
-    let renderer = world
-        .spawn((
-            Identity(object.renderer.clone()),
+    let renderer = object.renderer.as_ref().map(|address| {
+        world.spawn((
+            Identity(address.clone()),
             MeshRenderer {
                 host: object.address.clone(),
                 color: serde_json::from_value(get("color").clone()).expect("validated color"),
                 visual: object.visual,
             },
-        ))
-        .id();
+        )).id()
+    });
     let mut index = world.resource_mut::<EntityIndex>();
     index.0.insert(object.address, slot);
-    index.0.insert(object.renderer, renderer);
+    if let (Some(address), Some(renderer)) = (object.renderer, renderer) { index.0.insert(address, renderer); }
 }
 
 pub(crate) fn remove_object(world: &mut World, address: &Address) {
@@ -155,10 +155,12 @@ pub(crate) fn remove_object(world: &mut World, address: &Address) {
         .expect("validated root")
         .renderer
         .clone();
-    let renderer_entity = world.resource::<EntityIndex>().0[&renderer];
-    world.despawn(renderer_entity);
+    if let Some(renderer) = &renderer {
+        let renderer_entity = world.resource::<EntityIndex>().0[renderer];
+        world.despawn(renderer_entity);
+    }
     world.despawn(entity);
     let mut index = world.resource_mut::<EntityIndex>();
-    index.0.remove(&renderer);
+    if let Some(renderer) = &renderer { index.0.remove(renderer); }
     index.0.remove(address);
 }

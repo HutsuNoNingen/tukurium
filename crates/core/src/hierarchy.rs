@@ -218,7 +218,7 @@ pub(crate) fn duplicate(snapshot: &Snapshot, root: &Address) -> Result<Vec<Objec
     {
         let mut object = source.clone();
         object.address = mapping[&source.address].clone();
-        object.renderer.instance_id = object.address.instance_id.clone();
+        if let Some(renderer) = &mut object.renderer { renderer.instance_id = object.address.instance_id.clone(); }
         object.parent = source
             .parent
             .as_ref()

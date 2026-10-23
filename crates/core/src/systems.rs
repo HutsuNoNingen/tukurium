@@ -120,7 +120,7 @@ pub(crate) fn validate_commands(
                     let (_,_,revisions,root)=slots.get(entity).map_err(|_|"Expected an ObjectRoot Slot")?;
                     if command.expected_revision.parse::<u64>().ok()!=Some(*revisions.0.get("playback").unwrap_or(&0)) { return Err("Playback changed elsewhere; try the control again".into()); }
                     let mut value=playback.get(entity).map_err(|_|"This object has no video playback")?.0.clone();
-                    let visual=&meshes.get(index.0[&root.renderer]).map_err(|_|"Renderer is missing")?.visual;
+                    let visual=&meshes.get(index.0[root.renderer.as_ref().ok_or("Renderer is missing")?]).map_err(|_|"Renderer is missing")?.visual;
                     let duration=match visual {kokoverse_protocol::Visual::Video{duration_seconds,..}=>*duration_seconds,_=>return Err("Expected a video".into())};
                     value.position_seconds=value.position_at(clock.0,duration);
                     value.anchor_seconds=clock.0;
@@ -139,6 +139,23 @@ pub(crate) fn validate_commands(
                 WorldCommand::Structure { command } => {
                     let deleting = matches!(&command.operation, StructuralOperation::Delete { .. });
                     match command.operation {
+                        StructuralOperation::CreateSlot { parent } => {
+                            if slots.iter().count() >= MAX_OBJECTS { return Err("Object limit reached (128)".into()); }
+                            let mut object = new_object("Slot".into(), [0.0, 0.0, 0.0], [1.0; 4]);
+                            crate::hierarchy::validate_parent(&snapshot.0, &object.address, &parent)?;
+                            if let Some(parent_object) = parent.as_ref().and_then(|p| snapshot.0.objects.iter().find(|o| &o.address == p)) {
+                                object.world_position = parent_object.world_position;
+                                object.world_rotation = parent_object.world_rotation;
+                                object.world_scale = parent_object.world_scale;
+                            }
+                            object.renderer = None;
+                            object.visual = kokoverse_protocol::Visual::None;
+                            object.collider = None;
+                            object.parent = parent;
+                            object.fields.retain(|f| f.id != "color");
+                            crate::sync_object_fields(&mut object);
+                            Ok(Mutation::Insert(Box::new(object)))
+                        }
                         StructuralOperation::CreateChild { parent } => {
                             if slots.iter().count() >= MAX_OBJECTS { return Err("Object limit reached (128)".into()); }
                             let parent_object = snapshot.0.objects.iter().find(|o| o.address == parent).ok_or("Parent no longer exists")?;
@@ -266,8 +283,8 @@ pub(crate) fn apply_commands(world: &mut World) {
                 Mutation::ScriptFrame(patches) => {
                     for patch in patches {
                         let entity = patch.entity;
-                        let renderer = world.resource::<EntityIndex>().0
-                            [&world.get::<ObjectRoot>(entity).unwrap().renderer];
+                        let renderer = world.get::<ObjectRoot>(entity).unwrap().renderer.as_ref()
+                            .and_then(|address| world.resource::<EntityIndex>().0.get(address)).copied();
                         for (id, changed) in [
                             (
                                 "position",
@@ -285,7 +302,7 @@ pub(crate) fn apply_commands(world: &mut World) {
                             ),
                             (
                                 "color",
-                                world.get::<MeshRenderer>(renderer).unwrap().color != patch.color,
+                                renderer.is_some_and(|r| world.get::<MeshRenderer>(r).unwrap().color != patch.color),
                             ),
                         ] {
                             if changed {
@@ -302,7 +319,7 @@ pub(crate) fn apply_commands(world: &mut World) {
                             rotation: patch.rotation,
                             scale: patch.scale,
                         };
-                        world.get_mut::<MeshRenderer>(renderer).unwrap().color = patch.color;
+                        if let Some(renderer) = renderer { world.get_mut::<MeshRenderer>(renderer).unwrap().color = patch.color; }
                         world.get_mut::<ScriptComponents>(entity).unwrap().0 = patch.scripts;
                         world.get_mut::<ObjectRoot>(entity).unwrap().revision += 1;
                     }
@@ -443,9 +460,7 @@ pub(crate) fn extract_snapshot(
         creation,
     ) in &roots
     {
-        let mesh = meshes
-            .get(index.0[&root.renderer])
-            .expect("registered renderer");
+        let mesh = root.renderer.as_ref().map(|address| meshes.get(index.0[address]).expect("registered renderer"));
         let mut object = kokoverse_protocol::ObjectView {
             parent: slot.parent.clone(),
             item_identity: root.item_identity.clone(),
@@ -456,7 +471,7 @@ pub(crate) fn extract_snapshot(
             world_rotation: global.rotation,
             world_scale: global.scale,
             collider: collider.map(|c| c.0.clone()),
-            visual: mesh.visual.clone(),
+            visual: mesh.map_or(kokoverse_protocol::Visual::None, |m| m.visual.clone()),
             playback: playback.map(|p| p.0.clone()),
             scripts: scripts.0.clone(),
             panel: panel.map(|p| p.0.clone()),
@@ -477,13 +492,6 @@ pub(crate) fn extract_snapshot(
                     "Position",
                     "vec3",
                     serde_json::json!(local.translation),
-                    revisions,
-                ),
-                crate::field(
-                    "color",
-                    "Color",
-                    "color",
-                    serde_json::json!(mesh.color),
                     revisions,
                 ),
                 crate::field(
@@ -516,6 +524,9 @@ pub(crate) fn extract_snapshot(
                 ),
             ],
         };
+        if let Some(mesh) = mesh {
+            object.fields.insert(3, crate::field("color", "Color", "color", serde_json::json!(mesh.color), revisions));
+        }
         crate::panels::append_fields(&mut object, revisions);
         objects.push(object);
     }

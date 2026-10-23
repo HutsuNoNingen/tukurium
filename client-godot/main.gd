@@ -1263,7 +1263,7 @@ func create_render_node(object: Dictionary) -> MeshInstance3D:
 		node.mesh = quad
 	elif object.visual.get("kind") == "primitive":
 		node.mesh = PRIMITIVE_MESH.create(object.visual.shape)
-	else:
+	elif object.visual.get("kind") != "none":
 		var mesh := BoxMesh.new()
 		mesh.size = Vector3(1.5, 1.5, 1.5)
 		node.mesh = mesh
@@ -1302,7 +1302,7 @@ func update_selected() -> void:
 	current = objects.get(selected_id, {})
 	video_controls.visible = not current.is_empty() and current.visual.kind == "video"
 	fields.clear()
-	selection_outline.visible = not current.is_empty()
+	selection_outline.visible = not current.is_empty() and current.get("visual", {}).get("kind") != "none"
 	if current.is_empty():
 		object_label.text = "No object selected"
 		name_input.text = ""
@@ -1387,7 +1387,8 @@ func refresh_fields() -> void:
 	if not dirty.has("name"): name_input.text = fields.name.value
 	if not dirty.has("position"):
 		for i in range(3): position_inputs[i].value = fields.position.value[i]
-	if not dirty.has("color"):
+	color_input.disabled = not fields.has("color")
+	if fields.has("color") and not dirty.has("color"):
 		var c: Array = fields.color.value
 		color_input.color = Color(c[0], c[1], c[2], c[3])
 	if fields.has("rotation") and not dirty.has("rotation"):

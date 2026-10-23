@@ -166,7 +166,8 @@ pub struct ObjectView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item_identity: Option<ItemIdentity>,
     pub address: Address,
-    pub renderer: Address,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renderer: Option<Address>,
     pub object_revision: String,
     pub world_position: [f64; 3],
     #[serde(default = "identity_rotation")]
@@ -193,6 +194,7 @@ pub struct ObjectView {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Visual {
+    None,
     #[default]
     Cube,
     Primitive { shape: PrimitiveShape },
@@ -277,6 +279,7 @@ pub struct StructuralCommand {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum StructuralOperation {
+    CreateSlot { parent: Option<Address> },
     CreateChild { parent: Address },
     Reparent { target: Address, parent: Option<Address>, expected_revision: String },
     Create,

@@ -289,16 +289,9 @@ pub(crate) fn prepare_frame(world: &mut World) {
                 position: object.world_position,
                 rotation: object.world_rotation,
                 scale: object.world_scale,
-                color: serde_json::from_value(
-                    object
-                        .fields
-                        .iter()
-                        .find(|f| f.id == "color")
-                        .unwrap()
-                        .value
-                        .clone(),
-                )
-                .unwrap(),
+                color: object.fields.iter().find(|f| f.id == "color")
+                    .map(|f| serde_json::from_value(f.value.clone()).unwrap())
+                    .unwrap_or([1.0; 4]),
                 scripts: object.scripts,
             });
         }

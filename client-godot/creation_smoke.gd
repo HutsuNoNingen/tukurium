@@ -134,6 +134,15 @@ func run() -> void:
 			await RenderingServer.frame_post_draw
 			root.get_texture().get_image().save_png(arg.trim_prefix("--screenshot="))
 	scene.hud.open_creation()
+	if not await until(func(): return scene.world_panels.panels.size()==1,"Creation panel did not reopen for Slot"): quit(1); return
+	surface=scene.world_panels.panels.values()[0]
+	panel=surface.content
+	id=surface.panel_id
+	await click_control(scene,surface,panel.slot_button)
+	if not await until(func(): return not scene.objects.has(id) and scene.current.get("visual",{}).get("kind")=="none","Empty Slot was not created"): quit(1); return
+	if scene.current.get("renderer")!=null or scene.render_nodes[scene.selected_id].mesh!=null or scene.current.get("collider")!=null:
+		push_error("Empty Slot unexpectedly has a renderer or collider"); quit(1); return
+	scene.hud.open_creation()
 	if not await until(func(): return scene.world_panels.panels.size()==1,"Creation panel did not reopen for Esc"): quit(1); return
 	id=scene.world_panels.panels.keys()[0]
 	var escape := InputEventKey.new()

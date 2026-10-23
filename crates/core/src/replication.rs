@@ -155,7 +155,7 @@ fn ui_value(object: &ObjectView, id: &str) -> Value {
         .unwrap_or(Value::Null)
 }
 fn renderer(world: &World, entity: Entity) -> Entity {
-    world.resource::<EntityIndex>().0[&world.get::<ObjectRoot>(entity).unwrap().renderer]
+    world.resource::<EntityIndex>().0[world.get::<ObjectRoot>(entity).unwrap().renderer.as_ref().expect("mesh renderer")]
 }
 fn no_edit(_: &mut World, _: Entity, _: &str, _: Value) {
     unreachable!("Command-only field cannot be directly edited")
@@ -214,9 +214,10 @@ pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
                     FieldAccess::Command,
                 ),
             ],
-            present: |_| true,
+            present: |o| o.renderer.is_some(),
             project: |o| json!({"color":ui_value(o,"color"),"visual":o.visual}),
             restore: |o, v| {
+                o.renderer = Some(Address { instance_id: o.address.instance_id.clone(), local_id: 2 });
                 o.visual = parse(&v["visual"])?;
                 Ok(())
             },
@@ -493,10 +494,8 @@ impl Registry {
         }
         let mut result = crate::new_object("Object".into(), [0.0; 3], [1.0; 4]);
         result.address = o.address.clone();
-        result.renderer = Address {
-            instance_id: o.address.instance_id.clone(),
-            local_id: 2,
-        };
+        result.renderer = None;
+        result.visual = Visual::None;
         result.object_revision = o.revision;
         result.fields.clear();
         let mut seen = HashSet::new();

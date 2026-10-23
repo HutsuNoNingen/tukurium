@@ -35,6 +35,32 @@ fn run(model: &mut WorldModel, command: WorldCommand) -> CommandOutcome {
 }
 
 #[test]
+fn empty_slots_replicate_duplicate_and_restore_without_mesh_renderers() {
+    let mut host = WorldModel::new();
+    let mut guest = WorldModel::new();
+    guest.restore(host.snapshot()).unwrap();
+    let parent = host.snapshot().objects[0].address.clone();
+    let created = run(&mut host, structure(StructuralOperation::CreateSlot { parent: Some(parent.clone()) }));
+    let id = created.selected.unwrap();
+    guest.apply_commit(created.result.unwrap()).unwrap();
+    assert_eq!(guest.snapshot(), host.snapshot());
+    let slot = host.snapshot().objects.into_iter().find(|o| o.address == id).unwrap();
+    assert!(slot.renderer.is_none());
+    assert_eq!(slot.visual, kokoverse_protocol::Visual::None);
+    assert!(slot.fields.iter().all(|f| f.id != "color"));
+    assert_eq!(slot.parent, Some(parent));
+    let copy = run(&mut host, structure(StructuralOperation::Duplicate { target: id, expected_revision: slot.object_revision }));
+    guest.apply_commit(copy.result.unwrap()).unwrap();
+    assert_eq!(guest.snapshot(), host.snapshot());
+    let mut restored = WorldModel::new();
+    restored.restore(host.snapshot()).unwrap();
+    assert_eq!(restored.snapshot(), host.snapshot());
+    let encoded = replication::REGISTRY.encode_world(&host.snapshot());
+    let decoded = replication::REGISTRY.decode_world(encoded).unwrap();
+    assert_eq!(decoded, host.snapshot());
+}
+
+#[test]
 fn primitives_replicate_and_restore_without_mesh_assets() {
     use kokoverse_protocol::{PrimitiveShape, Visual};
     let mut host = WorldModel::new();
@@ -278,7 +304,7 @@ fn invalid_snapshot_and_commit_are_atomic() {
     let mut model = WorldModel::new();
     let before = model.snapshot();
     let mut bad = before.clone();
-    bad.objects[0].renderer.instance_id = Uuid::new_v4().to_string();
+    bad.objects[0].renderer.as_mut().unwrap().instance_id = Uuid::new_v4().to_string();
     assert!(model.restore(bad).is_err());
     assert_eq!(before, model.snapshot());
     let bad = WorldCommit {
