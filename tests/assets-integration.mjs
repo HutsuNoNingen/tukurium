@@ -1,12 +1,25 @@
 import {spawn} from 'node:child_process';
-import {createConnection} from 'node:net';
+import {createConnection,createServer} from 'node:net';
 import {mkdirSync,writeFileSync,readFileSync,existsSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import assert from 'node:assert/strict';
 import {modelFixture} from './asset-fixture.mjs';
-const root=resolve(import.meta.dirname,'..'), session=`assets-${randomUUID()}`, base=49000+Math.floor(Math.random()*800);
+async function freePorts(){
+  for(let attempt=0;attempt<100;attempt++){
+    const base=49000+Math.floor(Math.random()*11000),servers=[];
+    try {
+      for(let offset=0;offset<10;offset++){
+        const server=createServer();servers.push(server);
+        await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(base+offset,'127.0.0.1',resolve);});
+      }
+      return base;
+    }catch{}finally{await Promise.all(servers.filter(s=>s.listening).map(s=>new Promise(r=>s.close(r))));}
+  }
+  throw Error('Could not reserve test ports');
+}
+const root=resolve(import.meta.dirname,'..'), session=`assets-${randomUUID()}`, base=await freePorts();
 const work=resolve(root,'.run',session);mkdirSync(work,{recursive:true});
 const mediaMode=process.argv.includes('--media');
 const fixture=resolve(work,'drop-model.glb'), bytes=modelFixture(process.argv.includes('--large')?100_000_000:150000), hash=createHash('sha256').update(bytes).digest('hex');writeFileSync(fixture,bytes);
@@ -21,7 +34,7 @@ async function connect(port) {
     return {messages,send(body){const data=Buffer.from(JSON.stringify({protocol_version:3,session_id:session,authority_epoch:epoch,sequence:'1',body})),h=Buffer.alloc(4);h.writeUInt32BE(data.length);socket.write(Buffer.concat([h,data]));},async wait(predicate,timeout=15000){const until=Date.now()+timeout;while(Date.now()<until){const found=messages.find(predicate);if(found)return found;await delay(20);}throw Error('Asset wait timeout: '+JSON.stringify(messages.slice(-2)));}};
   }throw Error('No engine');
 }
-async function godot(port,extra) {const c=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',['--headless','--path','client-godot','--script',mediaMode?'res://media_smoke.gd':'res://asset_smoke.gd','--',`--port=${port}`,`--session=${session}`,...extra]);const code=await new Promise(r=>c.once('exit',r));assert.equal(code,0,c.logs);assert.doesNotMatch(c.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(c.logs,mediaMode?/MEDIA SMOKE PASS/:/ASSET SMOKE PASS/);return c;}
+async function godot(port,extra) {const c=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(process.argv.includes('--rendered')?['--rendering-method','gl_compatibility']:['--headless']),'--path','client-godot','--script',mediaMode?'res://media_smoke.gd':'res://asset_smoke.gd','--',`--port=${port}`,`--session=${session}`,...extra]);const code=await new Promise(r=>c.once('exit',r));assert.equal(code,0,c.logs);assert.doesNotMatch(c.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(c.logs,mediaMode?/MEDIA SMOKE PASS/:/ASSET SMOKE PASS/);return c;}
 try {
   start('.tools/kokosync-relay.exe',['--http',`127.0.0.1:${base}`,'--quic',`127.0.0.1:${base+1}`]);
   for(const [role,port] of [['host',base+2],['guest',base+4]]) {
@@ -30,6 +43,13 @@ try {
   const host=await connect(base+2), guest=await connect(base+4);
   for(const [peer,port] of [['host',base+3],['guest',base+5]]) start('.tools/kokosync-adapter.exe',['--engine',`127.0.0.1:${port}`,'--address',`127.0.0.1:${base+1}`,'--session',session,'--peer',peer,'--insecure-development']);
   await guest.wait(m=>m.kind==='snapshot'&&m.editable);
+  let observer;
+  if(process.argv.includes('--large')) {
+    observer=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',['--headless','--path','client-godot','--script','res://asset_observer_smoke.gd','--',`--port=${base+2}`,`--session=${session}`]);
+    const deadline=Date.now()+10000;
+    while(!observer.logs.includes('ASSET OBSERVER READY')&&Date.now()<deadline)await delay(20);
+    assert.match(observer.logs,/ASSET OBSERVER READY/);
+  }
   let extra=[`--fixture=${fixture}`];
   if(mediaMode){
     const fbxSource=process.argv.find(a=>a.startsWith('--fbx='))?.slice(6);
@@ -41,6 +61,14 @@ try {
     extra=[`--fbx=${fbx}`,`--video=${video}`];
   }
   await godot(base+4,extra);
+  if(observer) {
+    const deadline=Date.now()+150000;
+    while(observer.exitCode===null&&Date.now()<deadline)await delay(20);
+    assert.equal(observer.exitCode,0,observer.logs);
+    assert.doesNotMatch(observer.logs,/SCRIPT ERROR:|\bERROR:/);
+    assert.match(observer.logs,/ASSET OBSERVER PASS/);
+    console.log('PASS: peers see the Slot and upload progress before the 100 MB asset is ready');
+  }
   const snapshot=(await host.wait(m=>m.kind==='snapshot'&&m.snapshot.objects.some(o=>o.visual.kind=== (mediaMode?'video':'model')&&(mediaMode || o.world_scale[0]===1.5)))).snapshot;
   assert.equal(snapshot.objects.length,3);
   const model=snapshot.objects.find(o=>o.visual.kind==='model');if(!mediaMode)assert.equal(model.visual.asset_id,hash);
@@ -55,8 +83,9 @@ try {
   const late=await connect(latePort);
   start('.tools/kokosync-adapter.exe',['--engine',`127.0.0.1:${latePort+1}`,'--address',`127.0.0.1:${base+1}`,'--session',session,'--peer','late','--insecure-development']);
   await late.wait(m=>m.kind==='snapshot'&&m.editable&&m.snapshot.objects.length===3);
-  await godot(latePort,mediaMode?[]:[`--asset=${hash}`]);
+  await godot(latePort,mediaMode?[]:[`--asset=${hash}`,...(process.argv.includes('--rendered')?[`--status-capture=${resolve(work,'asset-loading.png')}`]:[])]);
   if(!mediaMode)assert.deepEqual(readFileSync(resolve(lateCache,hash+'.glb')),bytes);
+  if(!mediaMode&&process.argv.includes('--rendered')){assert.ok(existsSync(resolve(work,'asset-loading.png')));console.log(`SCREENSHOT=${resolve(work,'asset-loading.png')}`);}
   console.log(mediaMode?'PASS: late-joining engine receives both model and video; video decodes and plays':'PASS: late-joining engine downloads GLB on demand and Godot renders it from a separate asset cache');
   const before=host.messages.filter(m=>m.kind==='snapshot').at(-1).snapshot.world_revision;
   const bad='0'.repeat(64),at=host.messages.length;
@@ -65,6 +94,25 @@ try {
   host.send({kind:'asset_chunk',asset_id:bad,offset:1,data:bytes.subarray(0,1024).toString('base64')});
   await host.wait(m=>host.messages.indexOf(m)>=at&&m.kind==='asset_error'&&m.asset_id===bad);
   assert.equal(host.messages.filter(m=>m.kind==='snapshot').at(-1).snapshot.world_revision,before);
+  const progress=late.messages.filter(m=>m.kind==='asset_transfer'&&m.asset_id===hash&&m.phase==='downloading_network');
+  if(!mediaMode){assert.ok(progress.some(m=>m.completed===0&&m.total===bytes.length));assert.ok(progress.some(m=>m.completed===bytes.length));for(let i=1;i<progress.length;i++)assert.ok(progress[i].completed>=progress[i-1].completed);}
+  if(!mediaMode)console.log('PASS: actual network byte progress reaches completion without regressing');
   console.log('PASS: out-of-order asset chunks are rejected without changing the world');
+  // A remote subscriber can request a referenced asset before the host owns any bytes.
+  const pendingBytes=modelFixture(300000),pendingHash=createHash('sha256').update(pendingBytes).digest('hex'),command_id=randomUUID();
+  host.send({kind:'structure',command:{command_id,action:'import_asset',name:'Upload pending',position:[4,1,0],rotation:[0,0,0,1],visual:{kind:'model',asset_id:pendingHash,half_extents:[1,1,1]}}});
+  assert.equal((await host.wait(m=>m.kind==='result'&&m.command_id===command_id)).ok,true);
+  assert.equal(existsSync(resolve(work,'host',pendingHash+'.glb')),false);
+  late.send({kind:'asset_get',asset_id:pendingHash});
+  await late.wait(m=>m.kind==='asset_transfer'&&m.asset_id===pendingHash&&m.phase==='waiting_upload');
+  host.send({kind:'asset_offer',asset_id:pendingHash,size:pendingBytes.length});
+  for(let offset=0;offset<pendingBytes.length;offset+=128*1024){
+    await host.wait(m=>m.kind==='asset_chunk_request'&&m.asset_id===pendingHash&&m.offset===offset);
+    host.send({kind:'asset_chunk',asset_id:pendingHash,offset,data:pendingBytes.subarray(offset,offset+128*1024).toString('base64')});
+  }
+  await late.wait(m=>m.kind==='asset_offer'&&m.asset_id===pendingHash);
+  assert.deepEqual(readFileSync(resolve(lateCache,pendingHash+'.glb')),pendingBytes);
+  assert.ok(late.messages.some(m=>m.kind==='asset_transfer'&&m.asset_id===pendingHash&&m.phase==='waiting_upload'&&m.completed>0));
+  console.log('PASS: remote pending reference waits for upload, receives progress and resolves without another world edit');
 } catch(e) {for(const c of children) if(c.logs) console.error(c.logs.slice(-5000));throw e;}
 finally {for(const s of sockets)s.destroy();for(const c of children)if(c.exitCode===null)c.kill();}

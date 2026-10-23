@@ -42,7 +42,7 @@ try {
     foreach ($file in @('Godot_v4.7.2-stable_win64.exe','Godot_v4.7.2-stable_win64_console.exe')) {
         Copy-Item -LiteralPath (Join-Path '.tools/godot' $file) -Destination (Join-Path $packageRoot '.tools/godot')
     }
-    foreach ($file in @('main.gd','main.tscn','project.godot','avatar.gd','translation_gizmo.gd','asset_importer.gd','script_editor.gd','world_panel.gd','world_panels.gd','inspector_view.gd','request_broker.gd')) {
+    foreach ($file in @('main.gd','main.tscn','project.godot','avatar.gd','translation_gizmo.gd','asset_importer.gd','asset_status.gd','script_editor.gd','world_panel.gd','world_panels.gd','inspector_view.gd','request_broker.gd')) {
         Copy-Item -LiteralPath (Join-Path 'client-godot' $file) -Destination (Join-Path $packageRoot 'client-godot')
     }
     $godotOutput = & .tools/godot/Godot_v4.7.2-stable_win64_console.exe --headless --path client-godot --editor --import 2>&1

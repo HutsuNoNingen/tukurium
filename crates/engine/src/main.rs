@@ -385,18 +385,8 @@ impl Engine {
                 requester.to_string()
             });
         }
-        if let WorldCommand::Structure { command: structure } = &command
-            && let kokoverse_protocol::StructuralOperation::ImportAsset {
-                visual:
-                    kokoverse_protocol::Visual::Model { asset_id, .. }
-                    | kokoverse_protocol::Visual::Video { asset_id, .. },
-                ..
-            } = &structure.operation
-            && !self.assets.contains(asset_id)
-        {
-            self.reply(origin,json!({"kind":"result","command_id":command_id,"ok":false,"message":"Upload the model asset before placing it"}));
-            return;
-        }
+        // Asset references can be committed before their bytes arrive.
+        // Missing bytes are resolved by the bounded asset waiters, not world edits.
         match self.model.enqueue(command) {
             Ok(ticket) => {
                 self.inflight.insert(key.clone());

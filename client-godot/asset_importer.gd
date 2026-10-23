@@ -30,7 +30,7 @@ func choose_avatar_texture() -> void:
 	dialog.popup_centered_ratio(0.7)
 
 func queue_avatar_texture(path: String) -> void:
-	jobs.append({"path":path,"purpose":"avatar"})
+	enqueue_job({"path":path,"purpose":"avatar"})
 
 func reset_avatar_texture() -> void:
 	if not editor.editable: return
@@ -53,12 +53,13 @@ func start_avatar_texture(path: String) -> void:
 	cache_avatar_texture(id,data)
 	start_upload(id,data,"png")
 
-func cache_avatar_texture(id: String, data: PackedByteArray) -> void:
+func cache_avatar_texture(id: String, data: PackedByteArray) -> bool:
 	var img := Image.new()
-	if img.load_png_from_buffer(data)!=OK: return
+	if img.load_png_from_buffer(data)!=OK: return false
 	avatar_textures[id] = ImageTexture.create_from_image(img)
 	for avatar in editor.avatars.values():
 		if avatar.texture_id==id: avatar.apply_texture(avatar_textures[id])
+	return true
 
 func attach_avatar(id: String, texture_id: String) -> void:
 	var avatar: Node3D = editor.avatars[id]
@@ -69,8 +70,7 @@ func attach_avatar(id: String, texture_id: String) -> void:
 	if avatar_textures.has(texture_id):
 		if avatar.paint_material != null and avatar.paint_material.albedo_texture!=avatar_textures[texture_id]: avatar.apply_texture(avatar_textures[texture_id])
 	elif editor.editable and not requested.has(texture_id):
-		requested[texture_id] = true
-		editor.queue_message({"kind":"asset_get","asset_id":texture_id})
+		request_asset(texture_id)
 
 func tool_path(name: String) -> String:
 	return ProjectSettings.globalize_path("res://../.tools/ffmpeg/"+name+".exe")
@@ -110,10 +110,11 @@ func drop_files(paths: PackedStringArray) -> void:
 	var hit: Dictionary = editor.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(origin,origin+direction*12.0))
 	if not hit.is_empty(): point = hit.position
 	for i in range(paths.size()):
-		jobs.append({"path":paths[i],"point":point+editor.camera.global_basis.x*float(i)*2.2})
+		enqueue_job({"path":paths[i],"point":point+editor.camera.global_basis.x*float(i)*2.2})
 	if not jobs.is_empty(): editor.feedback.text = "%d file(s) queued for import" % jobs.size()
 
 func _process(delta: float) -> void:
+	expire_downloads()
 	if prepare_thread != null:
 		if not prepare_thread.is_alive():
 			var result: Dictionary = prepare_thread.wait_to_finish()
@@ -135,6 +136,7 @@ func fail(message: String) -> void:
 	printerr("Asset import: "+message)
 	if not active.is_empty():
 		if active.has("video_pid") and OS.is_process_running(active.video_pid): OS.kill(active.video_pid)
+		editor.asset_status.update(str(active.task),"error",0,0,message)
 		active.clear()
 		editor.pending = false
 		editor.pending_action = ""
@@ -142,6 +144,9 @@ func fail(message: String) -> void:
 
 func start_import(job: Dictionary) -> void:
 	active = job
+	active.placed = false
+	active.upload_complete = true
+	import_status("preparing")
 	transfer_age = 0.0
 	editor.pending = true
 	editor.pending_action = "import_asset"
@@ -167,6 +172,7 @@ func start_import(job: Dictionary) -> void:
 		if file == null: fail("Could not open model file."); return
 		if file.get_length() > MAX_SOURCE: fail("Model import limit is 100 MiB per file."); return
 		editor.feedback.text = "Importing " + extension.to_upper() + "…"
+		import_status("converting" if extension == "fbx" else "preparing")
 		prepare_thread = Thread.new()
 		prepare_thread.start(prepare_model.bind(str(job.path),extension))
 	elif extension in ["mp4","mov","webm","mkv","avi","ogv"]:
@@ -192,9 +198,15 @@ func prepare_model(path: String, extension: String) -> Dictionary:
 	return {"data":data}
 
 func upload_model(data: PackedByteArray) -> void:
+	var task: String = active.task
+	import_status("preparing")
+	await get_tree().process_frame
+	if active.get("task","") != task: return
 	var id := hash_bytes(data)
 	if not templates.has(id) and not build_template(id,data): fail("No renderable mesh found in this model."); return
 	start_upload(id,data,"glb")
+	var half: Array = templates[id].half
+	commit_import({"kind":"model","asset_id":id,"half_extents":half},half[1])
 
 func hash_bytes(data: PackedByteArray) -> String:
 	var hash := HashingContext.new()
@@ -206,7 +218,9 @@ func start_upload(id: String, data: PackedByteArray, format: String) -> void:
 	active.asset_id = id
 	active.data = data
 	active.format = format
+	active.upload_complete = false
 	transfer_age = 0.0
+	import_status("uploading_local",0,data.size())
 	editor.feedback.text = "Sharing asset…"
 	editor.queue_message({"kind":"asset_offer","asset_id":id,"size":data.size(),"format":format})
 
@@ -237,6 +251,7 @@ func start_video_conversion(path: String) -> void:
 	if pid<0: fail("Could not start video conversion."); return
 	active.video_pid = pid
 	active.video_output = destination
+	import_status("converting")
 	editor.feedback.text = "Preparing video…"
 
 func finish_video_conversion() -> void:
@@ -253,16 +268,19 @@ func finish_video(path: String, info: Dictionary) -> void:
 	var data := file.get_buffer(file.get_length())
 	var id := hash_bytes(data)
 	active.video_info = info
-	cache_video(id,data)
+	if not cache_video(id,data): fail("Could not write video cache."); return
 	start_upload(id,data,"ogv")
+	var ratio := float(info.width)/float(info.height)
+	commit_import({"kind":"video","asset_id":id,"width":int(info.width),"height":int(info.height),"duration_seconds":float(info.duration)},1.0/ratio if ratio>=1.0 else 1.0)
 
-func cache_video(id: String, data: PackedByteArray) -> void:
+func cache_video(id: String, data: PackedByteArray) -> bool:
 	var path := media_directory().path_join(id+".ogv")
 	if not FileAccess.file_exists(path):
 		var file := FileAccess.open(path,FileAccess.WRITE)
-		if file == null: return
+		if file == null: return false
 		file.store_buffer(data)
 	videos[id] = path
+	return true
 
 func self_contained_glb(data: PackedByteArray) -> bool:
 	if data.size()<20 or data.decode_u32(0)!=0x46546c67 or data.decode_u32(4)!=2 or data.decode_u32(8)!=data.size(): return false
@@ -312,18 +330,29 @@ func commit_import(visual: Dictionary, half_height: float) -> void:
 	var point: Vector3 = active.point + Vector3.UP*(half_height+0.02)
 	var rotation := Quaternion.IDENTITY
 	if visual.kind in ["image","video"]: rotation = Quaternion(Vector3.UP,editor.camera.rotation.y)
-	editor.requests.request({"kind":"structure","command":{"action":"import_asset","name":str(active.path).get_file().get_basename().substr(0,80),"position":[point.x,point.y,point.z],"rotation":[rotation.x,rotation.y,rotation.z,rotation.w],"visual":visual}}, editor.complete_action)
+	import_status("placing")
+	editor.requests.request({"kind":"structure","command":{"action":"import_asset","name":str(active.path).get_file().get_basename().substr(0,80),"position":[point.x,point.y,point.z],"rotation":[rotation.x,rotation.y,rotation.z,rotation.w],"visual":visual}}, on_import_result.bind(str(active.task)))
 	editor.feedback.text = "Placing " + str(active.path).get_file() + "…"
 	transfer_age = 0.0
 
 func receive(body: Dictionary) -> void:
 	var id: String = body.get("asset_id","")
+	if body.kind == "asset_transfer":
+		var phase: String = str(body.phase)
+		if active.get("asset_id","") == id:
+			transfer_age = 0.0
+			import_status(phase,int(body.get("completed",0)),int(body.get("total",0)))
+		elif requested.has(id) and int(requested[id]) >= 0 and not templates.has(id) and not videos.has(id) and not avatar_textures.has(id):
+			requested[id] = Time.get_ticks_msec()
+			editor.asset_status.update(id,phase,int(body.get("completed",0)),int(body.get("total",0)))
+		return
 	if body.kind == "asset_chunk_request" and active.get("asset_id","") == id:
 		var offset := int(body.offset)
 		var data: PackedByteArray = active.data
 		if offset < 0 or offset >= data.size(): fail("Invalid asset upload offset."); return
 		editor.queue_message({"kind":"asset_chunk","asset_id":id,"offset":offset,"data":Marshalls.raw_to_base64(data.slice(offset,mini(offset+CHUNK,data.size())))})
 		transfer_age = 0.0
+		import_status("uploading_local",offset,data.size())
 		editor.feedback.text = "Sharing asset… %d%%" % int(100.0*offset/data.size())
 	elif body.kind == "asset_ready" and active.get("asset_id","") == id:
 		if active.format == "png":
@@ -331,51 +360,113 @@ func receive(body: Dictionary) -> void:
 			var file := FileAccess.open(avatar_file(),FileAccess.WRITE)
 			if file != null: file.store_buffer(active.data)
 			editor.queue_message({"kind":"profile","name":editor.nickname.text.strip_edges(),"avatar_texture":id})
+			import_status("ready")
 			active.clear()
 			editor.pending = false
 			editor.pending_action = ""
 			editor.feedback.text = "Avatar texture shared."
-		elif active.format == "ogv":
-			var info: Dictionary = active.video_info
-			var ratio := float(info.width)/float(info.height)
-			commit_import({"kind":"video","asset_id":id,"width":int(info.width),"height":int(info.height),"duration_seconds":float(info.duration)},1.0/ratio if ratio>=1.0 else 1.0)
 		else:
-			var half: Array = templates[id].half
-			commit_import({"kind":"model","asset_id":id,"half_extents":half},half[1])
+			active.upload_complete = true
+			finish_import()
+
 	elif body.kind == "asset_offer":
+		if not requested.has(id) or int(requested[id]) < 0: return
 		var size := int(body.size)
-		if size < 20 or size > MAX_ASSET: return
+		if size < 20 or size > MAX_ASSET:
+			download_failed(id,"Invalid asset size")
+			return
 		downloads[id] = {"size":size,"data":PackedByteArray(),"format":body.get("format","glb")}
+		requested[id] = Time.get_ticks_msec()
+		editor.asset_status.update(id,"downloading_local",0,size)
 		editor.queue_message({"kind":"asset_chunk_request","asset_id":id,"offset":0})
 	elif body.kind == "asset_chunk" and downloads.has(id):
 		var download: Dictionary = downloads[id]
 		var bytes := Marshalls.base64_to_raw(body.data)
-		if int(body.offset)!=download.data.size() or bytes.is_empty() or bytes.size()>CHUNK or download.data.size()+bytes.size()>download.size:
-			downloads.erase(id); return
+		if download.get("finishing",false) or int(body.offset)!=download.data.size() or bytes.is_empty() or bytes.size()>CHUNK or download.data.size()+bytes.size()>download.size:
+			download_failed(id,"Invalid or out-of-order asset data")
+			return
 		download.data.append_array(bytes)
+		requested[id] = Time.get_ticks_msec()
+		editor.asset_status.update(id,"downloading_local",download.data.size(),download.size)
 		if download.data.size() == download.size:
-			if hash_bytes(download.data) == id and download.format=="png":
-				cache_avatar_texture(id,download.data)
-			elif hash_bytes(download.data) == id and download.format=="ogv":
-				cache_video(id,download.data)
-				for object_id in editor.objects:
-					if editor.objects[object_id].visual.get("asset_id","")==id: attach_video(object_id)
-			elif hash_bytes(download.data) == id and self_contained_glb(download.data) and build_template(id,download.data):
-				for object_id in editor.objects:
-					if editor.objects[object_id].visual.get("asset_id","")==id: attach_model(object_id)
-			downloads.erase(id)
+			download.finishing = true
+			finish_download(id,download)
 		else: editor.queue_message({"kind":"asset_chunk_request","asset_id":id,"offset":download.data.size()})
 	elif body.kind == "asset_error":
-		downloads.erase(id)
 		if active.get("asset_id","") == id: fail(body.get("message","Asset transfer failed."))
-		else: editor.feedback.text = body.get("message","Model download failed.")
+		else: download_failed(id,body.get("message","Asset download failed."))
 
-func on_result(body: Dictionary) -> void:
-	if active.is_empty(): return
-	if body.ok:
-		if body.get("selected") is Dictionary: editor.select_object(body.selected.instance_id)
-		editor.feedback.text = "Imported " + str(active.path).get_file()
+func finish_download(id: String, download: Dictionary) -> void:
+	editor.asset_status.update(id,"verifying")
+	await get_tree().process_frame
+	if downloads.get(id) != download: return
+	if hash_bytes(download.data) != id:
+		download_failed(id,"Asset checksum mismatch")
+		return
+	editor.asset_status.update(id,{"ogv":"loading_video","png":"loading_texture"}.get(download.format,"loading_model"))
+	await get_tree().process_frame
+	if downloads.get(id) != download: return
+	var success := true
+	if download.format == "png": success = cache_avatar_texture(id,download.data)
+	elif download.format == "ogv": success = cache_video(id,download.data)
+	else: success = self_contained_glb(download.data) and build_template(id,download.data)
+	if not success:
+		download_failed(id,"Could not load or cache this asset")
+		return
+	downloads.erase(id)
+	requested.erase(id)
+	for object_id in editor.objects:
+		if editor.objects[object_id].visual.get("asset_id","") == id:
+			if download.format == "ogv": attach_video(object_id)
+			elif download.format == "glb": attach_model(object_id)
+	editor.asset_status.update(id,"ready",int(download.size),int(download.size))
+
+func download_failed(id: String, message: String) -> void:
+	downloads.erase(id)
+	requested[id] = -1
+	editor.asset_status.update(id,"error",0,0,message)
+
+func expire_downloads() -> void:
+	for id in requested.keys():
+		if int(requested[id]) >= 0 and Time.get_ticks_msec()-int(requested[id]) > 35000:
+			download_failed(id,"Transfer timed out. Retry when connected.")
+
+func request_asset(id: String) -> void:
+	requested[id] = Time.get_ticks_msec()
+	editor.asset_status.update(id,"waiting")
+	editor.queue_message({"kind":"asset_get","asset_id":id})
+
+func retry_asset(id: String) -> void:
+	if not editor.editable: return
+	downloads.erase(id)
+	request_asset(id)
+
+func enqueue_job(job: Dictionary) -> void:
+	job.task = "import:%s:%s" % [Time.get_ticks_usec(),jobs.size()]
+	jobs.append(job)
+	editor.asset_status.update(job.task,"queued",0,0,"",str(job.path).get_file())
+
+func import_status(phase: String, completed: int = 0, total: int = 0) -> void:
+	if not active.is_empty(): editor.asset_status.update(str(active.task),phase,completed,total,"",str(active.path).get_file())
+
+func on_import_result(body: Dictionary, task: String) -> void:
+	if active.get("task","") != task: return
+	if not body.ok:
+		fail(str(body.get("message","Import failed")))
+		return
+	active.placed = true
+	active.selected = body.get("selected",{})
+	finish_import()
+
+func finish_import() -> void:
+	if not active.get("placed",false) or not active.get("upload_complete",false): return
+	import_status("ready")
+	editor.feedback.text = "Imported " + str(active.path).get_file()
+	var selected: Dictionary = active.get("selected",{})
 	active.clear()
+	editor.pending = false
+	editor.pending_action = ""
+	if not selected.is_empty(): editor.select_object(selected.instance_id)
 
 func attach_model(object_id: String) -> void:
 	var object: Dictionary = editor.objects[object_id]
@@ -389,8 +480,7 @@ func attach_model(object_id: String) -> void:
 		parent.mesh = null
 		tint_model(model,parent.material_override.albedo_color)
 	elif not requested.has(id):
-		requested[id] = true
-		editor.queue_message({"kind":"asset_get","asset_id":id})
+		request_asset(id)
 
 func tint_model(node: Node, color: Color) -> void:
 	if node is MeshInstance3D and node.mesh != null:
@@ -422,8 +512,7 @@ func attach_video(object_id: String) -> void:
 		player.play()
 		player.paused = true
 	elif not requested.has(id):
-		requested[id] = true
-		editor.queue_message({"kind":"asset_get","asset_id":id})
+		request_asset(id)
 
 func update_videos() -> void:
 	for id in editor.objects:
@@ -486,6 +575,7 @@ func _exit_tree() -> void:
 	for template in templates.values(): template.node.free()
 
 func disconnected() -> void:
+	for id in requested.keys(): download_failed(id,"Disconnected. Reconnect to resume.")
 	downloads.clear()
 	requested.clear()
 	if not active.is_empty(): fail("Import interrupted. Drop the file again after reconnecting.")

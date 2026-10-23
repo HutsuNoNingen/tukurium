@@ -4,6 +4,8 @@ const MAX_FRAME := 1048576
 const AVATAR = preload("res://avatar.gd")
 const TRANSLATION_GIZMO = preload("res://translation_gizmo.gd")
 const ASSET_IMPORTER = preload("res://asset_importer.gd")
+const ASSET_STATUS = preload("res://asset_status.gd")
+var asset_status = ASSET_STATUS.new()
 const SCRIPT_EDITOR = preload("res://script_editor.gd")
 const WORLD_PANELS = preload("res://world_panels.gd")
 const REQUEST_BROKER = preload("res://request_broker.gd")
@@ -132,6 +134,8 @@ func _ready() -> void:
 	add_child(world_panels)
 	world_panels.setup(self)
 	build_ui()
+	add_child(asset_status)
+	asset_status.setup(self)
 	add_child(asset_importer)
 	asset_importer.configure(self)
 	connect_engine()
@@ -285,7 +289,9 @@ func build_ui() -> void:
 	row.add_child(status_label)
 	var tree := panel(root, 24, 112, 264, 510)
 	tree.add_child(label("WORLD", 12, Color("8ca7b6")))
-	tree.add_child(label("Workshop / " + session, 16))
+	var session_label := label("Workshop / " + session, 16)
+	session_label.clip_text = true
+	tree.add_child(session_label)
 	tree.add_child(label("Drop images, models or videos here", 12, Color("8ca7b6")))
 	create_button = Button.new()
 	create_button.text = "+ Cube"
@@ -1072,6 +1078,7 @@ func accept_message(message: Dictionary) -> void:
 			editable = body.editable
 			if not editable:
 				requests.disconnected()
+				asset_importer.disconnected()
 				world_panels.disconnected()
 				script_editor.disconnected()
 				avatar_restore_started = false
@@ -1108,7 +1115,6 @@ func complete_action(body: Dictionary) -> void:
 		select_object(body.selected.instance_id)
 		focus_selected()
 	pending_action = ""
-	asset_importer.on_result(body)
 
 func apply_snapshot(snapshot: Dictionary) -> void:
 	if gizmo.dragging:

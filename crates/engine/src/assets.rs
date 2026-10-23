@@ -17,15 +17,16 @@ struct Incoming {
     size: usize,
     touched: Instant,
 }
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 enum Waiting {
     Ready(u64),
-    Download(u64),
+    Download(Origin),
 }
 pub struct Assets {
     root: PathBuf,
     incoming: HashMap<(Origin, String), Incoming>,
     waiting: HashMap<String, Vec<Waiting>>,
+    waiting_touched: HashMap<String, Instant>,
 }
 impl Assets {
     pub fn new(root: PathBuf) -> std::io::Result<Self> {
@@ -34,7 +35,23 @@ impl Assets {
             root,
             incoming: HashMap::new(),
             waiting: HashMap::new(),
+            waiting_touched: HashMap::new(),
         })
+    }
+    fn wait_for(&mut self, id: &str, waiter: Waiting) -> Result<bool, String> {
+        if !self.waiting.contains_key(id) && self.waiting.len() >= 64 {
+            return Err("Too many pending assets".into());
+        }
+        let waiting = self.waiting.entry(id.into()).or_default();
+        let first = waiting.is_empty();
+        if !waiting.contains(&waiter) {
+            if waiting.len() >= 32 {
+                return Err("Too many asset subscribers".into());
+            }
+            waiting.push(waiter);
+        }
+        self.waiting_touched.insert(id.into(), Instant::now());
+        Ok(first)
     }
     fn path(&self, id: &str) -> PathBuf {
         let texture = self.root.join(format!("{id}.png"));
@@ -178,6 +195,42 @@ pub fn validate_glb(bytes: &[u8]) -> Result<(), String> {
 }
 
 impl Engine {
+    fn asset_progress(&mut self, id: &str, phase: &str, completed: usize, total: usize) {
+        let body = json!({"kind":"asset_transfer","asset_id":id,"phase":phase,"completed":completed,"total":total});
+        self.ui(body.clone());
+        if let Some(touched) = self.assets.waiting_touched.get_mut(id) {
+            *touched = Instant::now();
+        }
+        let subscribers: Vec<_> = self
+            .assets
+            .waiting
+            .get(id)
+            .into_iter()
+            .flatten()
+            .filter_map(|w| match w {
+                Waiting::Download(Origin::Peer(peer)) => Some(peer.clone()),
+                _ => None,
+            })
+            .collect();
+        for peer in subscribers {
+            self.asset_reply(Origin::Peer(peer), body.clone());
+        }
+    }
+    fn fail_asset_waiters(&mut self, id: &str, message: &str) {
+        self.assets.waiting_touched.remove(id);
+        if let Some(waiting) = self.assets.waiting.remove(id) {
+            for waiter in waiting {
+                let target = match waiter {
+                    Waiting::Ready(client) => Origin::Local(client),
+                    Waiting::Download(origin) => origin,
+                };
+                self.asset_reply(
+                    target,
+                    json!({"kind":"asset_error","asset_id":id,"message":message}),
+                );
+            }
+        }
+    }
     fn asset_reply(&mut self, to: Origin, body: Value) {
         match to {
             Origin::Local(id) => {
@@ -206,11 +259,14 @@ impl Engine {
     fn asset_received(&mut self, from: Origin, id: &str) {
         match from {
             Origin::Local(client) if !self.host => {
-                self.assets
-                    .waiting
-                    .entry(id.into())
-                    .or_default()
-                    .push(Waiting::Ready(client));
+                if let Err(message) = self.assets.wait_for(id, Waiting::Ready(client)) {
+                    self.asset_reply(
+                        Origin::Local(client),
+                        json!({"kind":"asset_error","asset_id":id,"message":message}),
+                    );
+                    return;
+                }
+                self.asset_progress(id, "uploading_host", 0, self.assets.size(id).unwrap_or(0));
                 self.offer_asset(Origin::Peer(self.host_peer.clone()), id);
             }
             source => self.asset_reply(source, json!({"kind":"asset_ready","asset_id":id})),
@@ -231,9 +287,12 @@ impl Engine {
                         .entry(id.into())
                         .or_default()
                         .push(Waiting::Ready(client)),
-                    Waiting::Download(client) => self.offer_asset(Origin::Local(client), id),
+                    Waiting::Download(origin) => self.offer_asset(origin, id),
                 }
             }
+        }
+        if !self.assets.waiting.contains_key(id) {
+            self.assets.waiting_touched.remove(id);
         }
     }
     pub(super) fn asset_message(&mut self, from: Origin, body: &Value) {
@@ -268,6 +327,18 @@ impl Engine {
                             touched: Instant::now(),
                         },
                     );
+                    if self.host || matches!(&from, Origin::Peer(_)) {
+                        self.asset_progress(
+                            id,
+                            if self.host {
+                                "waiting_upload"
+                            } else {
+                                "downloading_network"
+                            },
+                            0,
+                            size,
+                        );
+                    }
                     self.asset_reply(
                         from.clone(),
                         json!({"kind":"asset_chunk_request","asset_id":id,"offset":0}),
@@ -279,6 +350,13 @@ impl Engine {
                         .as_u64()
                         .filter(|n| *n < size as u64)
                         .ok_or("Invalid chunk offset")? as usize;
+                    if matches!(&from, Origin::Peer(peer) if peer == &self.host_peer)
+                        && self.assets.waiting.get(id).is_some_and(|waiting| {
+                            waiting.iter().any(|w| matches!(w, Waiting::Ready(_)))
+                        })
+                    {
+                        self.asset_progress(id, "uploading_host", offset, size);
+                    }
                     let mut file =
                         std::fs::File::open(self.assets.path(id)).map_err(|e| e.to_string())?;
                     file.seek(SeekFrom::Start(offset as u64))
@@ -310,7 +388,20 @@ impl Engine {
                     incoming.bytes.extend(data);
                     incoming.touched = Instant::now();
                     let offset = incoming.bytes.len();
-                    if offset == incoming.size {
+                    let total = incoming.size;
+                    if self.host || matches!(&from, Origin::Peer(_)) {
+                        self.asset_progress(
+                            id,
+                            if self.host {
+                                "waiting_upload"
+                            } else {
+                                "downloading_network"
+                            },
+                            offset,
+                            total,
+                        );
+                    }
+                    if offset == total {
                         let incoming = self.assets.incoming.remove(&key).unwrap();
                         self.assets.save(id, &incoming.bytes)?;
                         self.asset_received(from.clone(), id);
@@ -324,19 +415,17 @@ impl Engine {
                 "asset_get" => {
                     if self.assets.contains(id) {
                         self.offer_asset(from.clone(), id);
-                    } else if let Origin::Local(client) = from {
-                        if self.host {
-                            return Err("This model is missing from the host asset cache".into());
-                        }
-                        let waiting = self.assets.waiting.entry(id.into()).or_default();
-                        let first = waiting.is_empty();
-                        if !waiting
+                    } else if self.host || matches!(&from, Origin::Local(_)) {
+                        let first = self.assets.wait_for(id, Waiting::Download(from.clone()))?;
+                        let progress = self
+                            .assets
+                            .incoming
                             .iter()
-                            .any(|w| matches!(w,Waiting::Download(c) if c==&client))
-                        {
-                            waiting.push(Waiting::Download(client));
-                        }
-                        if first {
+                            .find(|((_, asset), _)| asset == id)
+                            .map(|(_, v)| (v.bytes.len(), v.size))
+                            .unwrap_or((0, 0));
+                        self.asset_reply(from.clone(),json!({"kind":"asset_transfer","asset_id":id,"phase":"waiting_upload","completed":progress.0,"total":progress.1}));
+                        if first && !self.host {
                             self.network(
                                 Some(&self.host_peer.clone()),
                                 json!({"kind":"asset_get","asset_id":id}),
@@ -346,20 +435,26 @@ impl Engine {
                         return Err("Asset is not available".into());
                     }
                 }
+                "asset_transfer" => {
+                    if matches!(&from,Origin::Peer(peer) if peer==&self.host_peer) {
+                        if let Some(touched) = self.assets.waiting_touched.get_mut(id) {
+                            *touched = Instant::now();
+                        }
+                        self.ui(body.clone());
+                    }
+                }
                 "asset_ready" => {
                     if matches!(&from,Origin::Peer(peer) if peer==&self.host_peer) {
+                        let size = self.assets.size(id).unwrap_or(0);
+                        self.asset_progress(id, "waiting_host", size, size);
                         self.finish_asset_waiters(id, true);
                     }
                 }
                 "asset_error" => {
-                    if let Some(waiting) = self.assets.waiting.remove(id) {
-                        for waiter in waiting {
-                            let client = match waiter {
-                                Waiting::Ready(c) | Waiting::Download(c) => c,
-                            };
-                            self.asset_reply(Origin::Local(client), body.clone());
-                        }
-                    }
+                    self.fail_asset_waiters(
+                        id,
+                        body["message"].as_str().unwrap_or("Asset transfer failed"),
+                    );
                     self.assets.incoming.remove(&key);
                 }
                 _ => {}
@@ -368,6 +463,7 @@ impl Engine {
         })();
         if let Err(message) = result {
             self.assets.incoming.remove(&key);
+            self.fail_asset_waiters(id, &message);
             self.asset_reply(
                 from,
                 json!({"kind":"asset_error","asset_id":id,"message":message}),
@@ -385,6 +481,20 @@ impl Engine {
         for (source, id) in stale {
             self.assets.incoming.remove(&(source.clone(), id.clone()));
             self.asset_reply(source,json!({"kind":"asset_error","asset_id":id,"message":"Asset transfer timed out; import again"}));
+            self.fail_asset_waiters(&id, "Asset upload timed out");
+        }
+        let waiting: Vec<_> = self
+            .assets
+            .waiting_touched
+            .iter()
+            .filter(|(_, at)| at.elapsed() > Duration::from_secs(30))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in waiting {
+            self.fail_asset_waiters(
+                &id,
+                "Asset has not arrived. Retry after the uploader reconnects.",
+            );
         }
     }
     pub(super) fn close_asset_client(&mut self, client: u64) {
@@ -392,9 +502,15 @@ impl Engine {
             .incoming
             .retain(|(source, _), _| *source != Origin::Local(client));
         self.assets.waiting.retain(|_, waiting| {
-            waiting.retain(|w| !matches!(w,Waiting::Ready(c)|Waiting::Download(c) if *c==client));
+            waiting.retain(|w| match w {
+                Waiting::Ready(c) => *c != client,
+                Waiting::Download(origin) => *origin != Origin::Local(client),
+            });
             !waiting.is_empty()
         });
+        self.assets
+            .waiting_touched
+            .retain(|id, _| self.assets.waiting.contains_key(id));
     }
 }
 
@@ -413,6 +529,31 @@ mod tests {
         bytes.extend(b"JSON");
         bytes.extend(data);
         bytes
+    }
+
+    #[test]
+    fn missing_asset_subscriptions_are_bounded_and_deduplicated() {
+        let root = std::env::temp_dir().join(format!("kokoverse-waiters-{}", uuid::Uuid::new_v4()));
+        let mut assets = Assets::new(root.clone()).unwrap();
+        let waiter = Waiting::Download(Origin::Peer("guest".into()));
+        assert!(assets.wait_for("asset", waiter.clone()).unwrap());
+        assert!(!assets.wait_for("asset", waiter).unwrap());
+        assert_eq!(assets.waiting["asset"].len(), 1);
+        for client in 0..31 {
+            assets
+                .wait_for("asset", Waiting::Download(Origin::Local(client)))
+                .unwrap();
+        }
+        assert!(
+            assets
+                .wait_for("asset", Waiting::Download(Origin::Local(99)))
+                .is_err()
+        );
+        for id in 0..63 {
+            assets.wait_for(&id.to_string(), Waiting::Ready(1)).unwrap();
+        }
+        assert!(assets.wait_for("overflow", Waiting::Ready(1)).is_err());
+        std::fs::remove_dir(root).unwrap();
     }
     #[test]
     fn glb_checks_reject_external_dependencies_and_truncated_chunks() {
