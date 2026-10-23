@@ -35,6 +35,34 @@ fn run(model: &mut WorldModel, command: WorldCommand) -> CommandOutcome {
 }
 
 #[test]
+fn primitives_replicate_and_restore_without_mesh_assets() {
+    use kokoverse_protocol::{PrimitiveShape, Visual};
+    let mut host = WorldModel::new();
+    let mut guest = WorldModel::new();
+    guest.restore(host.snapshot()).unwrap();
+    for shape in [PrimitiveShape::Box, PrimitiveShape::Sphere, PrimitiveShape::Capsule,
+        PrimitiveShape::Cylinder, PrimitiveShape::Cone, PrimitiveShape::Torus,
+        PrimitiveShape::Grid, PrimitiveShape::Quad] {
+        let result = run(&mut host, structure(StructuralOperation::ImportAsset {
+            name: format!("{shape:?}"), position: [2.0, 0.75, 0.0],
+            rotation: [0.0, 0.0, 0.0, 1.0], visual: Visual::Primitive { shape },
+        }));
+        let id = result.selected.unwrap();
+        guest.apply_commit(result.result.unwrap()).unwrap();
+        assert_eq!(host.snapshot(), guest.snapshot());
+        let object = guest.snapshot().objects.into_iter().find(|o| o.address == id).unwrap();
+        assert_eq!(object.visual, Visual::Primitive { shape });
+        assert_eq!(object.collider.unwrap().half_extents, shape.half_extents());
+    }
+    let bytes = serde_json::to_vec(&host.snapshot()).unwrap();
+    assert!(!String::from_utf8_lossy(&bytes).contains("asset_id"));
+    let mut restored = WorldModel::new();
+    restored.restore(serde_json::from_slice(&bytes).unwrap()).unwrap();
+    assert_eq!(host.snapshot(), restored.snapshot());
+    assert!(serde_json::from_value::<Visual>(json!({"kind":"primitive","shape":"unknown"})).is_err());
+}
+
+#[test]
 fn transform_commit_is_atomic_and_replicates_all_fields() {
     use kokoverse_protocol::TransformCommand;
     let mut host = WorldModel::new();

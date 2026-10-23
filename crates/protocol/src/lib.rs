@@ -189,6 +189,7 @@ pub struct ObjectView {
 pub enum Visual {
     #[default]
     Cube,
+    Primitive { shape: PrimitiveShape },
     Panel,
     Image {
         data_url: String,
@@ -206,6 +207,31 @@ pub enum Visual {
         #[serde(default)]
         duration_seconds: f64,
     },
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PrimitiveShape {
+    Box,
+    Sphere,
+    Capsule,
+    Cylinder,
+    Cone,
+    Torus,
+    Grid,
+    Quad,
+}
+
+impl PrimitiveShape {
+    pub fn half_extents(self) -> [f64; 3] {
+        match self {
+            Self::Capsule => [0.375, 0.75, 0.375],
+            Self::Torus => [0.75, 0.2, 0.75],
+            Self::Grid => [0.75, 0.025, 0.75],
+            Self::Quad => [0.75, 0.75, 0.025],
+            _ => [0.75; 3],
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

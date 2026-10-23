@@ -10,6 +10,7 @@ const SCRIPT_EDITOR = preload("res://script_editor.gd")
 const WORLD_PANELS = preload("res://world_panels.gd")
 const REQUEST_BROKER = preload("res://request_broker.gd")
 const WORLD_HUD = preload("res://world_hud.gd")
+const PRIMITIVE_MESH = preload("res://primitive_mesh.gd")
 var hud = WORLD_HUD.new()
 var requests = REQUEST_BROKER.new()
 var world_panels = WORLD_PANELS.new()
@@ -144,7 +145,7 @@ func _ready() -> void:
 	asset_importer.configure(self)
 	add_child(hud)
 	hud.setup(self)
-	set_view_mode(1)
+	set_view_mode(1, false)
 	connect_engine()
 
 func build_world() -> void:
@@ -1002,7 +1003,7 @@ func _process(delta: float) -> void:
 		node.scale = node.scale.lerp(Vector3(s[0],s[1],s[2]),alpha)
 	update_selection_outline()
 	world_panels.tick()
-	if not current.is_empty(): gizmo.set_target(cube.position, editable and not busy and not look and not fps_active)
+	if not current.is_empty() and not hud.blocking(): gizmo.set_target(cube.position, editable and not busy and not look and not fps_active)
 	else: gizmo.clear_target()
 	if look and not gizmo.dragging and not avatar_camera:
 		var movement := Vector3.ZERO
@@ -1227,12 +1228,16 @@ func create_render_node(object: Dictionary) -> MeshInstance3D:
 		var ratio: float = float(object.visual.width) / float(object.visual.height)
 		quad.size = Vector2(2.0, 2.0 / ratio) if ratio >= 1 else Vector2(2.0 * ratio, 2.0)
 		node.mesh = quad
+	elif object.visual.get("kind") == "primitive":
+		node.mesh = PRIMITIVE_MESH.create(object.visual.shape)
 	else:
 		var mesh := BoxMesh.new()
 		mesh.size = Vector3(1.5, 1.5, 1.5)
 		node.mesh = mesh
 	var mat := StandardMaterial3D.new()
 	mat.roughness = 0.45
+	if object.visual.get("kind") == "primitive" and object.visual.shape in ["grid","quad"]:
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	if image_panel:
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
@@ -1315,14 +1320,14 @@ func focus_selected() -> void:
 	camera.position = cube.position + Vector3(5, 3.25, 8)
 	camera.look_at(cube.position)
 
-func set_view_mode(mode: int) -> void:
+func set_view_mode(mode: int, capture: bool = true) -> void:
 	if gizmo.dragging: gizmo.cancel_drag()
 	cancel_hand_grab()
 	look = false
 	avatar_camera = mode != 2
 	release_player_input()
 	first_person = mode == 1
-	fps_active = first_person
+	fps_active = first_person and capture
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if fps_active else Input.MOUSE_MODE_VISIBLE
 	view_mode.select(mode)
 	view_mode.release_focus()

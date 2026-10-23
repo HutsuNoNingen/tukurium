@@ -623,6 +623,7 @@ pub(crate) fn new_object(name: String, position: [f64; 3], color: [f64; 4]) -> O
 pub(crate) fn set_default_collider(object: &mut ObjectView) {
     let half_extents = match &object.visual {
         kokoverse_protocol::Visual::Cube => [0.75; 3],
+        kokoverse_protocol::Visual::Primitive { shape } => shape.half_extents(),
         kokoverse_protocol::Visual::Panel => crate::panels::half_extents(
             object.panel.as_ref().map_or([720, 960], |panel| panel.size),
         ),
@@ -778,7 +779,9 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
 
 pub fn validate_visual(visual: &kokoverse_protocol::Visual) -> Result<(), String> {
     match visual {
-        kokoverse_protocol::Visual::Cube | kokoverse_protocol::Visual::Panel => Ok(()),
+        kokoverse_protocol::Visual::Cube
+        | kokoverse_protocol::Visual::Primitive { .. }
+        | kokoverse_protocol::Visual::Panel => Ok(()),
         kokoverse_protocol::Visual::Image { data_url, .. } => {
             if &validate_image(data_url)? == visual {
                 Ok(())

@@ -1,6 +1,7 @@
 extends CanvasLayer
 ## Local application chrome. The world and edit operations stay in the Engine.
 const RING = preload("res://ring_menu.gd")
+const CREATION_PANEL = preload("res://creation_panel.gd")
 const INK := Color("101b25")
 const LINE := Color("304550")
 const TEXT := Color("e6f0f4")
@@ -9,6 +10,7 @@ const ACCENT := Color("77dbce")
 var app
 var root := Control.new()
 var ring = RING.new()
+var creation_panel
 var menu := ColorRect.new()
 var workspace
 var room_label: Label
@@ -70,6 +72,8 @@ func setup(owner) -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation",12)
 	bar.add_child(row)
+	profile_button=button(row,"☰",toggle_menu)
+	profile_button.tooltip_text="ダッシュメニュー"
 	row.add_child(text("◇  kokoverse",21))
 	row.add_child(VSeparator.new())
 	room_label=text("Workshop",14,MUTED)
@@ -86,8 +90,6 @@ func setup(owner) -> void:
 	mode_button=button(row,"FPS",cycle_view)
 	mode_button.tooltip_text="視点切り替え · F5"
 	home_button=button(row,"ホーム / ライブラリ",open_home)
-	profile_button=button(row,"メニュー",toggle_menu)
-	profile_button.tooltip_text="メニュー · Esc"
 	build_menu()
 	root.add_child(ring)
 	ring.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -156,7 +158,31 @@ func workspace_open() -> bool:
 	return workspace != null and workspace.enabled and workspace.shade.visible
 
 func blocking() -> bool:
-	return menu.visible or ring.visible or workspace_open()
+	return menu.visible or ring.visible or workspace_open() or is_instance_valid(creation_panel)
+
+func open_creation() -> void:
+	if is_instance_valid(creation_panel): return
+	ring.hide()
+	app.release_cursor()
+	creation_panel=CREATION_PANEL.new()
+	app.add_child(creation_panel)
+	creation_panel.setup(app)
+	creation_panel.closed.connect(close_creation)
+
+func close_creation(resume: bool = true) -> void:
+	if is_instance_valid(creation_panel): creation_panel.queue_free()
+	creation_panel=null
+	if resume: resume_view()
+
+func release_to_cursor() -> void:
+	menu.hide()
+	ring.hide()
+	if workspace_open(): workspace.shade.hide()
+	close_creation(false)
+	last_overlay=false
+	app.get_viewport().gui_release_focus()
+	app.world_panels.clear_focus()
+	app.release_cursor()
 
 func resume_view() -> void:
 	if blocking() or app.world_panels.has_window_focus() or not app.get_window().has_focus(): return
@@ -210,20 +236,19 @@ func choose_action(index: int) -> void:
 	match index:
 		0: app.world_panels.open_inspector(ring_target,true)
 		1: app.world_panels.open_inspector(ring_target)
-		2: app.submit_structure("create")
+		2: open_creation()
 		3: app.choose_image()
-	if index in [1,2]: resume_view()
+	if index == 1: resume_view()
 
 func handle_input(event: InputEvent) -> bool:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE or event.physical_keycode == KEY_ESCAPE:
-			if workspace_open(): workspace.shade.hide(); resume_view()
-			elif ring.visible: close_ring()
-			else: toggle_menu()
+			release_to_cursor()
 			return true
 		if (event.keycode == KEY_F5 or event.physical_keycode == KEY_F5) and not app.gameplay_keyboard_blocked():
 			cycle_view()
 			return true
+	if is_instance_valid(creation_panel): return creation_panel.route_input(event)
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and event.pressed:
 		if ring.visible: close_ring(); return true
 		if not app.gameplay_keyboard_blocked(): show_ring(event.position); return true

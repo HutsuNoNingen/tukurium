@@ -38,6 +38,9 @@ func run() -> void:
 	root.add_child(scene)
 	if not await until(func(): return scene.editable and scene.player_initialized,"Scene not ready"): quit(1); return
 	if not scene.first_person or scene.view_mode.selected!=1: push_error("Default view is not FPS"); quit(1); return
+	if scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE: push_error("Startup captured the mouse"); quit(1); return
+	click(root.size*0.5)
+	if not scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_CAPTURED: push_error("Clicking the world did not start FPS controls"); quit(1); return
 	if scene.find_child("LegacyWorldSidebar",true,false).is_visible_in_tree(): push_error("Old world sidebar is visible"); quit(1); return
 	if not await until(func(): return scene.hud.sync_label.text.contains("同期済み") and scene.hud.fps_label.text.contains("FPS"),"HUD status missing"): quit(1); return
 	await create_timer(1.1).timeout
@@ -47,7 +50,9 @@ func run() -> void:
 	key(KEY_F5); key(KEY_F5)
 	if not scene.first_person: push_error("F5 did not cycle back to FPS"); quit(1); return
 	key(KEY_ESCAPE)
-	if not scene.hud.menu.visible or scene.fps_active or not scene.gameplay_keyboard_blocked(): push_error("Esc did not open a blocking menu"); quit(1); return
+	if scene.hud.menu.visible or scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE: push_error("Esc did not release cursor without opening menu"); quit(1); return
+	click(scene.hud.profile_button.get_global_rect().get_center())
+	if not scene.hud.menu.visible or not scene.gameplay_keyboard_blocked(): push_error("Hamburger did not open dashboard"); quit(1); return
 	if not scene.nickname.is_visible_in_tree() or not scene.avatar_button.is_visible_in_tree(): push_error("User settings are not in the menu"); quit(1); return
 	var position: Vector3=scene.player_target_position
 	Input.action_press("move_forward"); Input.action_press("jump")
@@ -56,7 +61,8 @@ func run() -> void:
 	if scene.player_target_position.distance_to(position)>0.02: push_error("Menu input moved the player"); quit(1); return
 	await capture("-menu")
 	key(KEY_ESCAPE)
-	if scene.hud.menu.visible or not scene.fps_active: push_error("Closing menu did not resume FPS"); quit(1); return
+	if scene.hud.menu.visible or scene.fps_active: push_error("Esc did not close menu and leave cursor visible"); quit(1); return
+	scene.hud.resume_view()
 	# The connected home surface is another Esc overlay, with the same input rules.
 	var workspace=scene.get("service_panel")
 	if workspace != null:
@@ -64,8 +70,9 @@ func run() -> void:
 		scene.hud.open_home()
 		if not workspace.shade.visible or not scene.gameplay_keyboard_blocked(): push_error("Home menu was not opened"); quit(1); return
 		key(KEY_ESCAPE)
-		if workspace.shade.visible or not scene.fps_active: push_error("Esc did not close home and resume FPS"); quit(1); return
+		if workspace.shade.visible or scene.fps_active: push_error("Esc did not close home and release cursor"); quit(1); return
 		workspace.enabled=false
+		scene.hud.resume_view()
 	click(root.size*0.5,MOUSE_BUTTON_MIDDLE)
 	if not scene.hud.ring.visible or not scene.gameplay_keyboard_blocked(): push_error("Middle click did not open ring"); quit(1); return
 	await capture("-ring")
@@ -82,7 +89,7 @@ func run() -> void:
 	click(root.size*0.5,MOUSE_BUTTON_MIDDLE)
 	key(KEY_ESCAPE)
 	if scene.hud.ring.visible or scene.hud.menu.visible: push_error("Esc did not cancel ring"); quit(1); return
-	print("HUD SMOKE PASS: default FPS, F5, Esc settings, blocked movement, status, ring 2D/3D and cancel")
+	print("HUD SMOKE PASS: cursor-first FPS, click to capture, F5, Esc release, dashboard, blocked movement, status, ring 2D/3D and cancel")
 	scene.queue_free()
 	await process_frame
 	await process_frame
