@@ -50,6 +50,9 @@ pub struct InspectorView(pub kokoverse_protocol::InspectorView);
 #[derive(Component, Clone)]
 pub struct CreationView(pub kokoverse_protocol::CreationView);
 
+#[derive(Component, Clone)]
+pub struct WorldText(pub kokoverse_protocol::WorldText);
+
 #[derive(Component)]
 pub struct MeshRenderer {
     pub host: Address,

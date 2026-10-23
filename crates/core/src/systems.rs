@@ -52,6 +52,7 @@ type SnapshotRoot<'a> = (
     Option<&'a WorldPanel>,
     Option<&'a InspectorView>,
     Option<&'a CreationView>,
+    Option<&'a WorldText>,
 );
 
 /// Resolve stable addresses and validate against state committed by the preceding command.
@@ -491,6 +492,7 @@ pub(crate) fn extract_snapshot(
         panel,
         inspector,
         creation,
+        world_text,
     ) in &roots
     {
         let mesh = root.renderer.as_ref().map(|address| meshes.get(index.0[address]).expect("registered renderer"));
@@ -510,6 +512,7 @@ pub(crate) fn extract_snapshot(
             panel: panel.map(|p| p.0.clone()),
             inspector: inspector.map(|i| i.0.clone()),
             creation: creation.map(|c| c.0.clone()),
+            world_text: world_text.map(|t| t.0.clone()),
             fields: vec![
                 crate::field(
                     "name",
@@ -561,6 +564,10 @@ pub(crate) fn extract_snapshot(
             object.fields.insert(3, crate::field("color", "Color", "color", serde_json::json!(mesh.color), revisions));
         }
         crate::panels::append_fields(&mut object, revisions);
+        if let Some(text) = &object.world_text {
+            object.fields.push(crate::field("world_text", "Text", "string", serde_json::json!(text.text), revisions));
+            object.fields.push(crate::field("world_text_color", "Text color", "color", serde_json::json!(text.color), revisions));
+        }
         objects.push(object);
     }
     objects.sort_by(|a, b| a.address.instance_id.cmp(&b.address.instance_id));

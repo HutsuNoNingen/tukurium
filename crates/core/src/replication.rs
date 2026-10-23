@@ -43,6 +43,15 @@ fn remove_mesh(object: &mut ObjectView) -> Result<(), String> {
     Ok(())
 }
 
+fn remove_world_text(object: &mut ObjectView) -> Result<(), String> {
+    object.world_text = None;
+    Ok(())
+}
+
+fn world_text(v: &Value) -> Result<(), String> {
+    valid(v.as_str().is_some_and(|s| s.chars().count() <= 80 && s.len() <= 512))
+}
+
 fn field(
     id: &str,
     label: &str,
@@ -177,7 +186,10 @@ fn no_edit(_: &mut World, _: Entity, _: &str, _: Value) {
 }
 
 pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
-    attachments: vec![AttachmentRegistration { type_id: "MeshRenderer", remove: remove_mesh }],
+    attachments: vec![
+        AttachmentRegistration { type_id: "MeshRenderer", remove: remove_mesh },
+        AttachmentRegistration { type_id: "WorldText", remove: remove_world_text },
+    ],
     components: vec![
         ComponentRegistration {
             type_id: "ItemIdentity",
@@ -400,6 +412,34 @@ pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
             },
             apply: |w, e, _, v| w.get_mut::<crate::components::CreationView>(e).unwrap().0.shape = parse(&v).unwrap(),
         },
+        ComponentRegistration {
+            type_id: "WorldText",
+            local_id: 11,
+            fields: vec![
+                editable("world_text", "Text", "string", 15, world_text),
+                editable("world_text_color", "Text color", "color", 16, color),
+            ],
+            present: |o| o.world_text.is_some(),
+            project: |o| {
+                let text = o.world_text.as_ref().unwrap();
+                json!({"world_text":text.text,"world_text_color":text.color})
+            },
+            restore: |o, v| {
+                o.world_text = Some(kokoverse_protocol::WorldText {
+                    text: parse(&v["world_text"])?,
+                    color: parse(&v["world_text_color"])?,
+                });
+                Ok(())
+            },
+            apply: |w, e, id, v| {
+                let mut text = w.get_mut::<crate::components::WorldText>(e).unwrap();
+                match id {
+                    "world_text" => text.0.text = parse(&v).unwrap(),
+                    "world_text_color" => text.0.color = parse(&v).unwrap(),
+                    _ => unreachable!(),
+                }
+            },
+        },
     ],
 });
 
@@ -417,6 +457,9 @@ impl Registry {
             }
             if type_id == "MeshRenderer" && !matches!(parse::<Visual>(&values["visual"])?, Visual::Cube | Visual::Primitive { .. }) {
                 return Err("Only primitive renderers can be attached to an empty Slot".into());
+            }
+            if type_id == "WorldText" && object.panel.is_some() {
+                return Err("WorldText belongs on a world Slot, not a panel surface".into());
             }
             (component.restore)(object, values)?;
             for field in component.fields.iter().filter(|f| f.ui_order.is_some()) {

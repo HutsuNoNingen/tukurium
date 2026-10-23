@@ -152,6 +152,18 @@ func run() -> void:
 		push_error("Palette status="+panel.status.text+" selected="+scene.selected_id+" disabled="+str(panel.add_renderer_button.disabled)); quit(1); return
 	await click_control(scene,surface,panel.remove_renderer_button)
 	if not await until(func(): return scene.objects[slot_id].visual.kind=="none" and scene.render_nodes[slot_id].mesh==null,"Renderer Component did not detach"): quit(1); return
+	await click_control(scene,surface,panel.add_text_button)
+	if not await until(func(): return scene.objects[slot_id].get("world_text")!=null and scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not attach"):
+		push_error("Palette status="+panel.status.text+" value="+str(scene.objects[slot_id].get("world_text"))+" disabled="+str(panel.add_text_button.disabled)); quit(1); return
+	if scene.render_nodes[slot_id].get_node("WorldText").text!="Text": push_error("Wrong WorldText content"); quit(1); return
+	await click_control(scene,surface,panel.remove_text_button)
+	if not await until(func(): return scene.objects[slot_id].get("world_text")==null and not scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not detach"): quit(1); return
+	await click_control(scene,surface,panel.add_text_button)
+	if not await until(func(): return scene.objects[slot_id].get("world_text")!=null and scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not reattach"): quit(1); return
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--screenshot="):
+			await RenderingServer.frame_post_draw
+			root.get_texture().get_image().save_png(arg.trim_prefix("--screenshot=").replace(".png","-text.png"))
 	scene.world_panels.close_panel(surface.panel_id)
 	if not await until(func(): return scene.world_panels.panels.is_empty(),"Component palette did not close"): quit(1); return
 	scene.hud.open_creation()

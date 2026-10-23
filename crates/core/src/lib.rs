@@ -666,6 +666,7 @@ pub(crate) fn new_object(name: String, position: [f64; 3], color: [f64; 4]) -> O
         panel: None,
         inspector: None,
         creation: None,
+        world_text: None,
         fields: vec![
             field("name", "Name", "string", json!(name), &Revisions::default()),
             field("parent", "Parent", "address", Value::Null, &Revisions::default()),
@@ -866,6 +867,12 @@ pub(crate) fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
                         != object.playback)
             {
                 return Err("Derived transform or collider does not match component fields".into());
+            }
+            if let Some(text) = &object.world_text {
+                if (f.id == "world_text" && f.value.as_str() != Some(text.text.as_str()))
+                    || (f.id == "world_text_color" && serde_json::from_value::<[f64; 4]>(f.value.clone()).ok() != Some(text.color)) {
+                    return Err("WorldText does not match component fields".into());
+                }
             }
         }
     }

@@ -196,3 +196,10 @@ FPSで3Dパネルを右クリック保持したままミドルクリックする
 
 - 再現・確認：空のSlotを選択し、共有作成パネルから表示部品を追加・削除する。[creation-integration.mjs](../tests/creation-integration.mjs) の `--rendered` で実入力、ホストの変更、途中参加を確認する。
 - コード：[creation_panel.gd](../client-godot/creation_panel.gd)。確認日：2026-10-24。
+
+## 共有Componentの数値は型付きで比較する
+
+Godotのパレットから `WorldText` の白色 `[1.0,1.0,1.0,1.0]` を送ると、JSONでは `[1,1,1,1]` になった。Rustでこの生のJSONとComponentの浮動小数点配列を再シリアライズしたJSONを比較すると、意味が同じでも不一致になり追加を拒否した。値域検証の後は `[f64; 4]` に復元して比較する。
+
+- 再現・確認：空Slotに文字を追加し、色を同期、付け外し、途中参加を [creation-integration.mjs](../tests/creation-integration.mjs) の `--rendered` で確認する。整数の色値はRustの [tests.rs](../crates/core/src/tests.rs) でも確認する。
+- コード：[lib.rs](../crates/core/src/lib.rs)、[replication.rs](../crates/core/src/replication.rs)。確認日：2026-10-24。

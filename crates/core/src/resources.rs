@@ -131,6 +131,9 @@ pub(crate) fn insert_object(world: &mut World, object: ObjectView) {
     if let Some(creation) = object.creation.clone() {
         world.entity_mut(slot).insert(CreationView(creation));
     }
+    if let Some(world_text) = object.world_text.clone() {
+        world.entity_mut(slot).insert(WorldText(world_text));
+    }
     world
         .entity_mut(slot)
         .insert(ScriptComponents(object.scripts.clone()));

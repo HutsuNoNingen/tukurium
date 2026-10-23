@@ -1238,6 +1238,24 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 			if field.id == "color":
 				var c: Array = field.value
 				node.material_override.albedo_color = Color(c[0], c[1], c[2], c[3])
+		if object.get("world_text") is Dictionary:
+			var label: Label3D
+			if node.has_node("WorldText"):
+				label=node.get_node("WorldText")
+			else:
+				label=Label3D.new()
+				label.name="WorldText"
+				label.font_size=64
+				label.pixel_size=0.005
+				label.outline_size=6
+				label.double_sided=true
+				node.add_child(label)
+			label.text=object.world_text.text
+			var text_color: Array=object.world_text.color
+			label.modulate=Color(text_color[0],text_color[1],text_color[2],text_color[3])
+			label.position=Vector3(0,0,0.8) if object.get("renderer")!=null else Vector3.ZERO
+		elif node.has_node("WorldText"):
+			node.get_node("WorldText").queue_free()
 		if object.visual.kind == "model":
 			asset_importer.attach_model(id)
 			if node.has_node("ImportedModel"): asset_importer.tint_model(node.get_node("ImportedModel"),node.material_override.albedo_color)

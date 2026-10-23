@@ -34,6 +34,8 @@ try {
   const observed=host.client.messages.filter(m=>m.kind==='snapshot').flatMap(m=>m.snapshot.objects);
   const slot=host.client.latest().snapshot.objects.find(o=>o.visual.kind==='none'&&o.renderer===undefined);
   assert.ok(observed.some(o=>o.address.instance_id===slot.address.instance_id&&o.visual.kind==='primitive'&&o.renderer),'Renderer attachment did not reach host');
+  assert.equal(slot.world_text?.text,'Text','WorldText did not reach host');
+  assert.ok(observed.some(o=>o.address.instance_id===slot.address.instance_id&&o.world_text?.text==='Text'),'WorldText attachment was not observed');
   const manipulated=observed.find(o=>o.creation && o.world_scale[0]>1.05 && Math.abs(o.world_rotation[1])>0.01);
   assert.ok(manipulated?.panel && manipulated.collider && !manipulated.inspector,'Grabbed creation surface did not reach host');
   assert.ok(shapes.every(shape=>observed.some(o=>o.creation?.shape===shape)),'Selection did not reach host');
@@ -45,6 +47,7 @@ try {
   const late=await peer('guest',2);
   await until(()=>shapes.every(shape=>late.client.latest().snapshot.objects.some(o=>o.visual.kind==='primitive'&&o.visual.shape===shape)),'Late join missed primitives');
   assert.ok(late.client.latest().snapshot.objects.some(o=>o.visual.kind==='none'&&o.renderer===undefined),'Late join missed empty Slot');
+  assert.ok(late.client.latest().snapshot.objects.some(o=>o.address.instance_id===slot.address.instance_id&&o.world_text?.text==='Text'),'Late join missed WorldText');
   await until(()=>late.client.latest().snapshot.objects.filter(o=>o.creation?.shape==='box').length===2,'Late join missed creation panels or selection');
   const copy=host.client.latest().snapshot.objects.find(o=>o.creation&&o.address.instance_id!==panel.address.instance_id);
   host.client.send({kind:'structure',command:{command_id:randomUUID(),action:'delete',target:copy.address,expected_revision:copy.object_revision}});

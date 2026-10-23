@@ -188,7 +188,15 @@ pub struct ObjectView {
     pub inspector: Option<InspectorView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creation: Option<CreationView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub world_text: Option<WorldText>,
     pub fields: Vec<Field>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct WorldText {
+    pub text: String,
+    pub color: [f64; 4],
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]

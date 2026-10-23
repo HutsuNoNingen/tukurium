@@ -10,6 +10,8 @@ var create_button: Button
 var slot_button: Button
 var add_renderer_button: Button
 var remove_renderer_button: Button
+var add_text_button: Button
+var remove_text_button: Button
 var status: Label
 var busy := false
 
@@ -70,6 +72,16 @@ func build_ui() -> void:
 	remove_renderer_button.focus_mode=Control.FOCUS_NONE
 	remove_renderer_button.pressed.connect(change_renderer.bind(false))
 	categories.add_child(remove_renderer_button)
+	add_text_button=Button.new()
+	add_text_button.text="文字を追加"
+	add_text_button.focus_mode=Control.FOCUS_NONE
+	add_text_button.pressed.connect(change_world_text.bind(true))
+	categories.add_child(add_text_button)
+	remove_text_button=Button.new()
+	remove_text_button.text="文字を外す"
+	remove_text_button.focus_mode=Control.FOCUS_NONE
+	remove_text_button.pressed.connect(change_world_text.bind(false))
+	categories.add_child(remove_text_button)
 	var grid := GridContainer.new()
 	grid.columns=4
 	grid.size_flags_horizontal=Control.SIZE_EXPAND_FILL
@@ -174,6 +186,8 @@ func refresh(object: Dictionary) -> void:
 	var selectable: bool=not target.is_empty() and target.get("panel")==null
 	add_renderer_button.disabled=busy or not app.editable or not selectable or target.get("renderer")!=null
 	remove_renderer_button.disabled=busy or not app.editable or not selectable or target.get("renderer")==null or target.get("playback")!=null
+	add_text_button.disabled=busy or not app.editable or not selectable or target.get("world_text")!=null
+	remove_text_button.disabled=busy or not app.editable or not selectable or target.get("world_text")==null
 	slot_button.disabled=busy or not app.editable
 	create_button.disabled=busy or not app.editable
 
@@ -194,6 +208,20 @@ func change_renderer(add: bool) -> void:
 	manager.command(command,func(result):
 		busy=false
 		if not result.ok: status.text=result.get("message","部品を変更できませんでした")
+		elif app.objects.has(panel_id): refresh(app.objects[panel_id]))
+
+func change_world_text(add: bool) -> void:
+	if busy or not app.editable or not app.objects.has(app.selected_id): return
+	var target: Dictionary=app.objects[app.selected_id]
+	if target.get("panel")!=null or (target.get("world_text")!=null)==add: return
+	busy=true
+	add_text_button.disabled=true
+	remove_text_button.disabled=true
+	var command: Dictionary={"kind":"structure","command":{"action":"add_component" if add else "remove_component","target":app.address_of(target),"type_id":"WorldText","expected_revision":target.object_revision}}
+	if add: command["command"]["values"]={"world_text":"Text","world_text_color":[1.0,1.0,1.0,1.0]}
+	manager.command(command,func(result):
+		busy=false
+		if not result.ok: status.text=result.get("message","文字を変更できませんでした")
 		elif app.objects.has(panel_id): refresh(app.objects[panel_id]))
 
 func spawn_slot() -> void:

@@ -103,6 +103,47 @@ fn renderer_component_attaches_and_detaches_with_revision_and_schema_checks() {
 }
 
 #[test]
+fn world_text_is_editable_and_survives_replication_duplication_and_restore() {
+    let mut host = WorldModel::new();
+    let mut guest = WorldModel::new();
+    guest.restore(host.snapshot()).unwrap();
+    let created = run(&mut host, structure(StructuralOperation::CreateSlot { parent: None }));
+    let id = created.selected.unwrap();
+    guest.apply_commit(created.result.unwrap()).unwrap();
+    let revision = host.snapshot().objects.iter().find(|o| o.address == id).unwrap().object_revision.clone();
+    let added = run(&mut host, structure(StructuralOperation::AddComponent {
+        target: id.clone(), type_id: "WorldText".into(), expected_revision: revision,
+        values: json!({"world_text":"Score: 0","world_text_color":[1,1,1,1]}),
+    }));
+    guest.apply_commit(added.result.unwrap()).unwrap();
+    assert_eq!(guest.snapshot(), host.snapshot());
+    let object = host.snapshot().objects.into_iter().find(|o| o.address == id).unwrap();
+    assert!(object.renderer.is_none());
+    assert_eq!(object.world_text.as_ref().unwrap().text, "Score: 0");
+    let edited = run(&mut host, WorldCommand::Edit { edit: Edit {
+        command_id: "edit-text".into(),
+        target: replication::REGISTRY.field_address(&id, "world_text").unwrap(),
+        field_id: "world_text".into(), expected_revision: "1".into(), value: json!("Score: 1"),
+    }});
+    guest.apply_commit(edited.result.unwrap()).unwrap();
+    assert_eq!(guest.snapshot(), host.snapshot());
+    let current = host.snapshot().objects.into_iter().find(|o| o.address == id).unwrap();
+    let copy = run(&mut host, structure(StructuralOperation::Duplicate { target: id.clone(), expected_revision: current.object_revision.clone() }));
+    guest.apply_commit(copy.result.unwrap()).unwrap();
+    assert_eq!(guest.snapshot(), host.snapshot());
+    let removed = run(&mut host, structure(StructuralOperation::RemoveComponent {
+        target: id, type_id: "WorldText".into(), expected_revision: current.object_revision,
+    }));
+    guest.apply_commit(removed.result.unwrap()).unwrap();
+    assert_eq!(guest.snapshot(), host.snapshot());
+    let mut restored = WorldModel::new();
+    restored.restore(host.snapshot()).unwrap();
+    assert_eq!(restored.snapshot(), host.snapshot());
+    let wire = replication::REGISTRY.encode_world(&host.snapshot());
+    assert_eq!(replication::REGISTRY.decode_world(wire).unwrap(), host.snapshot());
+}
+
+#[test]
 fn primitives_replicate_and_restore_without_mesh_assets() {
     use kokoverse_protocol::{PrimitiveShape, Visual};
     let mut host = WorldModel::new();
