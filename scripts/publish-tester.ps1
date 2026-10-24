@@ -66,6 +66,11 @@ try {
         if (-not $rootLine) { throw 'Packaging did not return PACKAGE_ROOT.' }
         $PackageRoot = ([string]$rootLine).Substring('PACKAGE_ROOT='.Length)
     }
+    $postPackageStatus = @(git status --porcelain --untracked-files=all)
+    if ($LASTEXITCODE -ne 0) { throw 'Could not inspect source status after packaging.' }
+    if ($postPackageStatus.Count -ne 0) {
+        throw 'Packaging changed the source tree. Commit generated source files before publishing a tagged build.'
+    }
     $packageInfo = Get-Content -LiteralPath (Join-Path $PackageRoot 'build-info.json') -Raw | ConvertFrom-Json
     if ($packageInfo.version -ne "Kokoverse-Windows-x64-$Tag" -or $packageInfo.sourceCommit -ne $commit -or $packageInfo.sourceTreeClean -ne $true) {
         throw 'Package version or recorded source does not match the clean tagged commit.'

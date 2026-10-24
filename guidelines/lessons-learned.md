@@ -226,3 +226,10 @@ Godotのインスペクタから `WorldText` の白色 `[1.0,1.0,1.0,1.0]` を�
 
 - 再現・確認：[reference-integration.mjs](../tests/reference-integration.mjs) の `--rendered` で別Slotの位置とWorldTextへのDrive、WorldTextへの共有Write、表示と同期を確認する。[references.rs](../crates/core/src/references.rs) でDriveの非永続性とWriteの確定を確認する。
 - コード：[drives.rs](../crates/core/src/drives.rs)、[world_panels.gd](../client-godot/world_panels.gd)、[script_editor.gd](../client-godot/script_editor.gd)。確認日：2026-10-24。
+
+## タグ付き配布ではGodotのUIDを先にコミットする
+
+新しい `.gd` を追加し、対応する `.gd.uid` をコミットしないまま配布を始めると、GodotのインポートがUIDを生成する。梱包開始時の作業ツリーはクリーンでも、ZIPにはタグにないUIDが入る。配布前にUIDをソースへ含め、公開スクリプトは梱包後にも作業ツリーを確認して、新たな生成ファイルがあればpushとR2公開を止める。
+
+- 再現・確認：`script_code_edit.gd.uid` がタグ `tester-v2026.10.24.6` に含まれず、同版のZIPに含まれることを確認した。UIDをコミットした後、[publish-tester.ps1](../scripts/publish-tester.ps1) で再梱包し、作業ツリーがクリーンな状態を確認する。
+- コード：[package.ps1](../scripts/package.ps1)、[publish-tester.ps1](../scripts/publish-tester.ps1)。確認日：2026-10-24。
