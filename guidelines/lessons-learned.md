@@ -15,6 +15,15 @@
 - コード：[world_hud.gd](../client-godot/world_hud.gd)、[world_panels.gd](../client-godot/world_panels.gd)。
 - テスト：[creation_smoke.gd](../client-godot/creation_smoke.gd)。修正：`ba2a9bc`。
 
+## チャットから3D操作へ戻っても歩けない
+
+2Dのチャット入力欄を選んだ後にワールドをクリックすると、マウスは捕捉されてパネルも薄くなるが、`LineEdit`のキーボードフォーカスが残っていた。移動入力は`gameplay_keyboard_blocked()`で止まり、文字は入力欄へ届き続ける。
+
+マウス捕捉に伴ってチャットパネルを入力停止にするとき、チャット欄のフォーカスも解除する。パネルを収納するときも同様に解除する。見た目やマウス入力の切り替えだけでキーボードフォーカスが消えるとは仮定しない。
+
+- 再現・確認：チャット欄をクリックし、ワールドをクリックしてFPSへ戻り、移動キーで実際に位置が変わること。
+- コード：[social_panels.gd](../client-godot/social_panels.gd)。テスト：[hud_smoke.gd](../client-godot/hud_smoke.gd)を[描画付き統合テスト](../tests/hud-integration.mjs)で実行。修正：2026-10-24。
+
 ## FPSでボタンを押すとカーソルに切り替わる
 
 ワールドパネルの左ボタン押下で、無条件にマウスを解放していた。

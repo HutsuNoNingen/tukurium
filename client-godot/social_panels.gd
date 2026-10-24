@@ -238,6 +238,7 @@ func show_error(message: String) -> void:
 func set_stowed(value: bool, animate: bool = true) -> void:
 	if stowed==value: return
 	stowed=value
+	if value and chat_input.has_focus(): chat_input.release_focus()
 	if slide and slide.is_running(): slide.kill()
 	left.show(); right.show()
 	left_edge.visible=value; right_edge.visible=value
@@ -265,6 +266,7 @@ func _process(_delta: float) -> void:
 	if app==null: return
 	var locked: bool=app.fps_active or Input.mouse_mode==Input.MOUSE_MODE_CAPTURED
 	if locked!=input_locked:
+		if locked and chat_input.has_focus(): chat_input.release_focus()
 		input_locked=locked
 		for panel in [left,right,left_edge,right_edge]:
 			panel.mouse_behavior_recursive=Control.MOUSE_BEHAVIOR_DISABLED if locked else Control.MOUSE_BEHAVIOR_INHERITED

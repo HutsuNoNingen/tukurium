@@ -98,6 +98,18 @@ func run() -> void:
 	if not await until(func(): return scene.social_panels.messages.size()==1,"Chat did not return from the Engine"): quit(1); return
 	if scene.social_panels.messages[0].text!="hello from HUD": push_error("Chat text changed in transit"); quit(1); return
 	await capture("-chat")
+	click(scene.social_panels.chat_input.get_global_rect().get_center())
+	if not scene.social_panels.chat_input.has_focus(): push_error("Click did not focus chat input"); quit(1); return
+	click(root.size*0.5)
+	await create_timer(0.05).timeout
+	if not scene.fps_active or scene.social_panels.chat_input.has_focus() or scene.gameplay_keyboard_blocked(): push_error("Chat input kept keyboard focus after returning to 3D"); quit(1); return
+	var chat_position: Vector3=scene.player_target_position
+	Input.action_press("move_forward")
+	await create_timer(0.25).timeout
+	Input.action_release("move_forward")
+	if scene.player_target_position.distance_to(chat_position)<0.02: push_error("Returning from chat did not restore movement"); quit(1); return
+	key(KEY_ESCAPE)
+	await create_timer(0.33).timeout
 	if not scene.hud.dock_buttons.has("sessions") or not scene.hud.dock_buttons.has("library") or not scene.hud.dock_buttons.has("workshop") or not scene.hud.dock_buttons.has("settings"):
 		push_error("Separate dock icons missing"); quit(1); return
 	click(scene.hud.dock_buttons.settings.get_global_rect().get_center())
