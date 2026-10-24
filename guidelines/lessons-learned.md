@@ -233,3 +233,12 @@ Godotのインスペクタから `WorldText` の白色 `[1.0,1.0,1.0,1.0]` を�
 
 - 再現・確認：`script_code_edit.gd.uid` がタグ `tester-v2026.10.24.6` に含まれず、同版のZIPに含まれることを確認した。UIDをコミットした後、[publish-tester.ps1](../scripts/publish-tester.ps1) で再梱包し、作業ツリーがクリーンな状態を確認する。
 - コード：[package.ps1](../scripts/package.ps1)、[publish-tester.ps1](../scripts/publish-tester.ps1)。確認日：2026-10-24。
+
+## Engine終了時にGodotが初回接続中でも閉じる
+
+配布版の起動直後にEngineのコンソールを閉じると、Godotがまだ初回TCP接続を完了していない場合がある。接続済みフラグを条件とする終了処理ではこの状態を拾えず、Godotだけが接続を再試行して残った。前回版でも同じ症状を再現した。
+
+`--close-with-engine` の起動では、最初の接続を5秒以内に確立できなければGodotを終了する。接続後に切れた場合は従来の切断処理で終了する。Engineを待って起動するランチャーの用途に限定し、開発用の再接続動作は維持する。
+
+- 再現・確認：[managed-launcher-smoke.ps1](../tests/managed-launcher-smoke.ps1) で配布版の起動、画面再表示、Engineコンソールの×、Godot終了とワールド保存を確認する。
+- コード：[main.gd](../client-godot/main.gd) の `connect_engine()` と `_process()`。確認日：2026-10-24。

@@ -41,6 +41,7 @@ var session := "demo"
 var epoch := ""
 var sequence := 0
 var retry_at := 0.0
+var initial_engine_deadline := 0
 var connected := false
 var editable := false
 var current: Dictionary = {}
@@ -779,6 +780,8 @@ func queue_message(body: Dictionary) -> void:
 	else: disconnect_engine("Send queue full. Reconnecting…")
 
 func connect_engine() -> void:
+	if close_with_engine and initial_engine_deadline==0:
+		initial_engine_deadline=Time.get_ticks_msec()+5000
 	received.clear()
 	outgoing.clear()
 	tcp = StreamPeerTCP.new()
@@ -956,6 +959,9 @@ func _process(delta: float) -> void:
 	script_editor.tick()
 	tcp.poll()
 	var state := tcp.get_status()
+	if close_with_engine and not connected and initial_engine_deadline>0 and Time.get_ticks_msec()>=initial_engine_deadline:
+		get_tree().quit()
+		return
 	if close_with_engine and state == StreamPeerTCP.STATUS_ERROR:
 		get_tree().quit()
 		return
