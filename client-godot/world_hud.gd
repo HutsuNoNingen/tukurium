@@ -16,6 +16,7 @@ var workspace
 var dock_holder: CenterContainer
 var dock: HBoxContainer
 var dock_buttons := {}
+var edit_mode_buttons := {}
 var dock_tween: Tween
 var dock_open := false
 var cursor_texture: ImageTexture
@@ -82,6 +83,12 @@ func setup(owner) -> void:
 	bar.add_child(row)
 	row.add_child(text("◇  kokoverse",21))
 	row.add_child(VSeparator.new())
+	var edit_switch := HBoxContainer.new()
+	edit_switch.add_theme_constant_override("separation",2)
+	row.add_child(edit_switch)
+	edit_mode_buttons.play=button(edit_switch,"▶ Play",func(): set_edit_mode(false))
+	edit_mode_buttons.edit=button(edit_switch,"✎ Edit",func(): set_edit_mode(true))
+	row.add_child(VSeparator.new())
 	room_label=text("Workshop",14,MUTED)
 	room_label.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	room_label.text_overrun_behavior=TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -97,6 +104,7 @@ func setup(owner) -> void:
 	mode_button.tooltip_text="視点切り替え · F5"
 	build_menu()
 	build_dock()
+	refresh_edit_mode()
 	root.add_child(ring)
 	ring.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	ring.hide()
@@ -162,7 +170,7 @@ func build_dock() -> void:
 	dock=HBoxContainer.new()
 	dock.add_theme_constant_override("separation",10)
 	holder.add_child(dock)
-	for item in [["sessions","⌂","セッション"],["library","▦","インベントリ"],["workshop","✦","ワークショップ"],["settings","⚙","設定"]]:
+	for item in [["sessions","⌂","セッション"],["library","▦","インベントリ"],["workshop","✦","ワークショップ"],["inspector","▣","インスペクタ"],["settings","⚙","設定"]]:
 		var key: String=item[0]
 		var tile := Button.new()
 		tile.text=item[1]+"\n"+item[2]
@@ -178,7 +186,30 @@ func build_dock() -> void:
 		tile.pressed.connect(func(): open_dock(key))
 		dock.add_child(tile)
 		dock_buttons[key]=tile
+	dock_buttons.inspector.hide()
 	holder.hide()
+
+func refresh_edit_mode() -> void:
+	for key in ["play","edit"]:
+		var active: bool=app.edit_mode == (key=="edit")
+		var tile: Button=edit_mode_buttons[key]
+		tile.add_theme_stylebox_override("normal",style(Color("245750") if active else Color.TRANSPARENT,8))
+		tile.add_theme_color_override("font_color",ACCENT if active else MUTED)
+	dock_buttons.inspector.visible=app.edit_mode
+
+func set_edit_mode(enabled: bool) -> void:
+	if app.edit_mode==enabled: return
+	app.edit_mode=enabled
+	if not enabled:
+		ring.hide()
+		app.world_panels.clear_focus()
+		for id in app.world_panels.windows.keys(): app.world_panels.close_window(id)
+		app.inspector_shell.hide()
+		app.inspector_toggle.set_pressed_no_signal(false)
+		if app.script_editor.window != null: app.script_editor.window.hide()
+		if app.gizmo.dragging: app.gizmo.cancel_drag()
+	app.world_panels.refresh_gizmos()
+	refresh_edit_mode()
 
 func set_dock_open(open: bool, animate: bool = true) -> void:
 	if dock_open==open: return
@@ -202,7 +233,9 @@ func set_dock_open(open: bool, animate: bool = true) -> void:
 	dock_tween.finished.connect(func(): if not dock_open: dock_holder.hide())
 
 func open_dock(key: String) -> void:
-	if key=="settings":
+	if key=="inspector":
+		if app.edit_mode: app.world_panels.toggle_dock_inspector(app.selected_id)
+	elif key=="settings":
 		toggle_menu()
 	elif workspace != null and workspace.enabled:
 		menu.hide()
@@ -216,7 +249,7 @@ func blocking() -> bool:
 	return menu.visible or ring.visible or workspace_open()
 
 func open_creation() -> void:
-	app.world_panels.open_creation()
+	if app.edit_mode: app.world_panels.open_creation()
 
 func release_to_cursor() -> void:
 	var captured: bool=Input.mouse_mode==Input.MOUSE_MODE_CAPTURED or app.fps_active
@@ -258,6 +291,7 @@ func cycle_view() -> void:
 	if blocking(): app.release_cursor()
 
 func show_ring(position: Vector2) -> void:
+	if not app.edit_mode: return
 	var screen: Vector2 = app.get_viewport().get_visible_rect().size*0.5 if app.fps_active else position
 	ring_target=app.selected_id
 	var origin: Vector3=app.camera.project_ray_origin(screen)
@@ -274,6 +308,7 @@ func show_ring(position: Vector2) -> void:
 
 func choose_action(index: int) -> void:
 	ring.hide()
+	if not app.edit_mode: return
 	match index:
 		0: app.world_panels.open_inspector(ring_target,true)
 		1: app.world_panels.open_inspector(ring_target)
@@ -293,6 +328,7 @@ func handle_input(event: InputEvent) -> bool:
 			cycle_view()
 			return true
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE:
+		if not app.edit_mode: return false
 		# Opening the ring releases the cursor and cancels a right-click grab.
 		if app.right_down or app.look or app.grab_waiting or not app.hand_grab.is_empty(): return true
 		if event.pressed:
@@ -327,3 +363,5 @@ func _process(_delta: float) -> void:
 		var active: bool=workspace_open() and workspace.windows[key].visible
 		dock_buttons[key].add_theme_color_override("font_color",ACCENT if active else TEXT)
 	dock_buttons.settings.add_theme_color_override("font_color",ACCENT if menu.visible else TEXT)
+	var inspector_open: bool=app.world_panels.windows.has(app.world_panels.dock_inspector_id)
+	dock_buttons.inspector.add_theme_color_override("font_color",ACCENT if inspector_open else TEXT)

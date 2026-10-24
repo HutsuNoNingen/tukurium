@@ -14,6 +14,7 @@ func run() -> void:
 	var scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
 	if not await until(func(): return scene.editable and not scene.current.is_empty(), "Scene not ready"): quit(1); return
+	scene.hud.set_edit_mode(true)
 	if scene.inspector_shell.visible: push_error("Legacy inspector should start closed"); quit(1); return
 	var initial_count: int = scene.objects.size()
 	var initial_target: String = scene.selected_id

@@ -52,6 +52,7 @@ func run() -> void:
 	if scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE: push_error("Startup captured the mouse"); quit(1); return
 	if scene.hud.cursor_texture==null or scene.hud.cursor_texture.get_size()!=Vector2(32,32): push_error("Custom cursor was not installed"); quit(1); return
 	if scene.hud.dock_open or scene.hud.dock_holder.visible: push_error("Dock appeared before Esc"); quit(1); return
+	if scene.edit_mode or scene.hud.dock_buttons.inspector.visible: push_error("Startup did not use Play mode"); quit(1); return
 	if not scene.social_panels.left.visible or not scene.social_panels.right.visible: push_error("Session side panels are missing"); quit(1); return
 	if not await until(func(): return scene.social_panels.count_label.text=="1人","Participant list did not receive presence"): quit(1); return
 	for top_button in scene.hud.root.get_node("TopBar").find_children("*", "Button", true, false):
@@ -83,6 +84,20 @@ func run() -> void:
 	if scene.social_panels.input_locked or scene.social_panels.left.modulate.a<0.9 or not scene.social_panels.chat_input.editable: push_error("Esc did not reactivate session panels"); quit(1); return
 	await create_timer(0.33).timeout
 	if absf(scene.hud.dock_holder.offset_top+86.0)>1.0: push_error("Dock did not slide into place"); quit(1); return
+	key(KEY_I)
+	click(root.size*0.5,MOUSE_BUTTON_MIDDLE)
+	scene.world_panels.open_inspector(scene.selected_id,true)
+	if not scene.world_panels.windows.is_empty() or scene.hud.ring.visible: push_error("Play mode opened an editor tool"); quit(1); return
+	click(scene.hud.edit_mode_buttons.edit.get_global_rect().get_center())
+	if not scene.edit_mode or not scene.hud.dock_buttons.inspector.visible: push_error("Edit mode did not add Inspector to dock"); quit(1); return
+	await capture("-edit")
+	click(scene.hud.dock_buttons.inspector.get_global_rect().get_center())
+	if not await until(func(): return scene.world_panels.windows.size()==1,"Dock did not open 2D inspector"): quit(1); return
+	if not scene.world_panels.panels.is_empty(): push_error("Dock inspector created a shared panel"); quit(1); return
+	click(scene.hud.edit_mode_buttons.play.get_global_rect().get_center())
+	if scene.edit_mode or scene.hud.dock_buttons.inspector.visible or not scene.world_panels.windows.is_empty(): push_error("Play mode kept editor UI open"); quit(1); return
+	click(scene.hud.edit_mode_buttons.edit.get_global_rect().get_center())
+	if not scene.edit_mode: push_error("Could not return to Edit mode"); quit(1); return
 	key(KEY_ESCAPE)
 	await create_timer(0.33).timeout
 	if scene.hud.dock_open or scene.hud.dock_holder.visible: push_error("Second Esc did not hide the dock"); quit(1); return

@@ -12,6 +12,7 @@ func run() -> void:
 	var scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
 	if not await until(func(): return scene.editable and not scene.current.is_empty(),"Not ready"): quit(1); return
+	scene.hud.set_edit_mode(true)
 	var source: String = scene.selected_id
 	scene.world_panels.open_inspector(source)
 	if not await until(func(): return scene.world_panels.panels.size()==1,"Source inspector missing"): quit(1); return

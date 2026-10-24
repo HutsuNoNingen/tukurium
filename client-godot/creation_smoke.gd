@@ -52,6 +52,8 @@ func run() -> void:
 	var scene=load("res://main.tscn").instantiate()
 	root.add_child(scene)
 	if not await until(func(): return scene.editable and scene.player_initialized,"Scene not ready"): quit(1); return
+	click(scene.hud.edit_mode_buttons.edit.get_global_rect().get_center())
+	if not scene.edit_mode: push_error("Creation tools require Edit mode"); quit(1); return
 	click(root.size*0.5,MOUSE_BUTTON_MIDDLE)
 	click(scene.hud.ring.center+Vector2(0,125))
 	if not await until(func(): return scene.world_panels.panels.size()==1,"Ring did not open shared creation panel"): quit(1); return

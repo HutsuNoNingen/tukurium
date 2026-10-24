@@ -12,6 +12,7 @@ func run() -> void:
 	var scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
 	if not await until(func(): return scene.editable and not scene.current.is_empty(),"Not ready"): quit(1); return
+	scene.hud.set_edit_mode(true)
 	var parent: String = scene.selected_id
 	scene.world_panels.open_inspector(parent,true)
 	if not await until(func(): return scene.world_panels.windows.size()==1,"No window"): quit(1); return

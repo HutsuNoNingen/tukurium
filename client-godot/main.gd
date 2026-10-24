@@ -89,6 +89,7 @@ var player_initialized := false
 var avatar_camera := true
 var first_person := false
 var fps_active := false
+var edit_mode := false
 var hand_grab: Dictionary = {}
 var grab_waiting := false
 var grab_releasing := false
@@ -1022,7 +1023,7 @@ func _process(delta: float) -> void:
 	draw_render_hierarchy(delta)
 	update_selection_outline()
 	world_panels.tick()
-	if not current.is_empty() and not hud.blocking(): gizmo.set_target(cube.position, editable and not busy and not look and not fps_active)
+	if edit_mode and not current.is_empty() and not hud.blocking(): gizmo.set_target(cube.position, editable and not busy and not look and not fps_active)
 	else: gizmo.clear_target()
 	if look and not gizmo.dragging and not avatar_camera:
 		var movement := Vector3.ZERO
@@ -1459,7 +1460,7 @@ func _input(event: InputEvent) -> void:
 	if world_panels.route_input(event):
 		get_viewport().set_input_as_handled()
 		return
-	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.physical_keycode == KEY_I and not gameplay_keyboard_blocked():
+	if edit_mode and event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.physical_keycode == KEY_I and not gameplay_keyboard_blocked():
 		world_panels.open_inspector(selected_id, event.shift_pressed)
 		get_viewport().set_input_as_handled()
 		return
@@ -1467,7 +1468,7 @@ func _input(event: InputEvent) -> void:
 		if event.pressed and not event.echo: try_jump()
 		get_viewport().set_input_as_handled()
 		return
-	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_I:
+	if edit_mode and event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_I:
 		var focus := get_viewport().gui_get_focus_owner()
 		if fps_active or not (focus is LineEdit or focus is TextEdit):
 			world_panels.open_inspector(selected_id, true)

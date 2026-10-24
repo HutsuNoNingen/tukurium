@@ -38,6 +38,7 @@ func run() -> void:
 	var scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
 	if not await until(func(): return scene.editable and not scene.current.is_empty(),"Scene not ready"): quit(1); return
+	scene.hud.set_edit_mode(true)
 	var target: String = scene.selected_id
 	for _i in 2: scene.world_panels.open_inspector(target)
 	if not await until(func(): return scene.world_panels.panels.size() == 2,"Shared inspectors missing"): quit(1); return

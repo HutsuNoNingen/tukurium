@@ -14,6 +14,7 @@ var component_schemas: Array = []
 var drive_sources: Dictionary = {}
 var evaluated_transforms: Dictionary = {}
 var windows: Dictionary = {}
+var dock_inspector_id := ""
 var pending_panel_close: Dictionary = {}
 var carried_reference: Dictionary = {}
 
@@ -93,7 +94,7 @@ func panel_spawn_position(distance: float) -> Vector3:
 	return origin + forward*distance
 
 func open_inspector(target_id: String = "", desktop: bool = false) -> void:
-	if not app.editable: return
+	if not app.edit_mode or not app.editable: return
 	if desktop:
 		open_window(target_id)
 		return
@@ -115,7 +116,7 @@ func close_panel(id: String) -> void:
 	command({"kind":"structure","command":{"action":"delete","target":app.address_of(app.objects[id]),"expected_revision":app.objects[id].object_revision}})
 
 func open_creation() -> void:
-	if not app.editable: return
+	if not app.edit_mode or not app.editable: return
 	var position := panel_spawn_position(2.6)
 	var q: Quaternion = app.camera.global_basis.get_rotation_quaternion()
 	command({"kind":"structure","command":{"action":"create_creation_panel","position":[position.x,position.y,position.z],"rotation":[q.x,q.y,q.z,q.w]}}, func(result):
@@ -138,7 +139,14 @@ func sync() -> void:
 	for window in windows.values(): window.get_meta("inspector").refresh_local()
 	refresh_gizmos()
 
-func open_window(target_id: String = "") -> void:
+func toggle_dock_inspector(target_id: String = "") -> void:
+	if windows.has(dock_inspector_id):
+		close_window(dock_inspector_id)
+	else:
+		dock_inspector_id = open_window(target_id)
+
+func open_window(target_id: String = "") -> String:
+	if not app.edit_mode: return ""
 	app.release_cursor()
 	var id := "desktop-%s-%s" % [Time.get_ticks_usec(), randi()]
 	var window := Window.new()
@@ -168,9 +176,11 @@ func open_window(target_id: String = "") -> void:
 	view.set_initial_target(target_id)
 	window.show()
 	window.grab_focus()
+	return id
 
 func close_window(id: String, force: bool = false) -> void:
 	if not windows.has(id): return
+	if id == dock_inspector_id: dock_inspector_id = ""
 	var window: Window = windows[id]
 	var view = window.get_meta("inspector")
 	window.gui_release_focus()
@@ -216,7 +226,7 @@ func refresh_gizmos() -> void:
 			shared_gizmos[target_id] = gizmo
 		shared_gizmos[target_id].set_target(app.render_nodes[target_id].position, false)
 		shared_gizmos[target_id].shared_active = app.remote_previews.has(target_id)
-		shared_gizmos[target_id].visible = target_id != app.selected_id
+		shared_gizmos[target_id].visible = app.edit_mode and target_id != app.selected_id
 	for id in shared_gizmos.keys():
 		if not wanted.has(id):
 			shared_gizmos[id].queue_free()
