@@ -242,3 +242,10 @@ Godotのインスペクタから `WorldText` の白色 `[1.0,1.0,1.0,1.0]` を�
 
 - 再現・確認：[managed-launcher-smoke.ps1](../tests/managed-launcher-smoke.ps1) で配布版の起動、画面再表示、Engineコンソールの×、Godot終了とワールド保存を確認する。
 - コード：[main.gd](../client-godot/main.gd) の `connect_engine()` と `_process()`。確認日：2026-10-24。
+
+## 2Dウィンドウのドラッグは入力イベントの画面座標を使う
+
+`root.push_input()` で押下と移動を送るテストでは、`Viewport.get_mouse_position()` が注入した入力位置と一致せず、ウィンドウが画面端まで飛んだ。押下と移動の `InputEventMouse.global_position` を同じ座標系で比較して移動量を出す。複数ウィンドウを重ねた場合は、実際にクリックされた子Controlを含む枠だけを前面へ移す。
+
+- 再現・確認：[hud-integration.mjs](../tests/hud-integration.mjs) の `--rendered` でドラッグ量、サイズ変更、背面ウィンドウのフォーカス、各ウィンドウの独立性を確認する。
+- コード：[desktop_window.gd](../client-godot/desktop_window.gd)、[service_panel.gd](../client-godot/service_panel.gd)。確認日：2026-10-24。

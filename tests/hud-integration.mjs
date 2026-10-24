@@ -18,7 +18,7 @@ try {
   const godot=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(process.argv.includes('--rendered')?['--rendering-method','gl_compatibility']:['--headless']),'--path',process.env.KOKOVERSE_TEST_CLIENT||'client-godot','--script','res://hud_smoke.gd','--',`--port=${port}`,`--session=${session}`,...(process.argv.includes('--rendered')?[`--screenshot=${screenshot}`]:[])]);
   const deadline=Date.now()+45000;while(godot.exitCode===null&&Date.now()<deadline)await delay(20);
   assert.equal(godot.exitCode,0,godot.logs);assert.doesNotMatch(godot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(godot.logs,/HUD SMOKE PASS/);
-  console.log('PASS: cursor-first FPS, persistent top bar, separate dock icons, floating window drag/resize, Esc, stopped movement and middle-click inspectors');
+  console.log('PASS: persistent top bar, separate session/inventory/workshop windows, drag/resize, window focus, Esc and middle-click inspectors');
   console.log(`SCREENSHOT=${screenshot}`);
 }catch(error){for(const child of children)if(child.logs)console.error(child.logs.slice(-4500));throw error;}
 finally{for(const child of children)if(child.exitCode===null)child.kill();}

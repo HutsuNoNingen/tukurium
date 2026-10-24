@@ -1,5 +1,6 @@
 extends Control
 ## Local floating frame. Position and size never become shared world state.
+signal focused
 
 var panel := PanelContainer.new()
 var grip := Button.new()
@@ -38,7 +39,7 @@ func _title_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index==MOUSE_BUTTON_LEFT and event.pressed:
 		dragging=true
 		resizing=false
-		origin=get_viewport().get_mouse_position()
+		origin=event.global_position
 		start_position=position
 		get_viewport().set_input_as_handled()
 
@@ -46,16 +47,21 @@ func _grip_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index==MOUSE_BUTTON_LEFT and event.pressed:
 		resizing=true
 		dragging=false
-		origin=get_viewport().get_mouse_position()
+		origin=event.global_position
 		start_size=size
 		get_viewport().set_input_as_handled()
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index==MOUSE_BUTTON_LEFT and event.pressed and is_visible_in_tree():
+		var hovered: Control=get_viewport().gui_get_hovered_control()
+		if hovered!=null and is_ancestor_of(hovered):
+			move_to_front()
+			focused.emit()
 	if event is InputEventMouseButton and event.button_index==MOUSE_BUTTON_LEFT and not event.pressed:
 		dragging=false
 		resizing=false
 	elif event is InputEventMouseMotion and (dragging or resizing):
-		var delta: Vector2=event.position-origin
+		var delta: Vector2=event.global_position-origin
 		var screen: Vector2=get_viewport_rect().size
 		if dragging:
 			position=Vector2(clampf(start_position.x+delta.x,0,maxf(0,screen.x-size.x)),clampf(start_position.y+delta.y,72,maxf(72,screen.y-size.y-60)))

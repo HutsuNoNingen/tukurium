@@ -13,6 +13,9 @@ var app
 var shade: ColorRect
 var shell: PanelContainer
 var floating_window
+var windows := {}
+var status_labels := {}
+var detail_boxes := {}
 var status: Label
 var identity: Label
 var name_input: LineEdit
@@ -33,13 +36,9 @@ var library_query: LineEdit
 var workshop_query: LineEdit
 var mine_only: CheckBox
 var page := "sessions"
-var pages := {}
-var nav := {}
 var heading: Label
 var version_label: Label
 var subtitle: Label
-var detail_box: VBoxContainer
-var detail_panel: PanelContainer
 var selected := {}
 var selection_kind := ""
 var library_total := 0
@@ -51,7 +50,7 @@ var login_button: Button
 var back_button: Button
 var library_generation := 0
 var workshop_generation := 0
-var detail_generation := 0
+var detail_generations := {"library":0,"workshop":0}
 var body_font: SystemFont
 var title_font: SystemFont
 var publish_dialog: ConfirmationDialog
@@ -152,12 +151,6 @@ func setup(scene) -> void:
 	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shade.visible=false
 	add_child(shade)
-	floating_window=DesktopWindow.new()
-	shade.add_child(floating_window)
-	floating_window.size=Vector2(minf(1120,app.get_viewport().get_visible_rect().size.x-48),minf(620,app.get_viewport().get_visible_rect().size.y-180))
-	floating_window.position=Vector2((app.get_viewport().get_visible_rect().size.x-floating_window.size.x)/2,82)
-	shell=floating_window.panel
-	shell.add_theme_stylebox_override("panel",box(GROUND,20,Color.TRANSPARENT,16))
 	var theme := Theme.new()
 	theme.default_font=body_font
 	theme.default_font_size=14
@@ -181,76 +174,89 @@ func setup(scene) -> void:
 	theme.set_stylebox("panel","AcceptDialog",box(PAPER,16,LINE,20))
 	theme.set_color("title_color","Window",INK)
 	theme.set_stylebox("embedded_border","Window",box(GROUND,14,LINE,12))
-	shell.theme=theme
-	var layout := row(shell,18)
-	var side := surface(layout)
-	side.custom_minimum_size.x=162
-	var sidebar := column(side,12)
-	sidebar.add_child(text("Kokoverse",24,INK,true))
-	sidebar.add_child(text("ワークスペース",12,MUTED))
-	rule(sidebar)
-	for item in [["sessions","セッション"],["library","マイライブラリ"],["workshop","ワークショップ"]]:
-		var key: String=item[0]
-		nav[key]=button(sidebar,item[1],func(): switch_page(key))
-		nav[key].alignment=HORIZONTAL_ALIGNMENT_LEFT
-	var space := Control.new()
-	space.size_flags_vertical=Control.SIZE_EXPAND_FILL
-	sidebar.add_child(space)
-	identity=paragraph("HNを入力してはじめる",13)
-	sidebar.add_child(identity)
-	name_input=field(sidebar,"HN")
-	name_input.max_length=40
-	login_button=button(sidebar,"Start",login,true)
-	name_input.text_submitted.connect(func(_value): login())
-	button(sidebar,"ユーザーコードをコピー",func():
-		if not current_user.is_empty():
-			DisplayServer.clipboard_set(str(current_user.id))
-			status.text="ユーザーコードをコピーしました。"
-	).tooltip_text="ワークショップを使わず直接渡すときに使います。"
-	var main := column(layout,14)
-	main.size_flags_horizontal=Control.SIZE_EXPAND_FILL
-	var top := row(main)
-	floating_window.use_titlebar(top)
-	var titles := column(top,3)
-	titles.mouse_filter=Control.MOUSE_FILTER_IGNORE
-	titles.size_flags_horizontal=Control.SIZE_EXPAND_FILL
-	heading=text("セッション",27,INK,true)
-	titles.add_child(heading)
-	subtitle=paragraph("一緒に作る場所を選ぶ。",13)
-	titles.add_child(subtitle)
-	version_label=text(app.app_version,12,MUTED)
-	version_label.mouse_filter=Control.MOUSE_FILTER_IGNORE
-	version_label.name="AppVersion"
-	version_label.tooltip_text="このアプリの配布バージョン"
-	top.add_child(version_label)
-	back_button=button(top,"閉じる",func(): shade.hide())
-	var workspace := row(main,16)
-	workspace.size_flags_vertical=Control.SIZE_EXPAND_FILL
-	var content := Control.new()
-	content.size_flags_horizontal=Control.SIZE_EXPAND_FILL
-	workspace.add_child(content)
+	var screen: Vector2=app.get_viewport().get_visible_rect().size
+	var sizes := {"sessions":Vector2(790,585),"library":Vector2(1010,600),"workshop":Vector2(1010,600)}
+	var positions := {"sessions":Vector2(104,88),"library":Vector2(145,96),"workshop":Vector2(185,106)}
+	var titles := {"sessions":"セッション","library":"インベントリ","workshop":"ワークショップ"}
+	var descriptions := {"sessions":"一緒に作る場所を選ぶ。","library":"保存した作品を配置・共有する。","workshop":"公開された作品を探す。"}
 	for key in ["sessions","library","workshop"]:
-		var pane := VBoxContainer.new()
-		pane.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		pane.add_theme_constant_override("separation",12)
-		content.add_child(pane)
-		pages[key]=pane
-	build_sessions(pages.sessions)
-	build_library(pages.library)
-	build_workshop(pages.workshop)
-	detail_panel=surface(workspace)
-	detail_panel.custom_minimum_size.x=292
-	var detail_scroll := ScrollContainer.new()
-	detail_scroll.horizontal_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED
-	detail_panel.add_child(detail_scroll)
-	detail_box=column(detail_scroll,12)
-	detail_box.size_flags_horizontal=Control.SIZE_EXPAND_FILL
-	detail_box.custom_minimum_size.x=252
-	status=paragraph("HNを入力してStartを押してください。同じHNなら同じライブラリを開けます。",12)
-	main.add_child(status)
-	content.resized.connect(update_columns)
-	switch_page("sessions",false)
-	floating_window.minimum_window_size=Vector2(700,450)
+		var frame=DesktopWindow.new()
+		shade.add_child(frame)
+		frame.size=Vector2(minf(sizes[key].x,screen.x-40),minf(sizes[key].y,screen.y-170))
+		frame.position=Vector2(minf(positions[key].x,screen.x-frame.size.x-20),positions[key].y)
+		frame.minimum_window_size=Vector2(620 if key=="sessions" else 760,430)
+		frame.panel.add_theme_stylebox_override("panel",box(GROUND,20,Color.TRANSPARENT,16))
+		frame.panel.theme=theme
+		frame.hide()
+		windows[key]=frame
+		frame.focused.connect(func(): activate_page(key))
+		var main := column(frame.panel,14)
+		main.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+		var top := row(main)
+		frame.use_titlebar(top)
+		var title_group := column(top,3)
+		title_group.mouse_filter=Control.MOUSE_FILTER_IGNORE
+		title_group.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+		var title := text(titles[key],27,INK,true)
+		title_group.add_child(title)
+		var description := paragraph(descriptions[key],13)
+		title_group.add_child(description)
+		if key=="sessions":
+			heading=title
+			subtitle=description
+			version_label=text(app.app_version,12,MUTED)
+			version_label.mouse_filter=Control.MOUSE_FILTER_IGNORE
+			version_label.name="AppVersion"
+			version_label.tooltip_text="このアプリの配布バージョン"
+			top.add_child(version_label)
+		var close_button := button(top,"閉じる",func(): close_page(key))
+		if key=="sessions":
+			back_button=close_button
+			var account := surface(main,PAPER,12)
+			var account_body := column(account,7)
+			identity=paragraph("HNを入力してはじめる",13)
+			account_body.add_child(identity)
+			var account_row := row(account_body)
+			name_input=field(account_row,"HN")
+			name_input.max_length=40
+			login_button=button(account_row,"Start",login,true)
+			name_input.text_submitted.connect(func(_value): login())
+			button(account_row,"ユーザーコードをコピー",func():
+				if not current_user.is_empty():
+					DisplayServer.clipboard_set(str(current_user.id))
+					status_labels.sessions.text="ユーザーコードをコピーしました。"
+			).tooltip_text="ワークショップを使わず直接渡すときに使います。"
+		var workspace := row(main,16)
+		workspace.size_flags_vertical=Control.SIZE_EXPAND_FILL
+		var pane := column(workspace,12)
+		pane.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+		pane.size_flags_vertical=Control.SIZE_EXPAND_FILL
+		if key=="sessions": build_sessions(pane)
+		elif key=="library":
+			build_library(pane)
+			empty_state(library,"まだ作品を表示できません","セッション画面でHNを入力すると、保存した作品を開けます。")
+		else:
+			build_workshop(pane)
+			empty_state(workshop,"まだ作品を表示できません","セッション画面でHNを入力すると、公開作品を探せます。")
+		if key!="sessions":
+			var panel := surface(workspace)
+			panel.custom_minimum_size.x=292
+			var detail_scroll := ScrollContainer.new()
+			detail_scroll.horizontal_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED
+			panel.add_child(detail_scroll)
+			var details := column(detail_scroll,12)
+			details.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+			details.custom_minimum_size.x=252
+			detail_boxes[key]=details
+		var feedback := paragraph("HNを入力してStartを押してください。" if key=="sessions" else "",12)
+		main.add_child(feedback)
+		status_labels[key]=feedback
+		pane.resized.connect(update_columns)
+	floating_window=windows.sessions
+	shell=floating_window.panel
+	status=status_labels.sessions
+	show_detail_empty("library")
+	show_detail_empty("workshop")
 
 func build_sessions(parent: VBoxContainer) -> void:
 	var panel := surface(parent)
@@ -337,36 +343,97 @@ func update_columns() -> void:
 	for grid in [library,workshop]:
 		if is_instance_valid(grid): grid.columns=clampi(int(grid.get_parent().size.x/195.0),1,3)
 
-func switch_page(value: String, refresh_data: bool = true) -> void:
+func activate_page(value: String) -> void:
 	page=value
-	for key in pages:
-		pages[key].visible=key==page
-		nav[key].add_theme_stylebox_override("normal",box(PALE if key==page else PAPER,10,Color.TRANSPARENT,12))
-		nav[key].add_theme_color_override("font_color",BLUE if key==page else INK)
-	detail_panel.visible=page!="sessions"
-	heading.text={"sessions":"セッション","library":"マイライブラリ","workshop":"ワークショップ"}[page]
-	subtitle.text={"sessions":"一緒に作る場所を選ぶ。","library":"保存した作品を配置する、共有する、公開する。","workshop":"みんなが公開した作品を探す。"}[page]
-	selected={}
-	selection_kind=""
-	detail_generation+=1
-	show_detail_empty()
+	floating_window=windows[value]
+	shell=floating_window.panel
+	status=status_labels[value]
+
+func switch_page(value: String, refresh_data: bool = true) -> void:
+	if not windows.has(value): return
+	activate_page(value)
+	app.release_cursor()
+	shade.show()
+	floating_window.show()
+	floating_window.move_to_front()
+	if value=="library":
+		save_button.disabled=app.current.is_empty() or current_session.is_empty()
+		save_button.tooltip_text="ワールドでアイテムを選択してから保存します。" if save_button.disabled else "見た目・設定・ロジックを保存します。"
 	update_columns.call_deferred()
 	if refresh_data and not current_user.is_empty(): refresh()
 
+func close_page(value: String) -> void:
+	if windows.has(value): windows[value].hide()
+	if not any_page_open():
+		shade.hide()
+		return
+	for index in range(shade.get_child_count()-1,-1,-1):
+		var frame=shade.get_child(index)
+		if not frame.visible: continue
+		for key in windows:
+			if windows[key]==frame:
+				activate_page(key)
+				return
+
+func any_page_open() -> bool:
+	for frame in windows.values():
+		if frame.visible: return true
+	return false
+
+func close_active_page() -> void:
+	for index in range(shade.get_child_count()-1,-1,-1):
+		var frame=shade.get_child(index)
+		if not frame.visible: continue
+		for key in windows:
+			if windows[key]==frame:
+				close_page(key)
+				return
+
+func close_all() -> void:
+	for frame in windows.values(): frame.hide()
+	shade.hide()
+
 func login() -> void:
-	if not current_session.is_empty(): status.text="HNを切り替えるには、セッションから退出してください。"; return
-	if name_input.text.strip_edges().is_empty(): status.text="HNを入力してください。"; name_input.grab_focus(); return
+	if not current_session.is_empty(): status_labels.sessions.text="HNを切り替えるには、セッションから退出してください。"; return
+	if name_input.text.strip_edges().is_empty(): status_labels.sessions.text="HNを入力してください。"; name_input.grab_focus(); return
 	auto_login=true
-	call_service("login",{"name":name_input.text},func(_v): selected={}; show_detail_empty(); refresh())
+	call_service("login",{"name":name_input.text},func(_v):
+		selected={}
+		for kind in detail_generations:
+			detail_generations[kind]+=1
+			show_detail_empty(kind)
+		refresh()
+	)
 
 func receive_state(body: Dictionary) -> void:
 	enabled=body.get("enabled",false)
 	open_button.visible=enabled
 	if not enabled: return
+	var previous_user_id: String=str(current_user.get("id",""))
 	current_user=body.user if body.get("user") is Dictionary else {}
 	current_session=body.session if body.get("session") is Dictionary else {}
+	if previous_user_id!=str(current_user.get("id","")):
+		library_generation+=1
+		workshop_generation+=1
+		for kind in detail_generations:
+			detail_generations[kind]+=1
+			show_detail_empty(kind)
+		clear_list(library)
+		clear_list(workshop)
+		library_total=0
+		workshop_total=0
+		library_page.text="0 件"
+		workshop_page.text="0 件"
+		selected={}
+		if current_user.is_empty():
+			empty_state(library,"まだ作品を表示できません","セッション画面でHNを入力すると、保存した作品を開けます。")
+			empty_state(workshop,"まだ作品を表示できません","セッション画面でHNを入力すると、公開作品を探せます。")
+		else:
+			if windows.library.visible: refresh_library()
+			if windows.workshop.visible: refresh_workshop()
 	name_input.editable=current_session.is_empty()
 	login_button.disabled=not current_session.is_empty()
+	save_button.disabled=app.current.is_empty() or current_session.is_empty()
 	if not current_user.is_empty():
 		identity.text="HN  "+str(current_user.name)
 		name_input.text=current_user.name
@@ -374,37 +441,34 @@ func receive_state(body: Dictionary) -> void:
 		if not auto_login:
 			auto_login=true
 			call_service("login",{"name":current_user.name},func(_v): refresh())
-	if current_session.is_empty(): show_panel()
-	else: shade.hide()
+	if current_session.is_empty():
+		if not any_page_open(): show_panel()
+	else: close_page("sessions")
 
 func show_panel() -> void:
-	app.release_cursor()
-	shade.show()
-	save_button.disabled=app.current.is_empty() or current_session.is_empty()
-	save_button.tooltip_text="ワールドでアイテムを選択してから保存します。" if save_button.disabled else "見た目・設定・ロジックを保存します。"
-	if not current_user.is_empty(): refresh()
+	switch_page("sessions")
 
 func open_page(value: String) -> void:
 	if not enabled: return
-	if shade.visible and page==value:
-		shade.hide()
+	if windows.has(value) and shade.visible and windows[value].visible:
+		close_page(value)
 		return
-	switch_page(value,false)
-	show_panel()
+	switch_page(value)
 
-func call_service(action: String, values: Dictionary, completed: Callable, failed: Callable = Callable()) -> void:
-	if not app.connected: status.text="接続を待っています…"; return
-	status.text="読み込み中…" if action in ["library","workshop","workshop_detail","version","sessions"] else "処理しています…"
+func call_service(action: String, values: Dictionary, completed: Callable, failed: Callable = Callable(), feedback_page: String = "") -> void:
+	var feedback: Label=status_labels.get(page if feedback_page.is_empty() else feedback_page,status)
+	if not app.connected: feedback.text="接続を待っています…"; return
+	feedback.text="読み込み中…" if action in ["library","workshop","workshop_detail","version","sessions"] else "処理しています…"
 	var body := values.duplicate(true)
 	body.kind="service"
 	body.action=action
 	if action=="create_session" and not load_world.is_empty(): body.load_world=load_world
 	app.requests.request(body,func(result):
 		if not result.get("ok",false):
-			status.text=result.get("message","処理できませんでした。もう一度お試しください。")
-			if failed.is_valid(): failed.call(status.text)
+			feedback.text=result.get("message","処理できませんでした。もう一度お試しください。")
+			if failed.is_valid(): failed.call(feedback.text)
 			return
-		status.text=""
+		feedback.text=""
 		completed.call(result.get("data",{}))
 	,["request_id"],"request_id",120000,"service_result")
 
@@ -414,7 +478,7 @@ func refresh() -> void:
 	else: refresh_workshop()
 
 func create_session() -> void:
-	if session_name.text.strip_edges().is_empty(): status.text="セッション名を入力してください。"; session_name.grab_focus(); return
+	if session_name.text.strip_edges().is_empty(): status_labels.sessions.text="セッション名を入力してください。"; session_name.grab_focus(); return
 	call_service("create_session",{"name":session_name.text},func(_v): pass)
 
 func refresh_sessions() -> void:
@@ -430,12 +494,12 @@ func refresh_sessions() -> void:
 			labels.add_child(text("ホスト  "+str(record.owner_name),12,MUTED))
 			var here: bool=current_session.get("id","")==record.id
 			button(contents,"ワールドへ" if here else "参加",func():
-				if here: shade.hide()
-				elif not current_session.is_empty(): status.text="今のセッションから退出してから参加してください。"
+				if here: close_page("sessions")
+				elif not current_session.is_empty(): status_labels.sessions.text="今のセッションから退出してから参加してください。"
 				else: call_service("join_session",{"session_id":record.id},func(_v): pass)
 			,true)
 		if rows.is_empty(): empty_state(sessions,"まだセッションがありません","上のフォームから、新しいセッションを作成できます。")
-	)
+	,Callable(),"sessions")
 
 func clear_list(parent: Node) -> void:
 	for child in parent.get_children(): parent.remove_child(child); child.queue_free()
@@ -459,7 +523,7 @@ func refresh_library() -> void:
 		for record in data.get("entries",[]): item_card(library,record,"library")
 		if data.get("entries",[]).is_empty(): empty_state(library,"保存した作品がありません","ワールドのアイテムを保存するか、ワークショップから取得してください。")
 		update_columns.call_deferred()
-	)
+	,Callable(),"library")
 
 func refresh_workshop() -> void:
 	if current_user.is_empty(): return
@@ -473,7 +537,7 @@ func refresh_workshop() -> void:
 		for record in data.get("entries",[]): item_card(workshop,record,"workshop")
 		if data.get("entries",[]).is_empty(): empty_state(workshop,"作品が見つかりません","マイライブラリから作品を公開できます。検索中なら、検索語を変えてください。")
 		update_columns.call_deferred()
-	)
+	,Callable(),"workshop")
 
 func page_label(offset: int, count: int, total: int) -> String:
 	return "0 件" if total==0 else "%d–%d / %d 件" % [offset+1,mini(offset+count,total),total]
@@ -516,67 +580,72 @@ func item_card(parent: GridContainer, record: Dictionary, kind: String) -> void:
 	contents.add_child(text(note,11,BLUE))
 	button(contents,"詳細を見る",func(): select_item(record,kind))
 
-func show_detail_empty() -> void:
-	if not is_instance_valid(detail_box): return
-	clear_list(detail_box)
-	detail_box.add_child(text("作品の詳細",18,INK,true))
-	detail_box.add_child(paragraph("作品を選ぶと、内容を確認できます。",13))
+func show_detail_empty(kind: String = "") -> void:
+	if kind.is_empty(): kind=page
+	if not detail_boxes.has(kind): return
+	var target_box: VBoxContainer=detail_boxes[kind]
+	clear_list(target_box)
+	target_box.add_child(text("作品の詳細",18,INK,true))
+	target_box.add_child(paragraph("作品を選ぶと、内容を確認できます。",13))
 
 func select_item(record: Dictionary, kind: String) -> void:
+	switch_page(kind,false)
 	selected=record
 	selection_kind=kind
-	detail_generation+=1
-	var generation := detail_generation
-	clear_list(detail_box)
-	detail_box.add_child(text("読み込み中…",14,MUTED))
+	detail_generations[kind]+=1
+	var generation: int=detail_generations[kind]
+	var target_box: VBoxContainer=detail_boxes[kind]
+	clear_list(target_box)
+	target_box.add_child(text("読み込み中…",14,MUTED))
 	call_service("version" if kind=="library" else "workshop_detail",{"version_id":record.get("version_id",""),"publication_id":record.get("id","")},func(data):
-		if generation==detail_generation: render_detail(data,record,kind)
+		if generation==detail_generations[kind]: render_detail(data,record,kind)
 	,func(message):
-		if generation==detail_generation: clear_list(detail_box); detail_box.add_child(paragraph(message,13))
-	)
+		if generation==detail_generations[kind]: clear_list(target_box); target_box.add_child(paragraph(message,13))
+	,kind)
 
 func render_detail(data: Dictionary, record: Dictionary, kind: String) -> void:
-	clear_list(detail_box)
-	preview_node(detail_box,data.get("thumbnail"),str(data.get("kind",record.get("kind","cube"))),158)
+	var target_box: VBoxContainer=detail_boxes[kind]
+	clear_list(target_box)
+	preview_node(target_box,data.get("thumbnail"),str(data.get("kind",record.get("kind","cube"))),158)
 	var title: String=str(record.get("name",data.get("title",data.get("name","作品"))))
-	detail_box.add_child(paragraph(title,21,INK))
+	target_box.add_child(paragraph(title,21,INK))
 	var creator: String=str(data.get("creator_name",record.get("creator_name","")))
-	detail_box.add_child(paragraph("作者  "+creator,13))
-	if kind=="workshop" and data.get("publisher_name",creator)!=creator: detail_box.add_child(paragraph("公開者  "+str(data.publisher_name),12))
+	target_box.add_child(paragraph("作者  "+creator,13))
+	if kind=="workshop" and data.get("publisher_name",creator)!=creator: target_box.add_child(paragraph("公開者  "+str(data.publisher_name),12))
 	var type_name := kind_label(str(record.get("kind",data.get("kind","cube"))))
 	var scripts := int(data.get("script_count",data.get("object",{}).get("scripts",[]).size()))
-	detail_box.add_child(text(type_name+"  ·  ロジック %d 件" % scripts,12,MUTED))
-	if kind=="workshop" and not str(data.get("description","")).is_empty(): detail_box.add_child(paragraph(data.description,13,INK))
-	rule(detail_box)
+	target_box.add_child(text(type_name+"  ·  ロジック %d 件" % scripts,12,MUTED))
+	if kind=="workshop" and not str(data.get("description","")).is_empty(): target_box.add_child(paragraph(data.description,13,INK))
+	rule(target_box)
 	if kind=="workshop":
 		var in_library: bool=data.get("in_library",false)
 		var action: String="ライブラリに追加済み" if in_library else "ライブラリに保存"
-		var acquire_button := button(detail_box,action,func():
+		var acquire_button := button(target_box,action,func():
 			call_service("acquire_item",{"publication_id":data.id},func(result):
-				status.text="ライブラリに保存しました。"
+				status_labels.workshop.text="ライブラリに保存しました。"
 				select_item(result.publication,"workshop")
 				refresh_workshop()
 			)
 		,true)
 		acquire_button.disabled=in_library
 		if in_library:
-			button(detail_box,"マイライブラリを開く",func(): switch_page("library"))
-		if data.get("can_manage",false): button(detail_box,"公開を停止…",func(): confirm_unpublish(data))
+			button(target_box,"マイライブラリを開く",func(): switch_page("library"))
+		if data.get("can_manage",false): button(target_box,"公開を停止…",func(): confirm_unpublish(data))
 	else:
-		detail_box.add_child(text("保存  "+Time.get_datetime_string_from_unix_time(int(data.saved_at)).replace("T"," "),11,MUTED))
-		var place := button(detail_box,"ワールドに配置",func():
+		target_box.add_child(text("保存  "+Time.get_datetime_string_from_unix_time(int(data.saved_at)).replace("T"," "),11,MUTED))
+		var place := button(target_box,"ワールドに配置",func():
 			var p: Vector3=app.player_position+Vector3(0,1,-2)
-			call_service("place_item",{"version_id":record.version_id,"position":[p.x,p.y,p.z]},func(_v): shade.hide())
+			call_service("place_item",{"version_id":record.version_id,"position":[p.x,p.y,p.z]},func(_v): close_all())
 		,true)
 		place.disabled=current_session.is_empty()
 		place.tooltip_text="セッションに参加すると配置できます。" if place.disabled else ""
 		if data.get("publication") is Dictionary:
-			button(detail_box,"公開中の作品を見る",func(): switch_page("workshop"); select_item(data.publication,"workshop"))
+			button(target_box,"公開中の作品を見る",func(): switch_page("workshop"); select_item(data.publication,"workshop"))
 		else:
-			button(detail_box,"ワークショップに公開…",func(): show_publish(record))
-		button(detail_box,"名前を変更…",func(): rename_entry(record))
-		button(detail_box,"ユーザーに直接渡す…",func(): share_entry(record))
-		button(detail_box,"ライブラリから外す…",func(): confirm_remove(record))
+			button(target_box,"ワークショップに公開…",func(): show_publish(record))
+		button(target_box,"名前を変更…",func(): rename_entry(record))
+		button(target_box,"ユーザーに直接渡す…",func(): share_entry(record))
+		button(target_box,"ライブラリから外す…",func(): confirm_remove(record))
 
 func kind_label(kind: String) -> String:
 	return {"cube":"オブジェクト","model":"3Dモデル","image":"画像","video":"動画"}.get(kind,"アイテム")
@@ -628,7 +697,7 @@ func show_publish(record: Dictionary) -> void:
 			mine_only.button_pressed=true
 			refresh_workshop()
 			select_item(data,"workshop")
-			status.text="ワークショップに公開しました。"
+			status_labels.workshop.text="ワークショップに公開しました。"
 		,func(message):
 			if is_instance_valid(dialog): publish_error.text=message; dialog.get_ok_button().disabled=false
 		)
@@ -638,13 +707,13 @@ func show_publish(record: Dictionary) -> void:
 func confirm_unpublish(record: Dictionary) -> void:
 	var dialog := modal("公開を停止しますか？","公開を停止")
 	dialog.dialog_text="ワークショップでの公開を停止します。保存済みのライブラリや配置物は残ります。"
-	dialog.confirmed.connect(func(): call_service("unpublish_item",{"publication_id":record.id},func(_v): selected={}; show_detail_empty(); refresh_workshop(); status.text="公開を停止しました。"); dialog.queue_free())
+	dialog.confirmed.connect(func(): call_service("unpublish_item",{"publication_id":record.id},func(_v): selected={}; show_detail_empty("workshop"); refresh_workshop(); status_labels.workshop.text="公開を停止しました。"); dialog.queue_free())
 	dialog.popup_centered()
 
 func confirm_remove(record: Dictionary) -> void:
 	var dialog := modal("ライブラリから外しますか？","ライブラリから外す")
 	dialog.dialog_text="この一覧から外します。ワールドに配置したものや公開中の作品は残ります。"
-	dialog.confirmed.connect(func(): call_service("remove_entry",{"entry_id":record.id},func(_v): selected={}; show_detail_empty(); refresh_library()); dialog.queue_free())
+	dialog.confirmed.connect(func(): call_service("remove_entry",{"entry_id":record.id},func(_v): selected={}; show_detail_empty("library"); refresh_library()); dialog.queue_free())
 	dialog.popup_centered()
 
 func rename_entry(record: Dictionary) -> void:
@@ -653,24 +722,24 @@ func rename_entry(record: Dictionary) -> void:
 	var input := field(form,"名前")
 	input.text=record.name
 	input.max_length=80
-	dialog.confirmed.connect(func(): call_service("rename_entry",{"entry_id":record.id,"name":input.text},func(_v): show_detail_empty(); refresh_library()); dialog.queue_free())
+	dialog.confirmed.connect(func(): call_service("rename_entry",{"entry_id":record.id,"name":input.text},func(_v): show_detail_empty("library"); refresh_library()); dialog.queue_free())
 	dialog.popup_centered()
 
 func share_entry(record: Dictionary) -> void:
 	var dialog := modal("ユーザーに直接渡す","渡す")
 	var form := column(dialog)
 	var recipient := field(form,"相手のユーザーコード")
-	dialog.confirmed.connect(func(): call_service("share_item",{"version_id":record.version_id,"user_id":recipient.text.strip_edges()},func(_v): status.text="作品を渡しました。"); dialog.queue_free())
+	dialog.confirmed.connect(func(): call_service("share_item",{"version_id":record.version_id,"user_id":recipient.text.strip_edges()},func(_v): status_labels.library.text="作品を渡しました。"); dialog.queue_free())
 	dialog.popup_centered()
 
 func save_selected() -> void:
-	if app.current.is_empty(): status.text="ワールドでアイテムを選択してください。"; return
+	if app.current.is_empty(): status_labels.library.text="ワールドでアイテムを選択してください。"; return
 	var object: Dictionary=app.current.duplicate(true)
 	var values := {"target":app.address_of(object),"name":str(app.fields.name.value)}
 	save_button.disabled=true
 	var thumbnail: PackedByteArray=await capture_item(object)
 	if not thumbnail.is_empty(): values.thumbnail="data:image/png;base64,"+Marshalls.raw_to_base64(thumbnail)
-	call_service("save_item",values,func(_v): library_offset=0; refresh_library(); save_button.disabled=false; status.text="アイテムを保存しました。",func(_message): save_button.disabled=false)
+	call_service("save_item",values,func(_v): library_offset=0; refresh_library(); save_button.disabled=false; status_labels.library.text="アイテムを保存しました。",func(_message): save_button.disabled=false)
 
 func capture_item(object: Dictionary) -> PackedByteArray:
 	if DisplayServer.get_name()=="headless": return PackedByteArray()

@@ -189,7 +189,7 @@ func release_to_cursor() -> void:
 	if not captured:
 		if ring.visible: ring.hide()
 		elif menu.visible: menu.hide()
-		elif workspace_open(): workspace.shade.hide()
+		elif workspace_open(): workspace.close_active_page()
 	app.get_viewport().gui_release_focus()
 	app.world_panels.clear_focus()
 	app.release_cursor()
@@ -207,7 +207,6 @@ func toggle_menu() -> void:
 	if menu.visible: close_menu()
 	else:
 		ring.hide()
-		if workspace_open(): workspace.shade.hide()
 		app.get_viewport().gui_release_focus()
 		app.world_panels.clear_focus()
 		app.release_cursor()
@@ -286,6 +285,6 @@ func _process(_delta: float) -> void:
 	home_button.visible=workspace != null and workspace.enabled
 	for key in ["sessions","library","workshop"]:
 		dock_buttons[key].disabled=not home_button.visible
-		var active: bool=workspace_open() and workspace.page==key
+		var active: bool=workspace_open() and workspace.windows[key].visible
 		dock_buttons[key].add_theme_color_override("font_color",ACCENT if active else TEXT)
 	dock_buttons.settings.add_theme_color_override("font_color",ACCENT if menu.visible else TEXT)

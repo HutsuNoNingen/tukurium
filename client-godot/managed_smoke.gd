@@ -75,6 +75,8 @@ func run() -> void:
 	panel.name_input.text="UI Visitor %s" % Time.get_unix_time_from_system()
 	panel.login()
 	if not await wait_for(func(): return panel.current_user.get("name","")!=owner_name,"Switching HN failed"): return
+	for label in panel.library.find_children("*", "Label", true, false):
+		if label.text=="みんなのキューブ": push_error("Previous HN's library remains visible after switching"); quit(1); return
 	panel.mine_only.button_pressed=false
 	panel.select_item(publication,"workshop")
 	if not await wait_for(func(): return has_button(panel,"ライブラリに保存"),"Public item details failed"): return

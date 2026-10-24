@@ -82,21 +82,36 @@ func run() -> void:
 		workspace.enabled=true
 		await until(func(): return not scene.hud.dock_buttons.sessions.disabled,"Session dock stayed disabled")
 		click(scene.hud.dock_buttons.sessions.get_global_rect().get_center())
-		if not workspace.shade.visible or workspace.page!="sessions" or not scene.gameplay_keyboard_blocked(): push_error("Session window was not opened"); quit(1); return
-		if not scene.hud.room_label.is_visible_in_tree() or workspace.floating_window.size.x>=root.size.x: push_error("Top bar or floating window layout missing"); quit(1); return
+		if not workspace.shade.visible or not workspace.windows.sessions.visible or not scene.gameplay_keyboard_blocked(): push_error("Session window was not opened"); quit(1); return
+		if not scene.hud.room_label.is_visible_in_tree() or workspace.windows.sessions.size.x>=root.size.x: push_error("Top bar or floating window layout missing"); quit(1); return
+		for control in workspace.windows.sessions.panel.find_children("*", "Button", true, false):
+			if control.text in ["マイライブラリ","ワークショップ"]: push_error("Old sidebar navigation remains in session window"); quit(1); return
 		await capture("-sessions")
-		var before: Vector2=workspace.floating_window.position
+		var before: Vector2=workspace.windows.sessions.position
 		drag(workspace.heading.get_global_rect().get_center(),workspace.heading.get_global_rect().get_center()+Vector2(38,24))
-		if workspace.floating_window.position.distance_to(before)<10: push_error("Session window did not drag"); quit(1); return
-		var old_size: Vector2=workspace.floating_window.size
-		drag(workspace.floating_window.grip.get_global_rect().get_center(),workspace.floating_window.grip.get_global_rect().get_center()+Vector2(-40,-32))
-		if workspace.floating_window.size.distance_to(old_size)<10: push_error("Session window did not resize"); quit(1); return
+		if workspace.windows.sessions.position.distance_to(before)<10: push_error("Session window did not drag"); quit(1); return
+		var old_size: Vector2=workspace.windows.sessions.size
+		drag(workspace.windows.sessions.grip.get_global_rect().get_center(),workspace.windows.sessions.grip.get_global_rect().get_center()+Vector2(-40,-32))
+		if workspace.windows.sessions.size.distance_to(old_size)<10: push_error("Session window did not resize"); quit(1); return
+		var resized_size: Vector2=workspace.windows.sessions.size
 		click(scene.hud.dock_buttons.library.get_global_rect().get_center())
-		if workspace.page!="library" or not workspace.shade.visible: push_error("Inventory dock did not open library"); quit(1); return
+		if not workspace.windows.library.visible or not workspace.windows.sessions.visible or workspace.windows.library==workspace.windows.sessions: push_error("Inventory did not open its own window"); quit(1); return
+		if workspace.windows.sessions.size.distance_to(resized_size)>1: push_error("Opening inventory changed the session window size"); quit(1); return
+		await capture("-library")
+		workspace.windows.sessions.position=Vector2(40,100)
+		click(Vector2(90,125))
+		if workspace.page!="sessions" or workspace.shade.get_child(workspace.shade.get_child_count()-1)!=workspace.windows.sessions: push_error("Clicking a background window did not focus it"); quit(1); return
+		click(Vector2(1000,125))
+		if workspace.page!="library": push_error("Inventory window did not regain focus"); quit(1); return
 		click(scene.hud.dock_buttons.workshop.get_global_rect().get_center())
-		if workspace.page!="workshop" or not workspace.shade.visible: push_error("Workshop dock did not open workshop"); quit(1); return
+		if not workspace.windows.workshop.visible or not workspace.windows.library.visible or workspace.detail_boxes.library==workspace.detail_boxes.workshop: push_error("Workshop did not open its own window and detail view"); quit(1); return
+		await capture("-workshop")
+		click(scene.hud.dock_buttons.workshop.get_global_rect().get_center())
+		if workspace.windows.workshop.visible or not workspace.windows.library.visible: push_error("Workshop dock closed the wrong window"); quit(1); return
 		key(KEY_ESCAPE)
-		if workspace.shade.visible or scene.fps_active: push_error("Esc did not close floating window and release cursor"); quit(1); return
+		if workspace.windows.library.visible or not workspace.windows.sessions.visible: push_error("Esc did not close the front window"); quit(1); return
+		key(KEY_ESCAPE)
+		if workspace.shade.visible or scene.fps_active: push_error("Esc did not close the last window and release cursor"); quit(1); return
 		workspace.enabled=false
 		scene.hud.resume_view()
 	click(root.size*0.5,MOUSE_BUTTON_MIDDLE)
@@ -115,7 +130,7 @@ func run() -> void:
 	click(root.size*0.5,MOUSE_BUTTON_MIDDLE)
 	key(KEY_ESCAPE)
 	if scene.hud.ring.visible or scene.hud.menu.visible: push_error("Esc did not cancel ring"); quit(1); return
-	print("HUD SMOKE PASS: cursor-first FPS, top bar, dock, floating window drag/resize, Esc, blocked movement, status and ring 2D/3D")
+	print("HUD SMOKE PASS: cursor-first FPS, top bar, separate windows, drag/resize, focus, Esc, blocked movement and ring 2D/3D")
 	scene.queue_free()
 	await process_frame
 	await process_frame
