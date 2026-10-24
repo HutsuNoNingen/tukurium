@@ -288,6 +288,8 @@ pub struct StructuralCommand {
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum StructuralOperation {
     CreateSlot { parent: Option<Address>, position: [f64; 3] },
+    CreateText { position: [f64; 3] },
+    CreateChildText { parent: Address },
     AddComponent { target: Address, type_id: String, expected_revision: String, values: Value },
     RemoveComponent { target: Address, type_id: String, expected_revision: String },
     CreateChild { parent: Address },

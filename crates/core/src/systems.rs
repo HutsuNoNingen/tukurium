@@ -11,6 +11,41 @@ fn image_size(visual: &kokoverse_protocol::Visual) -> usize {
     }
 }
 
+fn create_slot_object(
+    snapshot: &kokoverse_protocol::Snapshot,
+    parent: Option<Address>,
+    position: [f64; 3],
+    with_text: bool,
+) -> Result<kokoverse_protocol::ObjectView, String> {
+    validate_value("position", &serde_json::json!(position))?;
+    let mut object = new_object(if with_text { "Text" } else { "Slot" }.into(), position, [1.0; 4]);
+    crate::hierarchy::validate_parent(snapshot, &object.address, &parent)?;
+    if let Some(parent_object) = parent.as_ref().and_then(|p| snapshot.objects.iter().find(|o| &o.address == p)) {
+        object.world_rotation = parent_object.world_rotation;
+        object.world_scale = parent_object.world_scale;
+    }
+    let local = crate::hierarchy::relative(
+        crate::hierarchy::global_of(&object),
+        crate::hierarchy::parent_transform(snapshot, &parent)?,
+    );
+    validate_value("position", &serde_json::json!(local.translation))?;
+    object.renderer = None;
+    object.visual = kokoverse_protocol::Visual::None;
+    object.collider = None;
+    object.parent = parent;
+    object.fields.retain(|f| f.id != "color");
+    object.fields.iter_mut().find(|f| f.id == "position").unwrap().value = serde_json::json!(local.translation);
+    crate::sync_object_fields(&mut object);
+    if with_text {
+        crate::replication::REGISTRY.change_component(
+            &mut object,
+            "WorldText",
+            Some(&serde_json::json!({"world_text": "Text", "world_text_color": [1.0, 1.0, 1.0, 1.0]})),
+        )?;
+    }
+    Ok(object)
+}
+
 fn prepare_component_change(
     snapshot: &kokoverse_protocol::Snapshot,
     target: &Address,
@@ -169,23 +204,20 @@ pub(crate) fn validate_commands(
                             prepare_component_change(&snapshot.0, &target, &type_id, &expected_revision, None),
                         StructuralOperation::CreateSlot { parent, position } => {
                             if slots.iter().count() >= MAX_OBJECTS { return Err("Object limit reached (128)".into()); }
-                            validate_value("position", &serde_json::json!(position))?;
-                            let mut object = new_object("Slot".into(), position, [1.0; 4]);
-                            crate::hierarchy::validate_parent(&snapshot.0, &object.address, &parent)?;
-                            if let Some(parent_object) = parent.as_ref().and_then(|p| snapshot.0.objects.iter().find(|o| &o.address == p)) {
-                                object.world_rotation = parent_object.world_rotation;
-                                object.world_scale = parent_object.world_scale;
-                            }
-                            let local = crate::hierarchy::relative(crate::hierarchy::global_of(&object), crate::hierarchy::parent_transform(&snapshot.0, &parent)?);
-                            validate_value("position", &serde_json::json!(local.translation))?;
-                            object.renderer = None;
-                            object.visual = kokoverse_protocol::Visual::None;
-                            object.collider = None;
-                            object.parent = parent;
-                            object.fields.retain(|f| f.id != "color");
-                            object.fields.iter_mut().find(|f| f.id == "position").unwrap().value = serde_json::json!(local.translation);
-                            crate::sync_object_fields(&mut object);
-                            Ok(Mutation::Insert(Box::new(object)))
+                            Ok(Mutation::Insert(Box::new(create_slot_object(&snapshot.0, parent, position, false)?)))
+                        }
+                        StructuralOperation::CreateText { position } => {
+                            if slots.iter().count() >= MAX_OBJECTS { return Err("Object limit reached (128)".into()); }
+                            Ok(Mutation::Insert(Box::new(create_slot_object(&snapshot.0, None, position, true)?)))
+                        }
+                        StructuralOperation::CreateChildText { parent } => {
+                            if slots.iter().count() >= MAX_OBJECTS { return Err("Object limit reached (128)".into()); }
+                            let parent_object = snapshot.0.objects.iter().find(|o| o.address == parent).ok_or("Parent no longer exists")?;
+                            let global = crate::hierarchy::compose(
+                                crate::hierarchy::global_of(parent_object),
+                                LocalTransform { translation: [0.0, 0.0, 0.8], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3] },
+                            );
+                            Ok(Mutation::Insert(Box::new(create_slot_object(&snapshot.0, Some(parent), global.translation, true)?)))
                         }
                         StructuralOperation::CreateChild { parent } => {
                             if slots.iter().count() >= MAX_OBJECTS { return Err("Object limit reached (128)".into()); }

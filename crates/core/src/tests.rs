@@ -62,6 +62,37 @@ fn empty_slots_replicate_duplicate_and_restore_without_mesh_renderers() {
 }
 
 #[test]
+fn text_creation_is_atomic_for_world_and_child_slots() {
+    let mut host = WorldModel::new();
+    let mut guest = WorldModel::new();
+    guest.restore(host.snapshot()).unwrap();
+    let parent = host.snapshot().objects[0].address.clone();
+    let root = run(&mut host, structure(StructuralOperation::CreateText { position: [1.0, 1.6, 2.0] }));
+    let root_id = root.selected.unwrap();
+    guest.apply_commit(root.result.unwrap()).unwrap();
+    let child = run(&mut host, structure(StructuralOperation::CreateChildText { parent: parent.clone() }));
+    let child_id = child.selected.unwrap();
+    guest.apply_commit(child.result.unwrap()).unwrap();
+    assert_eq!(guest.snapshot(), host.snapshot());
+    let snapshot = host.snapshot();
+    let root_text = snapshot.objects.iter().find(|o| o.address == root_id).unwrap();
+    assert!(root_text.renderer.is_none());
+    assert_eq!(root_text.world_position, [1.0, 1.6, 2.0]);
+    assert_eq!(root_text.world_text.as_ref().unwrap().text, "Text");
+    assert!(root_text.fields.iter().any(|f| f.id == "world_text"));
+    let child_text = snapshot.objects.iter().find(|o| o.address == child_id).unwrap();
+    assert_eq!(child_text.parent, Some(parent));
+    assert_eq!(child_text.fields.iter().find(|f| f.id == "position").unwrap().value, json!([0.0, 0.0, 0.8]));
+    assert!(child_text.renderer.is_none());
+    assert_eq!(child_text.world_text.as_ref().unwrap().text, "Text");
+    let mut restored = WorldModel::new();
+    restored.restore(snapshot.clone()).unwrap();
+    assert_eq!(restored.snapshot(), snapshot);
+    let wire = replication::REGISTRY.encode_world(&snapshot);
+    assert_eq!(replication::REGISTRY.decode_world(wire).unwrap(), snapshot);
+}
+
+#[test]
 fn renderer_component_attaches_and_detaches_with_revision_and_schema_checks() {
     let mut host = WorldModel::new();
     let mut guest = WorldModel::new();
