@@ -12,15 +12,16 @@ var root := Control.new()
 var ring = RING.new()
 var menu = DesktopWindow.new()
 var workspace
+var dock_holder: CenterContainer
 var dock: HBoxContainer
 var dock_buttons := {}
+var dock_tween: Tween
+var dock_open := false
 var room_label: Label
 var sync_label: Label
 var fps_label: Label
 var engine_label: Label
-var profile_button: Button
 var mode_button: Button
-var home_button: Button
 var ring_target := ""
 var next_status := 0
 
@@ -64,6 +65,7 @@ func setup(owner) -> void:
 	theme.default_font_size = 15
 	root.theme = theme
 	var bar := PanelContainer.new()
+	bar.name="TopBar"
 	bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	bar.offset_left=16; bar.offset_right=-16; bar.offset_top=14; bar.offset_bottom=66
 	bar.add_theme_stylebox_override("panel",style(Color("101b25f5"),8))
@@ -71,8 +73,6 @@ func setup(owner) -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation",12)
 	bar.add_child(row)
-	profile_button=button(row,"ユーザー",toggle_menu)
-	profile_button.tooltip_text="ユーザー設定"
 	row.add_child(text("◇  kokoverse",21))
 	row.add_child(VSeparator.new())
 	room_label=text("Workshop",14,MUTED)
@@ -88,7 +88,6 @@ func setup(owner) -> void:
 	row.add_child(fps_label)
 	mode_button=button(row,"FPS",cycle_view)
 	mode_button.tooltip_text="視点切り替え · F5"
-	home_button=button(row,"セッション",open_home)
 	build_menu()
 	build_dock()
 	root.add_child(ring)
@@ -143,10 +142,12 @@ func build_menu() -> void:
 func build_dock() -> void:
 	var holder := CenterContainer.new()
 	holder.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	holder.offset_top=-86
-	holder.offset_bottom=-10
+	holder.offset_top=18
+	holder.offset_bottom=94
 	holder.mouse_filter=Control.MOUSE_FILTER_PASS
+	holder.modulate.a=0.0
 	root.add_child(holder)
+	dock_holder=holder
 	dock=HBoxContainer.new()
 	dock.add_theme_constant_override("separation",10)
 	holder.add_child(dock)
@@ -166,6 +167,28 @@ func build_dock() -> void:
 		tile.pressed.connect(func(): open_dock(key))
 		dock.add_child(tile)
 		dock_buttons[key]=tile
+	holder.hide()
+
+func set_dock_open(open: bool, animate: bool = true) -> void:
+	if dock_open==open: return
+	dock_open=open
+	if dock_tween and dock_tween.is_running(): dock_tween.kill()
+	if open: dock_holder.show()
+	var top: float=-86.0 if open else 18.0
+	var bottom: float=-10.0 if open else 94.0
+	var alpha: float=1.0 if open else 0.0
+	if not animate:
+		dock_holder.offset_top=top
+		dock_holder.offset_bottom=bottom
+		dock_holder.modulate.a=alpha
+		if not open: dock_holder.hide()
+		return
+	dock_tween=create_tween().set_parallel(true)
+	dock_tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	dock_tween.tween_property(dock_holder,"offset_top",top,0.28)
+	dock_tween.tween_property(dock_holder,"offset_bottom",bottom,0.28)
+	dock_tween.tween_property(dock_holder,"modulate:a",alpha,0.22)
+	dock_tween.finished.connect(func(): if not dock_open: dock_holder.hide())
 
 func open_dock(key: String) -> void:
 	if key=="settings":
@@ -186,19 +209,22 @@ func open_creation() -> void:
 
 func release_to_cursor() -> void:
 	var captured: bool=Input.mouse_mode==Input.MOUSE_MODE_CAPTURED or app.fps_active
+	var closed_overlay := false
 	if not captured:
-		if ring.visible: ring.hide()
-		elif menu.visible: menu.hide()
-		elif workspace_open(): workspace.close_active_page()
+		if ring.visible: ring.hide(); closed_overlay=true
+		elif menu.visible: menu.hide(); closed_overlay=true
+		elif workspace_open(): workspace.close_active_page(); closed_overlay=true
 	app.get_viewport().gui_release_focus()
 	app.world_panels.clear_focus()
 	app.release_cursor()
+	set_dock_open(true if captured or closed_overlay else not dock_open)
 
 func resume_view() -> void:
 	if blocking() or app.world_panels.has_window_focus() or not app.get_window().has_focus(): return
 	if app.avatar_camera and app.first_person:
 		app.fps_active=true
 		Input.mouse_mode=Input.MOUSE_MODE_CAPTURED
+		set_dock_open(false)
 
 func close_menu() -> void:
 	menu.hide()
@@ -211,12 +237,6 @@ func toggle_menu() -> void:
 		app.world_panels.clear_focus()
 		app.release_cursor()
 		menu.show()
-
-func open_home() -> void:
-	if workspace == null or not workspace.enabled: return
-	menu.hide()
-	ring.hide()
-	workspace.open_page("sessions")
 
 func close_ring() -> void:
 	ring.hide()
@@ -238,6 +258,7 @@ func show_ring(position: Vector2) -> void:
 	var name_text: String=str(app.world_panels.field_data(ring_target,"name").get("value","World"))
 	app.world_panels.clear_focus()
 	app.release_cursor()
+	set_dock_open(false)
 	ring.open(screen,name_text,app.editable)
 
 func choose_action(index: int) -> void:
@@ -266,6 +287,10 @@ func handle_input(event: InputEvent) -> bool:
 	return false
 
 func _process(_delta: float) -> void:
+	if app.fps_active or Input.mouse_mode==Input.MOUSE_MODE_CAPTURED:
+		if dock_open: set_dock_open(false)
+	elif (menu.visible or workspace_open()) and not dock_open:
+		set_dock_open(true)
 	if Time.get_ticks_msec()<next_status: return
 	next_status=Time.get_ticks_msec()+200
 	fps_label.text="%d FPS" % Engine.get_frames_per_second()
@@ -282,9 +307,9 @@ func _process(_delta: float) -> void:
 	engine_label.text="Engine %d ms" % roundi(app.clock_best_rtt*1000) if app.clock_ready else ""
 	engine_label.tooltip_text="ローカルEngineとの往復時間"
 	room_label.text=str(workspace.current_session.get("name",app.session)) if workspace != null else app.session
-	home_button.visible=workspace != null and workspace.enabled
+	var services_available: bool=workspace != null and workspace.enabled
 	for key in ["sessions","library","workshop"]:
-		dock_buttons[key].disabled=not home_button.visible
+		dock_buttons[key].disabled=not services_available
 		var active: bool=workspace_open() and workspace.windows[key].visible
 		dock_buttons[key].add_theme_color_override("font_color",ACCENT if active else TEXT)
 	dock_buttons.settings.add_theme_color_override("font_color",ACCENT if menu.visible else TEXT)

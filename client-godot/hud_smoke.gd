@@ -50,8 +50,12 @@ func run() -> void:
 	if not await until(func(): return scene.editable and scene.player_initialized,"Scene not ready"): quit(1); return
 	if not scene.first_person or scene.view_mode.selected!=1: push_error("Default view is not FPS"); quit(1); return
 	if scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE: push_error("Startup captured the mouse"); quit(1); return
+	if scene.hud.dock_open or scene.hud.dock_holder.visible: push_error("Dock appeared before Esc"); quit(1); return
+	for top_button in scene.hud.root.get_node("TopBar").find_children("*", "Button", true, false):
+		if top_button.text in ["ユーザー","セッション"]: push_error("Old top bar entry remains"); quit(1); return
 	click(root.size*0.5)
 	if not scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_CAPTURED: push_error("Clicking the world did not start FPS controls"); quit(1); return
+	if scene.hud.dock_open or scene.hud.dock_holder.visible: push_error("Dock appeared during FPS controls"); quit(1); return
 	if scene.find_child("LegacyWorldSidebar",true,false).is_visible_in_tree(): push_error("Old world sidebar is visible"); quit(1); return
 	if not await until(func(): return scene.hud.sync_label.text.contains("同期済み") and scene.hud.fps_label.text.contains("FPS"),"HUD status missing"): quit(1); return
 	await create_timer(1.1).timeout
@@ -62,6 +66,15 @@ func run() -> void:
 	if not scene.first_person: push_error("F5 did not cycle back to FPS"); quit(1); return
 	key(KEY_ESCAPE)
 	if scene.hud.menu.visible or scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE: push_error("Esc did not release cursor without opening menu"); quit(1); return
+	if not scene.hud.dock_open or not scene.hud.dock_holder.visible: push_error("Esc did not reveal the dock"); quit(1); return
+	await create_timer(0.33).timeout
+	if absf(scene.hud.dock_holder.offset_top+86.0)>1.0: push_error("Dock did not slide into place"); quit(1); return
+	key(KEY_ESCAPE)
+	await create_timer(0.33).timeout
+	if scene.hud.dock_open or scene.hud.dock_holder.visible: push_error("Second Esc did not hide the dock"); quit(1); return
+	key(KEY_ESCAPE)
+	await create_timer(0.33).timeout
+	await capture("-dock")
 	if not scene.hud.dock_buttons.has("sessions") or not scene.hud.dock_buttons.has("library") or not scene.hud.dock_buttons.has("workshop") or not scene.hud.dock_buttons.has("settings"):
 		push_error("Separate dock icons missing"); quit(1); return
 	click(scene.hud.dock_buttons.settings.get_global_rect().get_center())
@@ -113,7 +126,8 @@ func run() -> void:
 		key(KEY_ESCAPE)
 		if workspace.shade.visible or scene.fps_active: push_error("Esc did not close the last window and release cursor"); quit(1); return
 		workspace.enabled=false
-		scene.hud.resume_view()
+		click(root.size*0.5)
+		if not scene.fps_active or scene.hud.dock_open: push_error("World click did not resume FPS and hide dock"); quit(1); return
 	click(root.size*0.5,MOUSE_BUTTON_MIDDLE)
 	if not scene.hud.ring.visible or not scene.gameplay_keyboard_blocked(): push_error("Middle click did not open ring"); quit(1); return
 	await capture("-ring")

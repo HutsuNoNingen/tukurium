@@ -249,3 +249,10 @@ Godotのインスペクタから `WorldText` の白色 `[1.0,1.0,1.0,1.0]` を�
 
 - 再現・確認：[hud-integration.mjs](../tests/hud-integration.mjs) の `--rendered` でドラッグ量、サイズ変更、背面ウィンドウのフォーカス、各ウィンドウの独立性を確認する。
 - コード：[desktop_window.gd](../client-godot/desktop_window.gd)、[service_panel.gd](../client-godot/service_panel.gd)。確認日：2026-10-24。
+
+## FPSへ戻る入力とドックの退場を同時にする
+
+ワールドのクリックでFPSのマウス捕捉が始まっても、HUDの次フレームの監視だけでドックを閉じると、そのフレーム中はドックが開いた状態のまま残る。カーソル捕捉を確定する入力経路で、同時にドックの退場を開始する。Escでカーソルを解放したときは逆にドックを表示し、個人ウィンドウは勝手に閉じない。
+
+- 再現・確認：[hud-integration.mjs](../tests/hud-integration.mjs) の `--rendered` でEscによるスライド表示、再度Escによる収納、ワールドクリック直後のFPS捕捉と収納を確認する。
+- コード：[main.gd](../client-godot/main.gd)、[world_hud.gd](../client-godot/world_hud.gd)。確認日：2026-10-24。

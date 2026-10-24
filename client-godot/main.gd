@@ -1395,6 +1395,7 @@ func set_view_mode(mode: int, capture: bool = true) -> void:
 	first_person = mode == 1
 	fps_active = first_person and capture
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if fps_active else Input.MOUSE_MODE_VISIBLE
+	if fps_active: hud.set_dock_open(false)
 	view_mode.select(mode)
 	view_mode.release_focus()
 
@@ -1478,6 +1479,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			if event.pressed:
 				fps_active = true
 				Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+				hud.set_dock_open(false)
 				begin_hand_grab()
 			else: finish_hand_grab()
 			get_viewport().set_input_as_handled()
@@ -1500,6 +1502,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT and not fps_active:
 			fps_active = true
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+			hud.set_dock_open(false)
 			get_viewport().set_input_as_handled()
 			return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
