@@ -178,6 +178,7 @@ mod tests {
                 expected_position_revision: "0".into(),
                 expected_rotation_revision: "0".into(),
                 expected_scale_revision: "0".into(),
+                space: kokoverse_protocol::PositionSpace::World,
             },
         };
         assert!(sessions.check_command("bob", &transform).is_err());

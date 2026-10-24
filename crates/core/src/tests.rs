@@ -247,7 +247,7 @@ fn creation_panels_use_shared_surface_components_and_survive_restore() {
 
 #[test]
 fn transform_commit_is_atomic_and_replicates_all_fields() {
-    use kokoverse_protocol::TransformCommand;
+    use kokoverse_protocol::{PositionSpace, TransformCommand};
     let mut host = WorldModel::new();
     let mut guest = WorldModel::new();
     guest.restore(host.snapshot()).unwrap();
@@ -258,6 +258,7 @@ fn transform_commit_is_atomic_and_replicates_all_fields() {
         expected_position_revision: "0".into(),
         expected_rotation_revision: "0".into(),
         expected_scale_revision: "0".into(),
+        space: PositionSpace::World,
         position: [1.0, 2.0, 3.0],
         rotation: glam::DQuat::from_rotation_y(0.8).to_array(),
         scale: [1.5, 2.0, 0.5],

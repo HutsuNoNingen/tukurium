@@ -247,7 +247,10 @@ pub(crate) fn align(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use crate::WorldModel;
-    use kokoverse_protocol::{AvatarPose, Edit, ParticipantView, PlayerInput, WorldCommand};
+    use kokoverse_protocol::{
+        AvatarPose, Edit, ParticipantView, PlayerInput, PositionSpace, ScriptAction, ScriptCommand,
+        StructuralCommand, StructuralOperation, TransformCommand, WorldCommand,
+    };
     use std::time::Duration;
     fn setup() -> WorldModel {
         let mut m = WorldModel::new();
@@ -300,7 +303,8 @@ mod tests {
             m.grab_view().unwrap().distance,
             old_distance + 0.5 * old_distance.max(1.0)
         );
-        let released = m.release_grab().unwrap();
+        let (released, local) = m.release_grab().unwrap();
+        assert_eq!(local.translation, released.position);
         assert!(m.release_grab().is_none());
         m.enqueue(WorldCommand::Edit {
             edit: Edit {
@@ -317,6 +321,99 @@ mod tests {
         m.advance(Duration::from_millis(17));
         assert_eq!(m.snapshot().objects[0].world_position, released.position);
         assert!(m.grab_view().is_none());
+    }
+    #[test]
+    fn releasing_child_of_rotator_keeps_its_visible_position() {
+        use glam::DVec3;
+
+        let mut m = setup();
+        let root = m.snapshot().objects[0].address.clone();
+        m.enqueue(WorldCommand::Structure {
+            command: StructuralCommand {
+                command_id: "child".into(),
+                operation: StructuralOperation::CreateChild {
+                    parent: root.clone(),
+                },
+            },
+        })
+        .unwrap();
+        let child = m.tick().remove(0).selected.unwrap();
+        let object = m
+            .snapshot()
+            .objects
+            .into_iter()
+            .find(|o| o.address == child)
+            .unwrap();
+        let position = object.fields.iter().find(|f| f.id == "position").unwrap();
+        m.enqueue(WorldCommand::Edit {
+            edit: Edit {
+                command_id: "place-child".into(),
+                target: crate::replication::REGISTRY
+                    .field_address(&child, "position")
+                    .unwrap(),
+                field_id: "position".into(),
+                expected_revision: position.revision.clone(),
+                value: serde_json::json!([0.0, 0.0, 2.0]),
+            },
+        })
+        .unwrap();
+        m.tick()[0].result.as_ref().unwrap();
+        m.advance(Duration::from_millis(17));
+        assert_eq!(m.interaction_ray().unwrap().target, Some(child.clone()));
+        m.begin_grab().unwrap();
+        m.enqueue(WorldCommand::Script {
+            command: ScriptCommand {
+                command_id: "rotator".into(),
+                target: root.clone(),
+                action: ScriptAction::Attach {
+                    source: crate::scripting::ROTATOR.into(),
+                },
+            },
+        })
+        .unwrap();
+        m.tick()[0].result.as_ref().unwrap();
+        m.set_media_time(102.0);
+        m.advance(Duration::from_millis(17));
+        m.set_player_input(PlayerInput {
+            active: true,
+            face_view: true,
+            yaw: 0.2,
+            ..Default::default()
+        })
+        .unwrap();
+        m.advance(Duration::from_millis(17));
+        let (preview, local) = m.release_grab().unwrap();
+        assert_eq!(preview.target, child);
+        assert!(
+            (DVec3::from_array(local.translation) - DVec3::from_array(preview.position)).length()
+                > 0.2
+        );
+        m.enqueue(WorldCommand::Transform {
+            command: TransformCommand {
+                command_id: "release".into(),
+                target: child.clone(),
+                expected_position_revision: preview.expected_revision,
+                expected_rotation_revision: preview.expected_rotation_revision.unwrap(),
+                expected_scale_revision: preview.expected_scale_revision.unwrap(),
+                space: PositionSpace::Parent,
+                position: local.translation,
+                rotation: local.rotation,
+                scale: local.scale,
+            },
+        })
+        .unwrap();
+        m.tick()[0].result.as_ref().unwrap();
+        m.advance(Duration::from_millis(17));
+        let shown = m
+            .drive_frame()
+            .transforms
+            .into_iter()
+            .find(|t| t.target == child)
+            .unwrap();
+        assert!(
+            (DVec3::from_array(shown.position) - DVec3::from_array(preview.position)).length()
+                < 0.1
+        );
     }
     #[test]
     fn cancel_and_out_of_range_grab_leave_world_unchanged() {

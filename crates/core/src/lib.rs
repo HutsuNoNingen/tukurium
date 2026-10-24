@@ -302,17 +302,34 @@ impl WorldModel {
         }
     }
 
-    pub fn release_grab(&mut self) -> Option<kokoverse_protocol::ObjectPreview> {
+    pub fn release_grab(&mut self) -> Option<(kokoverse_protocol::ObjectPreview, LocalTransform)> {
         let mut update = Schedule::default();
         update.add_systems(grabbing::update_grab);
         update.run(&mut self.world);
-        let mut grab = self.world.resource_mut::<grabbing::GrabState>();
-        let held = grab.0.as_mut()?;
-        if held.view.released {
-            return None;
-        }
-        held.view.released = true;
-        Some(held.view.preview.clone())
+        let preview = {
+            let grab = self.world.resource::<grabbing::GrabState>();
+            let held = grab.0.as_ref()?;
+            if held.view.released {
+                return None;
+            }
+            held.view.preview.clone()
+        };
+        let local = hierarchy::local_from_evaluated_parent(
+            &mut self.world,
+            &preview.target,
+            GlobalTransform {
+                translation: preview.position,
+                rotation: preview.rotation?,
+                scale: preview.scale?,
+            },
+        )?;
+        self.world
+            .resource_mut::<grabbing::GrabState>()
+            .0
+            .as_mut()?
+            .view
+            .released = true;
+        Some((preview, local))
     }
 
     pub fn cancel_grab(&mut self) {

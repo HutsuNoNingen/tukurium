@@ -281,6 +281,8 @@ pub struct TransformCommand {
     pub expected_position_revision: String,
     pub expected_rotation_revision: String,
     pub expected_scale_revision: String,
+    #[serde(default)]
+    pub space: PositionSpace,
     pub position: [f64; 3],
     pub rotation: [f64; 4],
     pub scale: [f64; 3],

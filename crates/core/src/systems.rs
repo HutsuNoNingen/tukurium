@@ -185,9 +185,12 @@ pub(crate) fn validate_commands(
                         }
                     }
                     let object = snapshot.0.objects.iter().find(|o| o.address == command.target).unwrap();
-                    let local = crate::hierarchy::relative(GlobalTransform{translation:command.position,rotation:command.rotation,scale:command.scale},crate::hierarchy::parent_transform(&snapshot.0,&object.parent)?);
+                    let local = match command.space {
+                        PositionSpace::World => crate::hierarchy::relative(GlobalTransform{translation:command.position,rotation:command.rotation,scale:command.scale},crate::hierarchy::parent_transform(&snapshot.0,&object.parent)?),
+                        PositionSpace::Parent => LocalTransform{translation:command.position,rotation:command.rotation,scale:command.scale},
+                    };
                     for (id,value) in [("position",serde_json::json!(local.translation)),("rotation",serde_json::json!(local.rotation)),("scale",serde_json::json!(local.scale))] { validate_value(id,&value)?; }
-                    Ok(Mutation::SetTransform{entity,position:command.position,rotation:command.rotation,scale:command.scale})
+                    Ok(Mutation::SetTransform{entity,space:command.space,position:command.position,rotation:command.rotation,scale:command.scale})
                 }
                 WorldCommand::Playback { command } => {
                     use kokoverse_protocol::PlaybackAction;
@@ -401,11 +404,15 @@ pub(crate) fn apply_commands(world: &mut World) {
                 }
                 Mutation::SetTransform {
                     entity,
+                    space,
                     position,
                     rotation,
                     scale,
                 } => {
-                    let local = crate::hierarchy::world_to_local(world, entity, GlobalTransform { translation: position, rotation, scale });
+                    let local = match space {
+                        PositionSpace::World => crate::hierarchy::world_to_local(world, entity, GlobalTransform { translation: position, rotation, scale }),
+                        PositionSpace::Parent => LocalTransform { translation: position, rotation, scale },
+                    };
                     *world.get_mut::<LocalTransform>(entity).unwrap() = local;
                     for id in ["position", "rotation", "scale"] {
                         *world

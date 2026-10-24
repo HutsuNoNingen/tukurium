@@ -11,8 +11,8 @@ mod persistence;
 mod previews;
 use kokoverse_core::{WorldModel, replication::REGISTRY};
 use kokoverse_protocol::{
-    AvatarPose, GrabView, InteractionRay, ObjectPreview, ParticipantView, PlayerInput, SessionChatMessage,
-    TransformCommand,
+    AvatarPose, GrabView, InteractionRay, ObjectPreview, ParticipantView, PlayerInput,
+    PositionSpace, SessionChatMessage, TransformCommand,
 };
 use kokoverse_protocol::{
     Envelope, ReplicatedWorld, ReplicationCommit, VERSION, WorldCommand, read_frame, write_frame,
@@ -338,7 +338,7 @@ impl Engine {
             "align" if self.grab_owner == Some(id) => self.model.align_grab(),
             "cancel" if self.grab_owner == Some(id) => self.cancel_grab(),
             "release" if self.grab_owner == Some(id) => {
-                if let Some(p) = self.model.release_grab() {
+                if let Some((p, local)) = self.model.release_grab() {
                     self.sync_grab();
                     self.dispatch_command(
                         id,
@@ -353,9 +353,10 @@ impl Engine {
                                 expected_position_revision: p.expected_revision,
                                 expected_rotation_revision: p.expected_rotation_revision.unwrap(),
                                 expected_scale_revision: p.expected_scale_revision.unwrap(),
-                                position: p.position,
-                                rotation: p.rotation.unwrap(),
-                                scale: p.scale.unwrap(),
+                                space: PositionSpace::Parent,
+                                position: local.translation,
+                                rotation: local.rotation,
+                                scale: local.scale,
                             },
                         },
                         true,

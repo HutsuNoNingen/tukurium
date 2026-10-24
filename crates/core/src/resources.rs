@@ -23,6 +23,7 @@ pub(crate) enum Mutation {
     },
     SetTransform {
         entity: Entity,
+        space: kokoverse_protocol::PositionSpace,
         position: [f64; 3],
         rotation: [f64; 4],
         scale: [f64; 3],

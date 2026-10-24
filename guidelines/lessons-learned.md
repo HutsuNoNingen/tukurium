@@ -101,6 +101,15 @@ GodotのMeshはピック判定やパネル入力との互換性のため同じ�
 - 再現・確認：親を移動・拡縮し、Driveで回転させた状態で子の実ギズモをドラッグする。保存した子のローカル`position`が逆変換結果と一致することを確認する。
 - コード：[main.gd](../client-godot/main.gd)の`gizmo_local_position`。テスト：[hierarchy_smoke.gd](../client-godot/hierarchy_smoke.gd)を[描画付き統合テスト](../tests/hierarchy-integration.mjs)で実行。修正：2026-10-24。
 
+## Rotator付きの親から子を離すと飛ぶ
+
+親がRotatorで回る間、つかみ操作はDrive適用後の子のワールド姿勢をプレビューする。従来の解除コマンドはそのワールド姿勢を送り、ホストがDrive適用前の親姿勢で子のローカル値へ変換していた。確定後に親のDriveが再び合成されるため、子が飛んだように見える。
+
+解除した端末で、表示中の親姿勢を使ってワールド姿勢をローカル値へ変換し、`TransformCommand`の`space: parent`で確定する。ホストはこの値をそのまま共有の基準値へ保存する。従来の`space: world`は、Driveを伴わないワールド座標指定として維持する。つかみ中のプレビューとDrive結果は共有値に書き戻さない。
+
+- 再現・確認：親にRotatorを付け、子をつかんで移動し、回転中に離す。解除前後の表示位置、ホストとゲストの共有値、次のDriveフレームでの表示を確認する。
+- コード：[grabbing.rs](../crates/core/src/grabbing.rs)、[hierarchy.rs](../crates/core/src/hierarchy.rs)、[systems.rs](../crates/core/src/systems.rs)、[main.rs](../crates/engine/src/main.rs)。テスト：`releasing_child_of_rotator_keeps_its_visible_position`、`released_child_uses_driven_parent_pose_for_local_transform`。修正：2026-10-24。
+
 ## Remove Scriptを押すと操作できなくなる
 
 3Dインスペクタ内のScriptエディタが、削除確認にConfirmationDialogを使っていた。

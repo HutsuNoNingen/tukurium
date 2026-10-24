@@ -332,6 +332,31 @@ pub(crate) fn world_to_local(
     relative(global, base)
 }
 
+/// Convert a released world-space grab using the parent pose visible to this client.
+/// A parent Drive or preview is transient and must not be written into shared fields.
+pub(crate) fn local_from_evaluated_parent(
+    world: &mut World,
+    target: &Address,
+    global: GlobalTransform,
+) -> Option<LocalTransform> {
+    let entity = *world.resource::<EntityIndex>().0.get(target)?;
+    let parent = world.get::<Slot>(entity)?.parent.clone();
+    let Some(parent) = parent else {
+        return Some(relative(global, identity()));
+    };
+    let evaluated = evaluate(world)
+        .into_iter()
+        .find(|frame| frame.target == parent)?;
+    Some(relative(
+        global,
+        GlobalTransform {
+            translation: evaluated.position,
+            rotation: evaluated.rotation,
+            scale: evaluated.scale,
+        },
+    ))
+}
+
 #[derive(Component, Clone, Copy)]
 pub(crate) struct EvaluatedGlobal(pub GlobalTransform);
 
@@ -437,7 +462,8 @@ mod tests {
     use super::*;
     use crate::WorldModel;
     use kokoverse_protocol::{
-        Edit, ScriptAction, ScriptCommand, StructuralCommand, StructuralOperation, WorldCommand,
+        Edit, PositionSpace, ScriptAction, ScriptCommand, StructuralCommand, StructuralOperation,
+        TransformCommand, WorldCommand,
     };
     use std::time::Duration;
     fn structure(model: &mut WorldModel, operation: StructuralOperation) -> crate::CommandOutcome {
@@ -536,6 +562,119 @@ mod tests {
         assert!(
             DVec3::from_array(after.world_position)
                 .abs_diff_eq(DVec3::from_array(object.world_position), 1e-8)
+        );
+    }
+    #[test]
+    fn released_child_uses_driven_parent_pose_for_local_transform() {
+        let mut model = WorldModel::new();
+        model.set_media_time(100.0);
+        let root = model.snapshot().objects[0].address.clone();
+        let child = structure(
+            &mut model,
+            StructuralOperation::CreateChild {
+                parent: root.clone(),
+            },
+        )
+        .selected
+        .unwrap();
+        edit(
+            &mut model,
+            &child,
+            "position",
+            serde_json::json!([2.0, 0.0, 0.0]),
+        );
+        edit(
+            &mut model,
+            &root,
+            "scale",
+            serde_json::json!([1.5, 1.0, 0.75]),
+        );
+        model
+            .enqueue(WorldCommand::Script {
+                command: ScriptCommand {
+                    command_id: "rotator".into(),
+                    target: root.clone(),
+                    action: ScriptAction::Attach {
+                        source: crate::scripting::ROTATOR.into(),
+                    },
+                },
+            })
+            .unwrap();
+        model.tick()[0].result.as_ref().unwrap();
+        model.set_media_time(102.0);
+        model.advance(Duration::from_millis(17));
+        let frame = model.drive_frame();
+        let shown = frame
+            .transforms
+            .iter()
+            .find(|pose| pose.target == child)
+            .unwrap();
+        let global = GlobalTransform {
+            translation: (DVec3::from_array(shown.position) + DVec3::new(0.5, 0.0, 0.2)).to_array(),
+            rotation: shown.rotation,
+            scale: shown.scale,
+        };
+        let local = local_from_evaluated_parent(&mut model.world, &child, global).unwrap();
+        let base_local = relative(
+            global,
+            parent_transform(&model.snapshot(), &Some(root.clone())).unwrap(),
+        );
+        assert!(
+            (DVec3::from_array(local.translation) - DVec3::from_array(base_local.translation))
+                .length()
+                > 0.5
+        );
+        let snapshot = model.snapshot();
+        let object = snapshot
+            .objects
+            .iter()
+            .find(|object| object.address == child)
+            .unwrap();
+        let revision = |id: &str| {
+            object
+                .fields
+                .iter()
+                .find(|field| field.id == id)
+                .unwrap()
+                .revision
+                .clone()
+        };
+        let mut guest = WorldModel::new();
+        guest.restore(snapshot.clone()).unwrap();
+        model
+            .enqueue(WorldCommand::Transform {
+                command: TransformCommand {
+                    command_id: "release".into(),
+                    target: child.clone(),
+                    expected_position_revision: revision("position"),
+                    expected_rotation_revision: revision("rotation"),
+                    expected_scale_revision: revision("scale"),
+                    space: PositionSpace::Parent,
+                    position: local.translation,
+                    rotation: local.rotation,
+                    scale: local.scale,
+                },
+            })
+            .unwrap();
+        let commit = model.tick().remove(0).result.unwrap();
+        guest.apply_commit(commit).unwrap();
+        assert_eq!(model.snapshot(), guest.snapshot());
+        let saved = crate::replication::REGISTRY.encode_world(&model.snapshot());
+        let mut restored = WorldModel::new();
+        restored
+            .restore(crate::replication::REGISTRY.decode_world(saved).unwrap())
+            .unwrap();
+        assert_eq!(model.snapshot(), restored.snapshot());
+        model.advance(Duration::from_millis(17));
+        let after = model
+            .drive_frame()
+            .transforms
+            .into_iter()
+            .find(|pose| pose.target == child)
+            .unwrap();
+        assert!(
+            (DVec3::from_array(after.position) - DVec3::from_array(global.translation)).length()
+                < 0.1
         );
     }
     #[test]

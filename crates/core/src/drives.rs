@@ -346,6 +346,7 @@ mod tests {
                     expected_position_revision: "0".into(),
                     expected_rotation_revision: "0".into(),
                     expected_scale_revision: "0".into(),
+                    space: kokoverse_protocol::PositionSpace::World,
                     position: [0.0, 0.75, 0.0],
                     rotation: [0.0, 0.0, 0.0, 1.0],
                     scale: [3.0, 1.0, 1.0],
