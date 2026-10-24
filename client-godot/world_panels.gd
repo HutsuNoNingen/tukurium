@@ -74,8 +74,13 @@ func update_drive_sources(frame: Dictionary) -> void:
 
 func field_driver(object_id: String, field: String) -> Dictionary:
 	var script_id: String = drive_sources.get(object_id, {}).get(field, "")
-	for script in app.objects.get(object_id, {}).get("scripts", []):
-		if script.id == script_id: return script
+	if script_id.is_empty(): return {}
+	for owner_id in app.objects:
+		for script in app.objects[owner_id].get("scripts", []):
+			if script.id == script_id:
+				var driver: Dictionary = script.duplicate(false)
+				driver["owner_id"] = owner_id
+				return driver
 	return {}
 
 func panel_spawn_position(distance: float) -> Vector3:

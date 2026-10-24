@@ -668,6 +668,11 @@ func apply_drive_frame(frame: Dictionary) -> void:
 		if c.size() == 4:
 			render_nodes[id].material_override.albedo_color = Color(c[0], c[1], c[2], c[3])
 			if render_nodes[id].has_node("ImportedModel"): asset_importer.tint_model(render_nodes[id].get_node("ImportedModel"), render_nodes[id].material_override.albedo_color)
+		if render_nodes[id].has_node("WorldText") and objects[id].get("world_text") is Dictionary:
+			var label: Label3D = render_nodes[id].get_node("WorldText")
+			label.text = str(driven_objects.get(id, {}).get("world_text", objects[id].world_text.text))
+			var text_color: Array = driven_objects.get(id, {}).get("world_text_color", objects[id].world_text.color)
+			if text_color.size() == 4: label.modulate = Color(text_color[0], text_color[1], text_color[2], text_color[3])
 	sync_render_hierarchy()
 	var statuses: Array = frame.get("statuses", [])
 	if statuses != local_script_statuses:

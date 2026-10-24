@@ -35,6 +35,8 @@ var drive_labels: Dictionary = {}
 var drive_buttons: Dictionary = {}
 var field_signature := ""
 var requested_script := ""
+var pending_driver_owner := ""
+var pending_driver_script := ""
 var hierarchy
 var input_client_id := ""
 var desktop := false
@@ -361,7 +363,7 @@ func build_field(field: Dictionary) -> void:
 					add_button(row, "Restart", func(): playback("restart"))
 			_:
 				heading(field.label + " · " + JSON.stringify(field.value))
-		if field.id in ["position", "rotation", "scale", "color"]:
+		if field.id in ["position", "rotation", "scale", "color", "world_text", "world_text_color"]:
 			var info := Label.new()
 			info.add_theme_font_size_override("font_size", 18)
 			info.add_theme_color_override("font_color", Color("c5a5ed"))
@@ -374,7 +376,13 @@ func build_field(field: Dictionary) -> void:
 
 func open_driver(field: String) -> void:
 	var driver: Dictionary = manager.field_driver(target_id, field)
-	if not driver.is_empty(): open_script(str(driver.id))
+	if driver.is_empty(): return
+	var owner: String = str(driver.get("owner_id", target_id))
+	if owner == target_id: open_script(str(driver.id))
+	else:
+		pending_driver_owner = owner
+		pending_driver_script = str(driver.id)
+		choose_target(owner)
 
 func open_script(id: String) -> void:
 	finish_all()
@@ -611,6 +619,10 @@ func tick() -> void:
 	if edits.is_empty() and not script_view.busy() and target_change_pending:
 		target_change_pending = false
 		write_view_field("inspector_target", pending_target)
+	if not pending_driver_script.is_empty() and target_id == pending_driver_owner and not target_change_pending:
+		open_script(pending_driver_script)
+		pending_driver_owner = ""
+		pending_driver_script = ""
 	if edits.is_empty() and not script_view.busy() and pending_shared_tab >= 0:
 		var selected := pending_shared_tab
 		pending_shared_tab = -1

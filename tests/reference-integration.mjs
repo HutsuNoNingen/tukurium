@@ -38,7 +38,10 @@ try {
   await until(()=>godot.exitCode!==null,'Inspector UI timed out',60000);
   assert.equal(godot.exitCode,0,godot.logs);assert.doesNotMatch(godot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(godot.logs,/REFERENCE SMOKE PASS/);
   await until(()=>host.client.latest().snapshot.objects.some(o=>(o.scripts||[]).some(s=>s.parameters.source?.kind==='field')),'Field reference did not reach host');
-  console.log('PASS: spatial-to-native typed references, shared Lua parameters, local Drive, invalid type rejection');
+  await until(()=>host.client.latest().snapshot.objects.some(o=>o.world_text?.text==='Started'),'WorldText Write did not reach host');
+  assert.ok(guest.client.latest().snapshot.objects.some(o=>o.world_text?.text==='Started'),'WorldText Write did not reach guest');
+  assert.ok(host.client.latest().snapshot.objects.some(o=>(o.scripts||[]).some(s=>s.schema.name==='TextClock'&&s.parameters.ref_world_text?.kind==='field')),'Dropped WorldText binding did not reach host');
+  console.log('PASS: field drop into shared code, typed binding, local WorldText Drive, shared WorldText Write, cross-Slot Drive and invalid type rejection');
   if(process.argv.includes('--rendered'))console.log(`SCREENSHOT=${resolve(work,'references.png')}`);
 }catch(error){for(const child of children)if(child.logs)console.error(child.logs.slice(-5000));throw error;}
 finally{for(const socket of sockets)socket.destroy();for(const child of children)if(child.exitCode===null)child.kill();}

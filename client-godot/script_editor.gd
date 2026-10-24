@@ -2,6 +2,7 @@ extends RefCounted
 
 var app
 const REFERENCE_CHIP = preload("res://reference_chip.gd")
+const SCRIPT_CODE_EDIT = preload("res://script_code_edit.gd")
 var action_guard: Callable
 var reload_guard: Callable
 var selection_guard: Callable
@@ -16,6 +17,8 @@ var add_hint: Label
 var scripts: ItemList
 var templates: OptionButton
 var code: CodeEdit
+var drop_choices: HBoxContainer
+var dropped_field: Dictionary = {}
 var parameters: VBoxContainer
 var selected_title: Label
 var run_status: Label
@@ -160,7 +163,10 @@ func setup(owner, mount: Control = null) -> void:
 	var code_heading := Label.new()
 	code_heading.text = "Source code · Apply to save"
 	editor.add_child(code_heading)
-	code = CodeEdit.new()
+	code = SCRIPT_CODE_EDIT.new()
+	code.manager = app.world_panels
+	code.field_dropped = choose_field_operation
+	code.tooltip_text = "Drop a field reference here, or carry one with Ctrl+RMB and click. Choose Read, Write or Drive."
 	code.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	code.custom_minimum_size.y = 160
 	code.gutters_draw_line_numbers = true
@@ -183,6 +189,24 @@ func setup(owner, mount: Control = null) -> void:
 			refresh_buttons()
 			if draft_changed.is_valid(): draft_changed.call())
 	editor.add_child(code)
+	drop_choices = HBoxContainer.new()
+	drop_choices.add_theme_constant_override("separation", 8)
+	editor.add_child(drop_choices)
+	var drop_label := Label.new()
+	drop_label.text = "Field reference:"
+	drop_choices.add_child(drop_label)
+	for mode in ["Read", "Write", "Drive"]:
+		var choice := Button.new()
+		choice.text = mode
+		choice.focus_mode = Control.FOCUS_NONE
+		choice.pressed.connect(insert_field_operation.bind(mode))
+		drop_choices.add_child(choice)
+	var cancel_drop := Button.new()
+	cancel_drop.text = "Cancel"
+	cancel_drop.focus_mode = Control.FOCUS_NONE
+	cancel_drop.pressed.connect(func(): dropped_field = {}; drop_choices.hide())
+	drop_choices.add_child(cancel_drop)
+	drop_choices.hide()
 	var parameters_heading := Label.new()
 	parameters_heading.text = "Public parameters · changes save automatically"
 	editor.add_child(parameters_heading)
@@ -230,6 +254,8 @@ func open(id: String) -> void:
 		config_signature = ""
 		list_signature = ""
 		queued_parameters.clear()
+		dropped_field = {}
+		if drop_choices != null: drop_choices.hide()
 	refresh()
 	if window != null: window.popup_centered(Vector2i(1080, 760))
 
@@ -329,8 +355,109 @@ func queue_parameter(id: String, value: Variant) -> void:
 	queued_parameters[id] = value
 	flush_at = Time.get_ticks_msec() + 180
 
+func choose_field_operation(reference: Dictionary) -> void:
+	if current_script().is_empty() or not app.editable or not reference.has("target"): return
+	var owner_id: String = str(reference.target.get("instance_id", ""))
+	var field_id: String = str(reference.get("field_id", ""))
+	var fields: Array = app.objects.get(owner_id, {}).get("fields", [])
+	var matched: Array = fields.filter(func(field): return field.id == field_id and int(field.component_id) == int(reference.target.get("local_id", -1)))
+	if matched.is_empty():
+		feedback.text = "That field is no longer available."
+		return
+	var schemas: Array = app.world_panels.component_schemas.filter(func(schema): return int(schema.local_id) == int(reference.target.local_id))
+	var field_schemas: Array = [] if schemas.is_empty() else schemas[0].fields.filter(func(field): return field.id == field_id)
+	dropped_field = {"reference":reference.duplicate(true), "value":matched[0].value, "field_id":field_id,
+		"script_write":not field_schemas.is_empty() and field_schemas[0].get("script_write",false),
+		"script_drive":not field_schemas.is_empty() and field_schemas[0].get("script_drive",false)}
+	drop_choices.show()
+	for choice in drop_choices.get_children():
+		if choice is Button and choice.text in ["Write", "Drive"]:
+			choice.disabled = not bool(dropped_field.script_drive if choice.text == "Drive" else dropped_field.script_write)
+	feedback.text = "Choose Read, Write or Drive. Apply code to save the reference and source together."
+
+func lua_literal(value: Variant) -> String:
+	if value is String: return JSON.stringify(value)
+	if value is bool: return "true" if value else "false"
+	if value is int or value is float: return str(value)
+	if value is Array:
+		var parts: Array[String] = []
+		for item in value: parts.append(lua_literal(item))
+		return "{" + ", ".join(parts) + "}"
+	return "nil"
+
+func caret_offset() -> int:
+	var offset := code.get_caret_column()
+	for line in code.get_caret_line(): offset += code.get_line(line).length() + 1
+	return offset
+
+func set_caret_offset(source: String, offset: int) -> void:
+	var line := 0
+	var column := 0
+	for i in mini(offset, source.length()):
+		if source[i] == "\n": line += 1; column = 0
+		else: column += 1
+	code.set_caret_line(line)
+	code.set_caret_column(column)
+
+func insert_field_operation(mode: String) -> void:
+	if dropped_field.is_empty() or current_script().is_empty(): return
+	var field_id: String = dropped_field.field_id
+	var binding := "ref_" + field_id
+	var reused := false
+	for existing in current_script().schema.fields:
+		if existing.value_type == "field_ref" and current_script().parameters.get(existing.id) == dropped_field.reference:
+			binding = str(existing.id)
+			reused = true
+			break
+	if not reused:
+		for key in queued_parameters:
+			if queued_parameters[key] == dropped_field.reference:
+				binding = str(key)
+				reused = true
+				break
+	var number := 2
+	while not reused and (code.text.contains(binding + " =") or current_script().schema.fields.any(func(field): return field.id == binding)):
+		binding = "ref_" + field_id + "_" + str(number)
+		number += 1
+	var expression := "ctx.self.%s.%s" % [current_script().schema.name, binding]
+	var snippet := "ctx:read(%s)" % expression
+	if mode == "Write": snippet = "ctx:write_field(%s, %s)" % [expression, lua_literal(dropped_field.value)]
+	if mode == "Drive":
+		var initial: String = "string.format(\"%.1f\", ctx.time)" if field_id == "world_text" else lua_literal(dropped_field.value)
+		snippet = "ctx:drive_field(%s, %s)" % [expression, initial]
+	var source: String = code.text
+	var old_offset := caret_offset()
+	if not reused:
+		var fields_match := RegEx.new()
+		fields_match.compile("\\bfields\\s*=\\s*\\{")
+		var found := fields_match.search(source)
+		if found == null:
+			fields_match.compile("\\breturn\\s*\\{")
+			found = fields_match.search(source)
+			if found == null:
+				feedback.text = "Could not find the script table. Add a fields table manually."
+				return
+		var at: int = found.get_end()
+		var declaration: String = "\n        %s = { type = \"field_ref\", label = \"%s\" }," % [binding, field_id]
+		if not source.substr(found.get_start(), found.get_end() - found.get_start()).contains("fields"):
+			declaration = "\n    fields = { %s = { type = \"field_ref\", label = \"%s\" } }," % [binding, field_id]
+		var revised: String = source.substr(0, at) + declaration + source.substr(at)
+		code.text = revised
+		set_caret_offset(revised, old_offset + (declaration.length() if at <= old_offset else 0))
+	code.insert_text_at_caret(snippet)
+	code.grab_focus()
+	if not reused:
+		if queued_parameters.is_empty(): queued_parameters = current_script().parameters.duplicate(true)
+		queued_parameters[binding] = dropped_field.reference
+	source_dirty = true
+	if draft_changed.is_valid(): draft_changed.call()
+	dropped_field = {}
+	drop_choices.hide()
+	feedback.text = "Reference and code added. Apply code to save. Put Write in update/on_interact and Drive in drive."
+	refresh_buttons()
+
 func tick() -> void:
-	if not queued_parameters.is_empty() and pending_id.is_empty() and Time.get_ticks_msec() >= flush_at:
+	if not source_dirty and not queued_parameters.is_empty() and pending_id.is_empty() and Time.get_ticks_msec() >= flush_at:
 		update_component(false, bool(current_script().get("enabled", false)))
 
 func disconnected() -> void:
