@@ -217,3 +217,12 @@ Godotのインスペクタから `WorldText` の白色 `[1.0,1.0,1.0,1.0]` を�
 
 - 再現・確認：単独テキストと子テキストを3Dパネルから作り、[creation-integration.mjs](../tests/creation-integration.mjs) の `--rendered` で表示、同期、途中参加を確認する。不正な初期ComponentでSlotを残さないことと親相対位置、保存復元は [tests.rs](../crates/core/src/tests.rs) で確認する。
 - コード：[creation_panel.gd](../client-godot/creation_panel.gd)、[inspector_tree.gd](../client-godot/inspector_tree.gd)、[systems.rs](../crates/core/src/systems.rs)。確認日：2026-10-24。
+
+## 別SlotへのDriveは表示対象とスクリプトの持ち主を分けて追う
+
+従来のDrive表示は、表示対象Slotにスクリプトも付いている前提で制御元を探していた。別Slotの `WorldText` をDriveすると値は届いても、インスペクタから制御元を見つけられない。Drive結果には対象フィールドとスクリプトIDを載せ、UIはそのIDを全Slotのスクリプトから解決する。共有の基準値は変えず、Driveが外れたら表示を基準値に戻す。
+
+コード欄へのフィールドD&Dは、生のSlot IDをLuaへ挿入せず、型付き `field_ref` パラメータを作ってコードから参照する。Rustは登録表のWrite・Drive可否、値の型と範囲、参照が当該スクリプトに登録済みかを確認する。
+
+- 再現・確認：[reference-integration.mjs](../tests/reference-integration.mjs) の `--rendered` で別Slotの位置とWorldTextへのDrive、WorldTextへの共有Write、表示と同期を確認する。[references.rs](../crates/core/src/references.rs) でDriveの非永続性とWriteの確定を確認する。
+- コード：[drives.rs](../crates/core/src/drives.rs)、[world_panels.gd](../client-godot/world_panels.gd)、[script_editor.gd](../client-godot/script_editor.gd)。確認日：2026-10-24。

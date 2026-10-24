@@ -30,11 +30,17 @@ return {
 |---|---|---|
 | `ctx:write(entity, field, value)` | update / on_interact | 共有フィールド変更を要求し、通常の検証・commit経路で同期する |
 | `ctx:drive(entity, field, value)` | drive | その端末の導出値を設定する。共有値とrevisionを変更しない |
+| `ctx:write_field(field_ref, value)` | update / on_interact | スクリプトに登録した別Slotを含むフィールド参照へ共有値を書き込む |
+| `ctx:drive_field(field_ref, value)` | drive | 参照先のフィールドへ端末内の導出値を供給する |
 | `ctx:rotation_y(degrees, base?)` | どちらでも | 基準QuaternionへワールドY軸回転を加えたQuaternionを返す。基準省略時は単位回転 |
 | `ctx.world_time` | どちらでも | ホストに合わせた共有タイムライン上の秒数 |
 | `ctx.time` | どちらでも | スクリプトを追加してからの、停止・再開可能な経過秒数 |
 
-対象フィールドは`position`、`rotation`、`scale`、`color`。値域とQuaternionの正規化を検証する。現在の操作範囲は取り付け先の物体のみ。従来の`set_position`、`translate`、`set_scale`、`set_color`、`rotate_y`は共有WriteのAPIとして残る。
+従来の `ctx:write` / `ctx:drive` は取り付け先の物体の `position`、`rotation`、`scale`、`color` を対象にする。参照版の `write_field` / `drive_field` は、スクリプトの `field_ref` パラメータに登録された参照を使う。現在のWrite対象は `name`、Transform、`color`、`world_text`、`world_text_color`。Drive対象は `name` を除く同じフィールド。どちらもRustのComponent登録表で対象、型、値域を検証し、パネル操作などのコマンド専用フィールドには適用しない。従来の`set_position`、`translate`、`set_scale`、`set_color`、`rotate_y`は共有WriteのAPIとして残る。
+
+インスペクタのフィールドをスクリプトのコード欄にD&Dするか、Ctrl＋右クリックで参照を持ってコード欄をクリックする。`Read`、`Write`、`Drive` の選択後に参照パラメータの宣言とコードの呼び出しを挿入する。`Apply code` で両方を保存する。SlotのIDをLuaの文字列として埋め込まず、複製時に参照を付け替えられる `field_ref` を使う。Writeは `update` / `on_interact`、Driveは `drive` の中に置く。
+
+たとえばWorldTextをDriveで選ぶと `ctx:drive_field(ctx.self.TextClock.ref_world_text, string.format("%.1f", ctx.time))` のひな形を挿入する。文字列は端末内で更新され、共有の文字列はそのまま残る。`on_interact` から同じ参照へ `ctx:write_field` すれば共有の文字列が変わる。
 
 Driveからの共有Write・`set_state`、共有コールバックからのDriveは拒否する。スクリプトが通信処理を書く必要はない。例えばクリックによる色変更は以下となる。
 
@@ -66,7 +72,7 @@ Engine自身が約2秒ごとにホストと時刻を照合する。往復時間�
 
 Godotは値を描画へ反映する。SlotごとのGodotスクリプトを生成したり、UGCからGodotのノードへ直接アクセスしたりしない。つかみ操作やギズモの一時プレビューは、その操作対象フィールドについてDriveより優先する。
 
-現在は位置・回転・スケール・色が対象。共有物理の担当ユーザー移譲、操作ユーザーでの共有Write実行、任意ComponentフィールドへのDrive、ローカルで導出した値同士の依存グラフはまだ実装していない。
+共有物理の担当ユーザー移譲、操作ユーザーでの共有Write実行、登録表で許可していないフィールドへのDrive、ローカルで導出した値同士の依存グラフはまだ実装していない。
 
 ## 実行予算と検証
 
