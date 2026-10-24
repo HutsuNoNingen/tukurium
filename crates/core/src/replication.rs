@@ -60,6 +60,8 @@ fn field(
     validate: fn(&Value) -> Result<(), String>,
     access: FieldAccess,
 ) -> FieldRegistration {
+    let script_write = access == FieldAccess::Edit
+        && matches!(id, "name" | "position" | "rotation" | "scale" | "color" | "world_text" | "world_text_color");
     FieldRegistration {
         schema: FieldSchema {
             id: id.into(),
@@ -68,6 +70,8 @@ fn field(
             replication: ReplicationMode::Reliable,
             persistent: true,
             access,
+            script_write,
+            script_drive: script_write && id != "name",
         },
         ui_order: order,
         validate,
@@ -536,6 +540,23 @@ impl Registry {
             return Err("Component no longer exists".into());
         }
         Ok((o, c, f))
+    }
+    pub fn script_field<'a>(
+        &self,
+        snapshot: &'a Snapshot,
+        reference: &TypedReference,
+        value: &Value,
+        drive: bool,
+    ) -> Result<(&'a ObjectView, u32), String> {
+        let TypedReference::Field { target, field_id } = reference else {
+            return Err("Expected a field reference".into());
+        };
+        let (object, component, field) = self.resolve(snapshot, target, field_id)?;
+        if (drive && !field.schema.script_drive) || (!drive && !field.schema.script_write) {
+            return Err("This field does not support script Write or Drive".into());
+        }
+        (field.validate)(value)?;
+        Ok((object, component.local_id))
     }
     pub fn field_address(&self, object: &Address, id: &str) -> Result<Address, String> {
         Ok(Address {

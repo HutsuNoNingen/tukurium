@@ -346,7 +346,7 @@ pub(crate) fn apply_commands(world: &mut World) {
                     world.get_mut::<ObjectRoot>(entity).unwrap().revision += 1;
                     Some(target)
                 }
-                Mutation::ScriptFrame(patches) => {
+                Mutation::ScriptFrame { patches, field_writes } => {
                     for patch in patches {
                         let entity = patch.entity;
                         let renderer = world.get::<ObjectRoot>(entity).unwrap().renderer.as_ref()
@@ -388,6 +388,9 @@ pub(crate) fn apply_commands(world: &mut World) {
                         if let Some(renderer) = renderer { world.get_mut::<MeshRenderer>(renderer).unwrap().color = patch.color; }
                         world.get_mut::<ScriptComponents>(entity).unwrap().0 = patch.scripts;
                         world.get_mut::<ObjectRoot>(entity).unwrap().revision += 1;
+                    }
+                    for write in field_writes {
+                        crate::replication::apply_field(world, write.entity, write.component_id, &write.id, write.value);
                     }
                     None
                 }

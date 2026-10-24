@@ -27,6 +27,10 @@ pub struct FieldSchema {
     pub replication: ReplicationMode,
     pub persistent: bool,
     pub access: FieldAccess,
+    #[serde(default)]
+    pub script_write: bool,
+    #[serde(default)]
+    pub script_drive: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

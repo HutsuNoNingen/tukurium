@@ -1,7 +1,7 @@
 //! Local derived fields. These components never enter the shared snapshot or commit log.
 use crate::resources::*;
 use bevy_ecs::prelude::*;
-use kokoverse_protocol::{DriveFrame, DrivenObject, ScriptStatus};
+use kokoverse_protocol::{DriveFrame, DrivenObject, ScriptStatus, TypedReference};
 use kokoverse_scripting::{Event, Program};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
@@ -15,6 +15,7 @@ struct Cached {
     program: Option<Program>,
     error: Option<String>,
     values: BTreeMap<String, Value>,
+    field_values: Vec<(TypedReference, Value)>,
 }
 
 #[derive(Resource)]
@@ -70,9 +71,11 @@ pub(crate) fn evaluate(world: &mut World) {
                 program: None,
                 error: None,
                 values: BTreeMap::new(),
+                field_values: Vec::new(),
             });
         if cached.source != script.source || cached.revision != script.revision {
             cached.values.clear();
+            cached.field_values.clear();
             if !runtime.ready || started.elapsed().as_millis() >= 10 {
                 continue;
             }
@@ -116,19 +119,27 @@ pub(crate) fn evaluate(world: &mut World) {
                 time,
                 &crate::references::values(&snapshot, script),
             ) {
-                Ok(output) => cached.values = output.drives,
+                Ok(output) => {
+                    let validation = output.field_drives.iter().try_for_each(|(reference, value)| {
+                        crate::replication::REGISTRY.script_field(&snapshot, reference, value, true).map(|_| ())
+                    });
+                    match validation {
+                        Ok(()) => { cached.values = output.drives; cached.field_values = output.field_drives; }
+                        Err(error) => { cached.values.clear(); cached.field_values.clear(); cached.error = Some(error); }
+                    }
+                }
                 Err(error) => {
                     cached.values.clear();
+                    cached.field_values.clear();
                     cached.error = Some(error.chars().take(1024).collect());
                 }
             }
         }
     }
     runtime.cursor = runtime.cursor.wrapping_add(1);
-    // Read the shared base and publish typed ECS components. No shared field is changed.
+    // Resolve all script outputs in stable snapshot order, including fields on other Slots.
+    let mut resolved: HashMap<String, (BTreeMap<String, Value>, BTreeMap<String, String>)> = HashMap::new();
     for object in &snapshot.objects {
-        let mut values = BTreeMap::new();
-        let mut sources = BTreeMap::new();
         for script in object.scripts.iter().filter(|s| s.schema.has_drive) {
             let Some(cached) = runtime.cache.get(&script.id) else {
                 continue;
@@ -139,16 +150,23 @@ pub(crate) fn evaluate(world: &mut World) {
                 && cached.revision == script.revision
                 && error.is_none()
             {
-                if let Some(field) = cached.values.keys().find(|k| values.contains_key(*k)) {
+                let mut proposed: Vec<(String, String, Value)> = cached.values.iter()
+                    .map(|(field, value)| (object.address.instance_id.clone(), field.clone(), value.clone())).collect();
+                for (reference, value) in &cached.field_values {
+                    if let TypedReference::Field { target, field_id } = reference {
+                        proposed.push((target.instance_id.clone(), field_id.clone(), value.clone()));
+                    }
+                }
+                if let Some((_, field, _)) = proposed.iter().find(|(id, field, _)| {
+                    resolved.get(id).is_some_and(|(values, _)| values.contains_key(field))
+                }) {
                     error = Some(format!("Field {field} is already driven by another script"));
                 } else {
-                    sources.extend(
-                        cached
-                            .values
-                            .keys()
-                            .map(|field| (field.clone(), script.id.clone())),
-                    );
-                    values.extend(cached.values.clone());
+                    for (id, field, value) in proposed {
+                        let (values, sources) = resolved.entry(id).or_default();
+                        values.insert(field.clone(), value);
+                        sources.insert(field, script.id.clone());
+                    }
                 }
             }
             frame.statuses.push(ScriptStatus {
@@ -158,6 +176,10 @@ pub(crate) fn evaluate(world: &mut World) {
                 error,
             });
         }
+    }
+    // No driven result enters the shared snapshot or commit log.
+    for object in &snapshot.objects {
+        let (values, sources) = resolved.remove(&object.address.instance_id).unwrap_or_default();
         let entity = world.resource::<EntityIndex>().0[&object.address];
         let fields = DrivenFields(values.clone());
         if world.get::<DrivenFields>(entity) != Some(&fields) {

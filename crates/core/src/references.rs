@@ -164,4 +164,61 @@ mod tests {
         model.advance(Duration::ZERO);
         assert!(model.drive_frame().objects.is_empty());
     }
+
+    #[test]
+    fn bound_text_field_can_be_written_or_driven_without_replicating_drive_values() {
+        let mut host = WorldModel::new();
+        let owner = host.snapshot().objects[0].address.clone();
+        host.enqueue(WorldCommand::Structure { command: StructuralCommand {
+            command_id: "text".into(), operation: StructuralOperation::CreateSlot {
+                parent: Some(owner.clone()), position: [0.0, 0.0, 0.8], rotation: None,
+                position_space: PositionSpace::Parent,
+                components: vec![InitialComponent { type_id: "WorldText".into(), values: serde_json::json!({"world_text":"Text","world_text_color":[1.0,1.0,1.0,1.0]}) }],
+            },
+        }}).unwrap();
+        let text_slot = host.tick().remove(0).selected.unwrap();
+        let reference = TypedReference::Field { target: Address { local_id: 11, ..text_slot.clone() }, field_id: "world_text".into() };
+        assert!(crate::replication::REGISTRY.script_field(&host.snapshot(), &reference, &serde_json::json!("x".repeat(81)), false).is_err());
+        let parent_field = TypedReference::Field { target: owner.clone(), field_id: "parent".into() };
+        assert!(crate::replication::REGISTRY.script_field(&host.snapshot(), &parent_field, &serde_json::Value::Null, false).is_err());
+        let name_field = TypedReference::Field { target: owner.clone(), field_id: "name".into() };
+        assert!(crate::replication::REGISTRY.script_field(&host.snapshot(), &name_field, &serde_json::json!("Clock"), true).is_err());
+        let source = "return {name='Clock',fields={display={type='field_ref'}},drive=function(ctx) ctx:drive_field(ctx.self.Clock.display, '00:42') end,on_interact=function(ctx) ctx:write_field(ctx.self.Clock.display, 'Started') end}";
+        host.enqueue(WorldCommand::Script { command: ScriptCommand {
+            command_id: "attach-clock".into(), target: owner.clone(),
+            action: ScriptAction::Attach { source: source.into() },
+        }}).unwrap();
+        host.tick()[0].result.as_ref().unwrap();
+        let script = host.snapshot().objects.into_iter().find(|object| object.address == owner).unwrap().scripts[0].clone();
+        host.enqueue(WorldCommand::Script { command: ScriptCommand {
+            command_id: "bind-clock".into(), target: owner.clone(),
+            action: ScriptAction::Update {
+                script_id: script.id, expected_revision: script.revision, source: source.into(), enabled: true,
+                parameters: BTreeMap::from([("display".into(), serde_json::to_value(&reference).unwrap())]),
+            },
+        }}).unwrap();
+        host.tick()[0].result.as_ref().unwrap();
+        let before = host.snapshot();
+        host.advance(Duration::ZERO);
+        let driven = host.drive_frame().objects.into_iter().find(|object| object.target == text_slot).unwrap();
+        assert_eq!(driven.values["world_text"], serde_json::json!("00:42"));
+        assert_eq!(host.snapshot(), before);
+        host.set_script_authority(true);
+        host.enqueue(WorldCommand::Script { command: ScriptCommand {
+            command_id: "click-clock".into(), target: owner,
+            action: ScriptAction::Interact,
+        }}).unwrap();
+        host.advance(Duration::ZERO);
+        let text = host.snapshot().objects.into_iter().find(|object| object.address == text_slot).unwrap();
+        let text_revision = text.fields.iter().find(|field| field.id == "world_text").unwrap().revision.clone();
+        assert_eq!(text.world_text.unwrap().text, "Started");
+        assert_eq!(host.drive_frame().objects.iter().find(|object| object.target == text_slot).unwrap().values["world_text"], serde_json::json!("00:42"));
+        host.enqueue(WorldCommand::Script { command: ScriptCommand {
+            command_id: "click-clock-again".into(), target: host.snapshot().objects.iter().find(|object| object.scripts.iter().any(|script| script.schema.name == "Clock")).unwrap().address.clone(),
+            action: ScriptAction::Interact,
+        }}).unwrap();
+        host.advance(Duration::ZERO);
+        let after = host.snapshot().objects.into_iter().find(|object| object.address == text_slot).unwrap();
+        assert_eq!(after.fields.iter().find(|field| field.id == "world_text").unwrap().revision, text_revision);
+    }
 }

@@ -34,6 +34,14 @@ pub(crate) struct FramePatch {
     pub scripts: Vec<ScriptComponent>,
 }
 
+pub(crate) struct FieldWrite {
+    pub entity: Entity,
+    pub target: Address,
+    pub component_id: u32,
+    pub id: String,
+    pub value: serde_json::Value,
+}
+
 pub(crate) fn validate_world_scripts<'a>(
     objects: impl Iterator<Item = &'a [ScriptComponent]>,
 ) -> Result<(), String> {
@@ -148,6 +156,7 @@ pub(crate) fn prepare_frame(world: &mut World) {
     let mut delivered = HashSet::new();
     let dt = runtime.dt;
     let mut patches = Vec::new();
+    let mut field_writes = Vec::new();
     let alive: HashSet<_> = snapshot
         .objects
         .iter()
@@ -242,6 +251,21 @@ pub(crate) fn prepare_frame(world: &mut World) {
                     &crate::references::values(&snapshot, &object.scripts[index]),
                 ) {
                     Ok(output) => {
+                        let proposed_writes: Result<Vec<_>, String> = output.field_writes.iter().map(|(reference, value)| {
+                            let (target, component_id) = crate::replication::REGISTRY.script_field(&snapshot, reference, value, false)?;
+                            let kokoverse_protocol::TypedReference::Field { field_id, .. } = reference else { unreachable!() };
+                            Ok(FieldWrite {
+                                entity: world.resource::<EntityIndex>().0[&target.address],
+                                target: target.address.clone(),
+                                component_id,
+                                id: field_id.clone(),
+                                value: value.clone(),
+                            })
+                        }).collect();
+                        let proposed_writes = match proposed_writes {
+                            Ok(writes) => writes,
+                            Err(error) => { cached.error = Some(error); break; }
+                        };
                         let values = [
                             ("position", serde_json::json!(output.position)),
                             ("rotation", serde_json::json!(output.rotation)),
@@ -275,6 +299,7 @@ pub(crate) fn prepare_frame(world: &mut World) {
                                 field.value = value.clone();
                             }
                         }
+                        field_writes.extend(proposed_writes);
                     }
                     Err(error) => {
                         cached.error = Some(error.chars().take(1024).collect());
@@ -314,11 +339,25 @@ pub(crate) fn prepare_frame(world: &mut World) {
         .filter(|(index, (_, id))| !delivered.contains(index) && alive.contains(id))
         .map(|(_, event)| event)
         .collect();
+    let mut compacted: Vec<FieldWrite> = Vec::new();
+    for write in field_writes {
+        if let Some(previous) = compacted.iter_mut().find(|item| item.target == write.target && item.id == write.id) {
+            *previous = write;
+        } else {
+            compacted.push(write);
+        }
+    }
+    let field_writes: Vec<FieldWrite> = compacted.into_iter().filter(|write| {
+        patches.iter().any(|patch| patch.entity == write.entity)
+            || snapshot.objects.iter().find(|object| object.address == write.target)
+                .and_then(|object| object.fields.iter().find(|field| field.id == write.id))
+                .is_none_or(|field| field.value != write.value)
+    }).collect();
     world.insert_resource(runtime);
-    if !patches.is_empty() && world.resource::<WorldRevision>().0 < u64::MAX {
+    if (!patches.is_empty() || !field_writes.is_empty()) && world.resource::<WorldRevision>().0 < u64::MAX {
         world.resource_mut::<Prepared>().0 = Some(PreparedCommand {
             ticket: 0,
-            mutation: Ok(Mutation::ScriptFrame(patches)),
+            mutation: Ok(Mutation::ScriptFrame { patches, field_writes }),
         });
     }
 }

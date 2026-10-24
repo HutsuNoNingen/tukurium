@@ -1,5 +1,5 @@
 //! Restricted Luau programs. A call produces a proposal; it never owns an ECS World.
-use kokoverse_protocol::{ObjectView, ScriptComponent, ScriptField, ScriptSchema};
+use kokoverse_protocol::{ObjectView, ScriptComponent, ScriptField, ScriptSchema, TypedReference};
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue, VmState, chunk::ChunkMode};
 use serde_json::{Value, json};
 use std::{
@@ -32,6 +32,8 @@ pub struct Output {
     pub color: [f64; 4],
     pub state: BTreeMap<String, Value>,
     pub drives: BTreeMap<String, Value>,
+    pub field_writes: Vec<(TypedReference, Value)>,
+    pub field_drives: Vec<(TypedReference, Value)>,
     commands: usize,
 }
 
@@ -375,6 +377,8 @@ impl Program {
                 color,
                 state: component.state.clone(),
                 drives: BTreeMap::new(),
+                field_writes: Vec::new(),
+                field_drives: Vec::new(),
                 commands: 0,
             }));
             let handler = match event {
@@ -603,6 +607,33 @@ impl Program {
                     "color" => out.color=serde_json::from_value(value).unwrap(),
                     _ => unreachable!(),
                 }}
+                Ok(())
+            })?)?;
+        }
+        let allowed_fields: Vec<TypedReference> = component.parameters.values()
+            .filter_map(|value| serde_json::from_value::<TypedReference>(value.clone()).ok())
+            .filter(|reference| matches!(reference, TypedReference::Field { .. }))
+            .collect();
+        for name in ["write_field", "drive_field"] {
+            let output = output.clone();
+            let allowed = allowed_fields.clone();
+            ctx.set(name, lua.create_function(move |lua, (_ctx, reference, value): (Table, LuaValue, LuaValue)| {
+                if (name == "drive_field") != local_drive {
+                    return Err(error("Use ctx:drive_field only in drive(ctx), and ctx:write_field only in shared callbacks"));
+                }
+                let reference: TypedReference = lua.from_value(reference)?;
+                if !matches!(reference, TypedReference::Field { .. }) || !allowed.contains(&reference) {
+                    return Err(error("Target must be a bound field reference"));
+                }
+                let value: Value = lua.from_value(value)?;
+                if serde_json::to_vec(&value).map_or(true, |bytes| bytes.len() > 2048) {
+                    return Err(error("Field value is too large"));
+                }
+                let mut out = output.lock().unwrap();
+                out.commands += 1;
+                if out.commands > MAX_COMMANDS { return Err(error("Too many script writes")); }
+                if local_drive { out.field_drives.push((reference, value)); }
+                else { out.field_writes.push((reference, value)); }
                 Ok(())
             })?)?;
         }

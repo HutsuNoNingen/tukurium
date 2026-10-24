@@ -38,7 +38,7 @@ pub(crate) enum Mutation {
     ScriptInteract {
         entity: Entity,
     },
-    ScriptFrame(Vec<crate::scripting::FramePatch>),
+    ScriptFrame { patches: Vec<crate::scripting::FramePatch>, field_writes: Vec<crate::scripting::FieldWrite> },
     Insert(Box<ObjectView>),
     InsertMany(Vec<ObjectView>),
     Replace(Box<ObjectView>),
