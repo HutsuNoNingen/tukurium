@@ -15,7 +15,7 @@
 
 ## 実装順
 
-進捗：描画部品を持たないSlotの作成、同期、複製、保存復元、共有作成パネルからの作成を実装済み。`AddComponent` / `RemoveComponent` は登録表に基づく検証と競合チェックを備え、最初の対象として `MeshRenderer` の付け外しを実装済み。以降のComponentは同じ登録経路へ追加する。
+進捗：描画部品を持たないSlotの作成、同期、複製、保存復元、共有作成パネルからの作成を実装済み。`CreateSlot` は初期Componentと親からの相対位置を受け取り、新規Slotをまとめて確定する。`AddComponent` / `RemoveComponent` は登録表に基づく検証と競合チェックを備え、インスペクタから `MeshRenderer` と `WorldText` を付け外しできる。以降のComponentも同じ登録経路へ追加する。
 
 `WorldText` は空Slotにも付けられ、文字と色を共同編集できる。`UgcCanvas` 以下のUI要素とレイアウトはまだ未実装。
 
@@ -37,11 +37,11 @@
 
 ## 段階0で決めるデータの形
 
-現在の `ObjectView` は `renderer: Address` を必須とし、作成・複製の経路も描画部品の存在を前提にする。UI要素や値だけのSlotを増やす前に、描画部品のないSlotを正しく表せるようにする。現在の `ComponentRegistration` は型ごとにSlot内で固定の `local_id` を持つため、同種のUI要素を複数並べる場合は、それぞれを子Slotに置く。UI要素を一つの大きなJSON配列にまとめない。
+`ObjectView` は描画部品のないSlotを表せる。新規作成と複製、保存と同期もこの状態を扱う。`ComponentRegistration` は型ごとにSlot内で固定の `local_id` を持つため、同種のUI要素を複数並べる場合は、それぞれを子Slotに置く。UI要素を一つの大きなJSON配列にまとめない。
 
 パーツの追加・削除は構造コマンドとしてホストが検証する。対象SlotとComponent型、期待revision、初期値を確認し、必要な依存Componentを明示する。削除時はそのComponentを参照するBindingがどうなるかを定義し、孤立参照を黙って別対象へ付け替えない。既存の作業データは保持し、スナップショット形式を変更する場合は再読込を検証してから切り替える。
 
-Godotの追加パレットは共有の3D作成パネルに置く。追加されたパーツは既存のインスペクタで型別フィールドを編集する。独立したパネル描画・Collider・入力転送を増やさず、[UIの表示先](../guidelines/ui-surfaces.md)と[WorldPanel](../guidelines/world-space-panels.md)の操作規則を使う。
+共有の3D作成パネルは新規の形状、空Slot、WorldText付きSlotを作る。既存SlotのComponentの付け外しとフィールド編集はインスペクタに置く。階層からはWorldText付きの子Slotも作れる。独立したパネル描画・Collider・入力転送を増やさず、[UIの表示先](../guidelines/ui-surfaces.md)と[WorldPanel](../guidelines/world-space-panels.md)の操作規則を使う。
 
 ## 操作から表示までの経路
 

@@ -192,21 +192,28 @@ FPSで3Dパネルを右クリック保持したままミドルクリックする
 
 ## Godotから構造コマンドへ渡すAddressは整数化する
 
-作成パネルから `AddComponent` を送ったとき、スナップショット内の `address.local_id` をそのまま再送するとGodotが `1.0` としてJSON化し、Rustの整数フィールドへ復元できず `Invalid edit payload` になった。既存の `app.address_of()` で `local_id` を整数化してから要求Brokerへ渡す。
+インスペクタから `AddComponent` を送ったとき、スナップショット内の `address.local_id` をそのまま再送するとGodotが `1.0` としてJSON化し、Rustの整数フィールドへ復元できず `Invalid edit payload` になった。既存の `app.address_of()` で `local_id` を整数化してから要求Brokerへ渡す。
 
-- 再現・確認：空のSlotを選択し、共有作成パネルから表示部品を追加・削除する。[creation-integration.mjs](../tests/creation-integration.mjs) の `--rendered` で実入力、ホストの変更、途中参加を確認する。
-- コード：[creation_panel.gd](../client-godot/creation_panel.gd)。確認日：2026-10-24。
+- 再現・確認：空のSlotを選択し、インスペクタから表示部品を追加・削除する。[creation-integration.mjs](../tests/creation-integration.mjs) の `--rendered` で実入力、ホストの変更、途中参加を確認する。
+- コード：[inspector_view.gd](../client-godot/inspector_view.gd)。確認日：2026-10-24。
 
 ## 共有Componentの数値は型付きで比較する
 
-Godotのパレットから `WorldText` の白色 `[1.0,1.0,1.0,1.0]` を送ると、JSONでは `[1,1,1,1]` になった。Rustでこの生のJSONとComponentの浮動小数点配列を再シリアライズしたJSONを比較すると、意味が同じでも不一致になり追加を拒否した。値域検証の後は `[f64; 4]` に復元して比較する。
+Godotのインスペクタから `WorldText` の白色 `[1.0,1.0,1.0,1.0]` を送ると、JSONでは `[1,1,1,1]` になった。Rustでこの生のJSONとComponentの浮動小数点配列を再シリアライズしたJSONを比較すると、意味が同じでも不一致になり追加を拒否した。値域検証の後は `[f64; 4]` に復元して比較する。
 
 - 再現・確認：空Slotに文字を追加し、色を同期、付け外し、途中参加を [creation-integration.mjs](../tests/creation-integration.mjs) の `--rendered` で確認する。整数の色値はRustの [tests.rs](../crates/core/src/tests.rs) でも確認する。
 - コード：[lib.rs](../crates/core/src/lib.rs)、[replication.rs](../crates/core/src/replication.rs)。確認日：2026-10-24。
 
 ## 描画部品のないSlotも作成位置を明示する
 
-空Slotを原点へ固定して作ると、後から付けた `WorldText` が床に隠れ、パレット操作は成功していても利用者には見えなかった。作成パネルは視点前方の水平位置と目線の高さを渡し、Rustはそのワールド位置を検証してから親Slotの相対座標に変換する。メッシュの有無ではなく、配置と画面での見え方も描画付きテストで確認する。
+空Slotを原点へ固定して作ると、後から付けた `WorldText` が床に隠れ、部品の追加は成功していても利用者には見えなかった。作成パネルは視点前方の水平位置と目線の高さを渡し、Rustはそのワールド位置を検証してから親Slotの相対座標に変換する。メッシュの有無ではなく、配置と画面での見え方も描画付きテストで確認する。
 
 - 再現・確認：[creation-integration.mjs](../tests/creation-integration.mjs) の `--rendered` で作成・付け外し後に視点をSlotへ向けたスクリーンショットを確認する。親付きSlotのワールド位置は [tests.rs](../crates/core/src/tests.rs) で確認する。
 - コード：[creation_panel.gd](../client-godot/creation_panel.gd)、[systems.rs](../crates/core/src/systems.rs)。確認日：2026-10-24。
+
+## 新規Slotと初期Componentは一つの構造操作で作る
+
+新規テキストをSlot作成と部品追加の二要求に分けると、他の参加者が途中の空Slotを見る可能性がある。`CreateSlot` に初期Componentを渡し、Rustが登録表の検証を通して一度に確定する。子テキストは親相対位置を指定する。単独テキストは視点の水平前方へ向ける回転を渡さないと、作成直後に文字の側面だけが見える。
+
+- 再現・確認：単独テキストと子テキストを3Dパネルから作り、[creation-integration.mjs](../tests/creation-integration.mjs) の `--rendered` で表示、同期、途中参加を確認する。不正な初期ComponentでSlotを残さないことと親相対位置、保存復元は [tests.rs](../crates/core/src/tests.rs) で確認する。
+- コード：[creation_panel.gd](../client-godot/creation_panel.gd)、[inspector_tree.gd](../client-godot/inspector_tree.gd)、[systems.rs](../crates/core/src/systems.rs)。確認日：2026-10-24。
