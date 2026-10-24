@@ -139,30 +139,23 @@ func run() -> void:
 	panel=surface.content
 	id=surface.panel_id
 	await click_control(scene,surface,panel.slot_button)
-	if not await until(func(): return not scene.objects.has(id) and scene.current.get("visual",{}).get("kind")=="none","Empty Slot was not created"): quit(1); return
+	if not await until(func(): return not scene.objects.has(id) and scene.current.get("visual",{}).get("kind")=="none","Empty Slot was not created"): push_error("Slot status="+panel.status.text+" current="+str(scene.current)+" pending="+str(scene.pending)); quit(1); return
 	if scene.current.get("renderer")!=null or scene.render_nodes[scene.selected_id].mesh!=null or scene.current.get("collider")!=null:
 		push_error("Empty Slot unexpectedly has a renderer or collider"); quit(1); return
 	var slot_id: String=scene.selected_id
 	scene.hud.open_creation()
-	if not await until(func(): return scene.world_panels.panels.size()==1,"Creation panel did not reopen for Component"): quit(1); return
+	if not await until(func(): return scene.world_panels.panels.size()==1,"Creation panel did not reopen for standalone text"): quit(1); return
 	surface=scene.world_panels.panels.values()[0]
 	panel=surface.content
-	await click_control(scene,surface,panel.add_renderer_button)
-	if not await until(func(): return scene.objects[slot_id].visual.kind=="primitive" and scene.render_nodes[slot_id].mesh!=null,"Renderer Component did not attach"):
-		push_error("Palette status="+panel.status.text+" selected="+scene.selected_id+" disabled="+str(panel.add_renderer_button.disabled)); quit(1); return
-	await click_control(scene,surface,panel.remove_renderer_button)
-	if not await until(func(): return scene.objects[slot_id].visual.kind=="none" and scene.render_nodes[slot_id].mesh==null,"Renderer Component did not detach"): quit(1); return
-	await click_control(scene,surface,panel.add_text_button)
-	if not await until(func(): return scene.objects[slot_id].get("world_text")!=null and scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not attach"):
-		push_error("Palette status="+panel.status.text+" value="+str(scene.objects[slot_id].get("world_text"))+" disabled="+str(panel.add_text_button.disabled)); quit(1); return
-	if scene.render_nodes[slot_id].get_node("WorldText").text!="Text": push_error("Wrong WorldText content"); quit(1); return
-	await click_control(scene,surface,panel.remove_text_button)
-	if not await until(func(): return scene.objects[slot_id].get("world_text")==null and not scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not detach"): quit(1); return
-	await click_control(scene,surface,panel.add_text_button)
-	if not await until(func(): return scene.objects[slot_id].get("world_text")!=null and scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not reattach"): quit(1); return
-	scene.world_panels.close_panel(surface.panel_id)
-	if not await until(func(): return scene.world_panels.panels.is_empty(),"Component palette did not close"): quit(1); return
-	var text_direction: Vector3=(scene.render_nodes[slot_id].global_position-scene.camera.global_position).normalized()
+	id=surface.panel_id
+	await create_timer(0.2).timeout
+	await click_control(scene,surface,panel.text_button)
+	if not await until(func(): return not scene.objects.has(id) and scene.current.get("world_text")!=null and scene.current.get("parent")==null,"Standalone text was not created"): push_error("Text status="+panel.status.text+" current="+str(scene.current.get("world_text"))+" panel="+str(scene.objects.has(id))); quit(1); return
+	var text_id: String=scene.selected_id
+	var text_q: Array=scene.objects[text_id].world_rotation
+	var text_normal: Vector3=Quaternion(text_q[0],text_q[1],text_q[2],text_q[3])*Vector3.BACK
+	if text_normal.dot((scene.camera.global_position-scene.render_nodes[text_id].global_position).normalized())<0.5: push_error("Standalone text faces away from its creator"); quit(1); return
+	var text_direction: Vector3=(scene.render_nodes[text_id].global_position-scene.camera.global_position).normalized()
 	var look := InputEventMouseMotion.new()
 	look.position=root.size*0.5
 	look.relative=Vector2(wrapf(scene.orbit_yaw-atan2(-text_direction.x,-text_direction.z),-PI,PI),scene.orbit_pitch-asin(text_direction.y))/0.003
@@ -173,6 +166,41 @@ func run() -> void:
 		if arg.begins_with("--screenshot="):
 			await RenderingServer.frame_post_draw
 			root.get_texture().get_image().save_png(arg.trim_prefix("--screenshot=").replace(".png","-text.png"))
+	scene.select_object(slot_id)
+	scene.world_panels.open_inspector(slot_id)
+	if not await until(func(): return scene.world_panels.panels.size()==1 and scene.world_panels.panels.values()[0].inspector_content,"Inspector did not open for Component"): quit(1); return
+	surface=scene.world_panels.panels.values()[0]
+	panel=surface.content
+	if not await until(func(): return panel.target_id==slot_id and panel.add_mesh_button!=null,"Inspector did not show Add Component"): quit(1); return
+	await process_frame
+	await click_control(scene,surface,panel.add_mesh_button)
+	if not await until(func(): return scene.objects[slot_id].visual.kind=="primitive" and scene.render_nodes[slot_id].mesh!=null,"Renderer Component did not attach"):
+		push_error("Inspector status="+panel.message.text+" selected="+scene.selected_id); quit(1); return
+	if not await until(func(): return panel.component_remove_buttons.has("MeshRenderer"),"Inspector did not show Remove MeshRenderer"): quit(1); return
+	await process_frame
+	await click_control(scene,surface,panel.component_remove_buttons["MeshRenderer"])
+	if not await until(func(): return scene.objects[slot_id].visual.kind=="none" and scene.render_nodes[slot_id].mesh==null,"Renderer Component did not detach"): quit(1); return
+	if not await until(func(): return panel.add_text_button!=null,"Inspector did not show Add WorldText"): quit(1); return
+	await process_frame
+	await click_control(scene,surface,panel.add_text_button)
+	if not await until(func(): return scene.objects[slot_id].get("world_text")!=null and scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not attach"):
+		push_error("Inspector status="+panel.message.text+" value="+str(scene.objects[slot_id].get("world_text"))); quit(1); return
+	if scene.render_nodes[slot_id].get_node("WorldText").text!="Text": push_error("Wrong WorldText content"); quit(1); return
+	if not await until(func(): return panel.component_remove_buttons.has("WorldText"),"Inspector did not show Remove WorldText"): quit(1); return
+	await process_frame
+	await click_control(scene,surface,panel.component_remove_buttons["WorldText"])
+	if not await until(func(): return scene.objects[slot_id].get("world_text")==null and not scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not detach"): quit(1); return
+	if not await until(func(): return panel.add_text_button!=null,"Inspector did not restore Add WorldText"): quit(1); return
+	await process_frame
+	await click_control(scene,surface,panel.add_text_button)
+	if not await until(func(): return scene.objects[slot_id].get("world_text")!=null and scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not reattach"): quit(1); return
+	await click_control(scene,surface,panel.hierarchy.child_text_button)
+	if not await until(func(): return scene.objects.values().any(func(o): return o.get("parent")!=null and o.parent.instance_id==slot_id and o.get("world_text")!=null),"Text child was not created"): quit(1); return
+	var child_id: String=scene.selected_id
+	if not await until(func(): return panel.target_id==child_id and not panel.target_change_pending,"Inspector did not select text child"): quit(1); return
+	await create_timer(0.2).timeout
+	scene.world_panels.close_panel(surface.panel_id)
+	if not await until(func(): return scene.world_panels.panels.is_empty(),"Inspector did not close"): push_error("Panel IDs="+str(scene.world_panels.panels.keys())+" pending="+str(scene.world_panels.pending_panel_close)+" edits="+str(panel.edits)+" busy="+str(panel.script_view.busy())); quit(1); return
 	scene.hud.open_creation()
 	if not await until(func(): return scene.world_panels.panels.size()==1,"Creation panel did not reopen for Esc"): quit(1); return
 	id=scene.world_panels.panels.keys()[0]
@@ -180,7 +208,7 @@ func run() -> void:
 	escape.keycode=KEY_ESCAPE; escape.pressed=true
 	root.push_input(escape,true)
 	if not scene.world_panels.panels.has(id) or Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE: push_error("Esc deleted world panel or captured cursor"); quit(1); return
-	print("CREATION SMOKE PASS: FPS gaze click/drag, TPS cursor, shared surface, move while open, grab/rotate/scale, eight meshes, close after success")
+	print("CREATION SMOKE PASS: eight shapes, empty and text Slot presets, inspector component editing and text child, close after success")
 	scene.queue_free()
 	await process_frame
 	await process_frame

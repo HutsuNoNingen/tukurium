@@ -8,10 +8,7 @@ var cards: Array[Button] = []
 var selected := 0
 var create_button: Button
 var slot_button: Button
-var add_renderer_button: Button
-var remove_renderer_button: Button
-var add_text_button: Button
-var remove_text_button: Button
+var text_button: Button
 var status: Label
 var busy := false
 
@@ -60,28 +57,6 @@ func build_ui() -> void:
 	body.add_child(categories)
 	categories.add_child(label("3Dモデル",23))
 	categories.add_child(label("Procedural",15))
-	categories.add_child(HSeparator.new())
-	categories.add_child(label("選択中のSlot",17))
-	add_renderer_button=Button.new()
-	add_renderer_button.text="表示部品を追加"
-	add_renderer_button.focus_mode=Control.FOCUS_NONE
-	add_renderer_button.pressed.connect(change_renderer.bind(true))
-	categories.add_child(add_renderer_button)
-	remove_renderer_button=Button.new()
-	remove_renderer_button.text="表示部品を外す"
-	remove_renderer_button.focus_mode=Control.FOCUS_NONE
-	remove_renderer_button.pressed.connect(change_renderer.bind(false))
-	categories.add_child(remove_renderer_button)
-	add_text_button=Button.new()
-	add_text_button.text="文字を追加"
-	add_text_button.focus_mode=Control.FOCUS_NONE
-	add_text_button.pressed.connect(change_world_text.bind(true))
-	categories.add_child(add_text_button)
-	remove_text_button=Button.new()
-	remove_text_button.text="文字を外す"
-	remove_text_button.focus_mode=Control.FOCUS_NONE
-	remove_text_button.pressed.connect(change_world_text.bind(false))
-	categories.add_child(remove_text_button)
 	var grid := GridContainer.new()
 	grid.columns=4
 	grid.size_flags_horizontal=Control.SIZE_EXPAND_FILL
@@ -123,12 +98,21 @@ func build_ui() -> void:
 	status=label("",18)
 	status.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	footer.add_child(status)
+	var presets := VBoxContainer.new()
+	presets.add_theme_constant_override("separation",4)
+	footer.add_child(presets)
+	text_button=Button.new()
+	text_button.text="テキストを作成"
+	text_button.custom_minimum_size=Vector2(190,48)
+	text_button.focus_mode=Control.FOCUS_NONE
+	text_button.pressed.connect(spawn_slot.bind(true))
+	presets.add_child(text_button)
 	slot_button=Button.new()
 	slot_button.text="空のSlotを作成"
 	slot_button.custom_minimum_size=Vector2(190,48)
 	slot_button.focus_mode=Control.FOCUS_NONE
-	slot_button.pressed.connect(spawn_slot)
-	footer.add_child(slot_button)
+	slot_button.pressed.connect(spawn_slot.bind(false))
+	presets.add_child(slot_button)
 	create_button=Button.new()
 	create_button.custom_minimum_size=Vector2(210,48)
 	create_button.focus_mode=Control.FOCUS_NONE
@@ -182,59 +166,35 @@ func refresh(object: Dictionary) -> void:
 	var index: int=PRIMITIVES.SHAPES.find(object.creation.shape)
 	if index>=0: show_selection(index)
 	for card in cards: card.disabled=not app.editable
-	var target: Dictionary=app.objects.get(app.selected_id,{})
-	var selectable: bool=not target.is_empty() and target.get("panel")==null
-	add_renderer_button.disabled=busy or not app.editable or not selectable or target.get("renderer")!=null
-	remove_renderer_button.disabled=busy or not app.editable or not selectable or target.get("renderer")==null or target.get("playback")!=null
-	add_text_button.disabled=busy or not app.editable or not selectable or target.get("world_text")!=null
-	remove_text_button.disabled=busy or not app.editable or not selectable or target.get("world_text")==null
 	slot_button.disabled=busy or not app.editable
+	text_button.disabled=busy or not app.editable
 	create_button.disabled=busy or not app.editable
 
 func finish_all() -> void:
 	pass
 
-func change_renderer(add: bool) -> void:
-	if busy or not app.editable or not app.objects.has(app.selected_id): return
-	var target: Dictionary=app.objects[app.selected_id]
-	if target.get("panel")!=null: return
-	if add and target.get("renderer")!=null: return
-	if not add and (target.get("renderer")==null or target.get("playback")!=null): return
-	busy=true
-	add_renderer_button.disabled=true
-	remove_renderer_button.disabled=true
-	var command: Dictionary={"kind":"structure","command":{"action":"add_component" if add else "remove_component","target":app.address_of(target),"type_id":"MeshRenderer","expected_revision":target.object_revision}}
-	if add: command["command"]["values"]={"color":[0.2,0.65,0.8,1.0],"visual":{"kind":"primitive","shape":PRIMITIVES.SHAPES[selected]}}
-	manager.command(command,func(result):
-		busy=false
-		if not result.ok: status.text=result.get("message","部品を変更できませんでした")
-		elif app.objects.has(panel_id): refresh(app.objects[panel_id]))
-
-func change_world_text(add: bool) -> void:
-	if busy or not app.editable or not app.objects.has(app.selected_id): return
-	var target: Dictionary=app.objects[app.selected_id]
-	if target.get("panel")!=null or (target.get("world_text")!=null)==add: return
-	busy=true
-	add_text_button.disabled=true
-	remove_text_button.disabled=true
-	var command: Dictionary={"kind":"structure","command":{"action":"add_component" if add else "remove_component","target":app.address_of(target),"type_id":"WorldText","expected_revision":target.object_revision}}
-	if add: command["command"]["values"]={"world_text":"Text","world_text_color":[1.0,1.0,1.0,1.0]}
-	manager.command(command,func(result):
-		busy=false
-		if not result.ok: status.text=result.get("message","文字を変更できませんでした")
-		elif app.objects.has(panel_id): refresh(app.objects[panel_id]))
-
-func spawn_slot() -> void:
+func spawn_slot(with_text: bool) -> void:
 	if busy or not app.editable: return
 	busy=true
 	slot_button.disabled=true
+	text_button.disabled=true
 	create_button.disabled=true
 	status.text="作成中…"
 	var position: Vector3=app.camera.global_position-app.camera.global_basis.z*4.0
 	position.y=app.player_position.y+1.6
-	manager.command({"kind":"structure","command":{"action":"create_slot","parent":null,"position":[position.x,position.y,position.z]}},func(result):
+	var components: Array=[]
+	if with_text: components.append({"type_id":"WorldText","values":{"world_text":"Text","world_text_color":[1.0,1.0,1.0,1.0]}})
+	var command: Dictionary={"action":"create_slot","parent":null,"position":[position.x,position.y,position.z],"components":components}
+	if with_text:
+		var forward: Vector3=-app.camera.global_basis.z
+		forward.y=0.0
+		if forward.length_squared()<0.0001: forward=Vector3.FORWARD
+		var rotation: Quaternion=Basis.looking_at(forward.normalized(),Vector3.UP).get_rotation_quaternion()
+		command["rotation"]=[rotation.x,rotation.y,rotation.z,rotation.w]
+	manager.command({"kind":"structure","command":command},func(result):
 		busy=false
 		slot_button.disabled=not app.editable
+		text_button.disabled=not app.editable
 		create_button.disabled=not app.editable
 		if result.ok:
 			app.select_object(result.selected.instance_id)
@@ -246,6 +206,7 @@ func spawn_selected(index: int = -1) -> void:
 	busy=true
 	create_button.disabled=true
 	slot_button.disabled=true
+	text_button.disabled=true
 	status.text="作成中…"
 	var chosen: int=selected if index<0 else index
 	var shape: String=PRIMITIVES.SHAPES[chosen]
@@ -256,6 +217,7 @@ func spawn_selected(index: int = -1) -> void:
 		busy=false
 		create_button.disabled=not app.editable
 		slot_button.disabled=not app.editable
+		text_button.disabled=not app.editable
 		if result.ok:
 			app.select_object(result.selected.instance_id)
 			manager.close_panel(panel_id)

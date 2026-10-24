@@ -2,6 +2,7 @@ extends PanelContainer
 const SHARED_SCRIPT_VIEW = preload("res://shared_script_view.gd")
 const INSPECTOR_TREE = preload("res://inspector_tree.gd")
 const REFERENCE_CHIP = preload("res://reference_chip.gd")
+const PRIMITIVES = preload("res://primitive_mesh.gd")
 ## One inspector instance. Selection, drafts and requests never use the HUD's singleton state.
 var manager
 var script_view
@@ -42,6 +43,11 @@ var reference_chips: Dictionary = {}
 var pending_field := ""
 var pending_reference_target := ""
 var reference_values: Dictionary = {}
+var component_shape_picker: OptionButton
+var add_mesh_button: Button
+var add_text_button: Button
+var component_remove_buttons: Dictionary = {}
+var component_actions := VBoxContainer.new()
 
 func setup(controller, id: String, in_desktop: bool = false) -> void:
 	manager = controller
@@ -126,6 +132,7 @@ func build_body(body: Container) -> void:
 	tabs.add_tab("Scripts")
 	tabs.tab_changed.connect(select_tab)
 	details.add_child(tabs)
+	details.add_child(component_actions)
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	details.add_child(scroll)
@@ -208,12 +215,20 @@ func build_fields() -> void:
 	drive_buttons.clear()
 	reference_chips.clear()
 	reference_values.clear()
+	for child in component_actions.get_children():
+		component_actions.remove_child(child)
+		child.queue_free()
+	component_shape_picker = null
+	add_mesh_button = null
+	add_text_button = null
+	component_remove_buttons.clear()
 	building_field = {}
 	field_container = fields_box
 	if target_id.is_empty() or not manager.app.objects.has(target_id):
 		heading("Choose an object above. Deleted targets are cleared.")
 		return
 	var object: Dictionary = manager.app.objects[target_id]
+	build_component_actions(object)
 	for schema in manager.component_schemas:
 		var fields: Array = object.fields.filter(func(field): return int(field.component_id) == int(schema.local_id))
 		if fields.is_empty(): continue
@@ -232,6 +247,51 @@ func build_fields() -> void:
 		row.add_child(label)
 		add_button(row, "Edit", open_script.bind(str(script.id)))
 	add_button(field_container, "Manage scripts", open_script.bind(""))
+
+func build_component_actions(object: Dictionary) -> void:
+	component_actions.visible = object.get("panel") == null and tabs.current_tab == 0
+	if object.get("panel") != null: return
+	var title_label := Label.new()
+	title_label.text = "Components"
+	title_label.add_theme_font_size_override("font_size", 20)
+	component_actions.add_child(title_label)
+	var mesh_row := HBoxContainer.new()
+	component_actions.add_child(mesh_row)
+	component_shape_picker = OptionButton.new()
+	for index in PRIMITIVES.SHAPES.size(): component_shape_picker.add_item(PRIMITIVES.NAMES[index])
+	mesh_row.add_child(component_shape_picker)
+	add_mesh_button = add_button(mesh_row, "Add Mesh", change_component.bind("MeshRenderer", true))
+	add_mesh_button.disabled = not manager.app.editable or object.get("renderer") != null
+	component_remove_buttons["MeshRenderer"] = add_button(mesh_row, "Remove Mesh", change_component.bind("MeshRenderer", false))
+	component_remove_buttons["MeshRenderer"].disabled = not manager.app.editable or object.get("renderer") == null or object.get("playback") != null
+	var text_row := HBoxContainer.new()
+	component_actions.add_child(text_row)
+	var text_label := Label.new()
+	text_label.text = "WorldText"
+	text_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text_row.add_child(text_label)
+	add_text_button = add_button(text_row, "Add", change_component.bind("WorldText", true))
+	add_text_button.disabled = not manager.app.editable or object.get("world_text") != null
+	component_remove_buttons["WorldText"] = add_button(text_row, "Remove", change_component.bind("WorldText", false))
+	component_remove_buttons["WorldText"].disabled = not manager.app.editable or object.get("world_text") == null
+
+func change_component(type_id: String, add: bool) -> void:
+	if not manager.app.editable or not manager.app.objects.has(target_id): return
+	var object: Dictionary = manager.app.objects[target_id]
+	if object.get("panel") != null: return
+	if type_id == "MeshRenderer":
+		if (object.get("renderer") != null) == add or (not add and object.get("playback") != null): return
+	elif type_id == "WorldText":
+		if (object.get("world_text") != null) == add: return
+	else: return
+	var command: Dictionary = {"action":"add_component" if add else "remove_component", "target":manager.app.address_of(object), "type_id":type_id, "expected_revision":object.object_revision}
+	if add and type_id == "MeshRenderer":
+		command["values"] = {"color":[0.2,0.65,0.8,1.0], "visual":{"kind":"primitive", "shape":PRIMITIVES.SHAPES[component_shape_picker.selected]}}
+	elif add:
+		command["values"] = {"world_text":"Text", "world_text_color":[1.0,1.0,1.0,1.0]}
+	message.text = ""
+	manager.command({"kind":"structure", "command":command}, func(result):
+		if not result.ok: message.text = result.get("message", "Could not change component"))
 
 func component_section(name: String, component_id: int = 0) -> void:
 	var section := VBoxContainer.new()
@@ -412,6 +472,7 @@ func refresh_pages(object: Dictionary) -> void:
 	tabs.current_tab = 1 if show_scripts else 0
 	tabs.set_block_signals(false)
 	script_mount.visible = show_scripts
+	component_actions.visible = not show_scripts and manager.app.objects.get(target_id, {}).get("panel") == null
 	scroll.visible = not show_scripts
 	script_view.active = show_scripts
 	if show_scripts: script_view.refresh(target_id, object.inspector.get("script_id"))

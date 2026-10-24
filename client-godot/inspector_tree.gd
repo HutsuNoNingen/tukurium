@@ -24,6 +24,7 @@ var filling := false
 var signature := ""
 var tree_state: Dictionary = {}
 var child_button: Button
+var child_text_button: Button
 
 func setup(view) -> void:
 	inspector = view
@@ -63,6 +64,19 @@ func setup(view) -> void:
 			manager.command({"kind":"structure","command":{"action":"create_child","parent":manager.app.address_of(manager.app.objects[view.target_id])}},func(result):
 				if result.ok: inspector.choose_target(result.selected.instance_id)
 				else: inspector.message.text = result.get("message","Could not create child")))
+	child_text_button = view.add_button(self,"+ Text child",func():
+		if manager.app.objects.has(view.target_id):
+			manager.command({"kind":"structure","command":{
+				"action":"create_slot",
+				"parent":manager.app.address_of(manager.app.objects[view.target_id]),
+				"position":[0.0,0.0,0.8],
+				"position_space":"parent",
+				"components":[{"type_id":"WorldText","values":{"world_text":"Text","world_text_color":[1.0,1.0,1.0,1.0]}}],
+			}},func(result):
+				if result.ok:
+					inspector.choose_target(result.selected.instance_id)
+					manager.app.select_object(result.selected.instance_id)
+				else: inspector.message.text = result.get("message","Could not create text child")))
 	view.add_button(self,"Move to world",func(): move_object(view.target_id,null))
 	view.add_button(self,"Duplicate",func():
 		var object: Dictionary = manager.app.objects.get(view.target_id,{})

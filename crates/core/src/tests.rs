@@ -1,5 +1,5 @@
 use super::*;
-use kokoverse_protocol::{Edit, StructuralCommand, StructuralOperation};
+use kokoverse_protocol::{Edit, InitialComponent, PositionSpace, StructuralCommand, StructuralOperation};
 
 fn edit(model: &WorldModel, field: &str, value: Value) -> WorldCommand {
     let object = &model.snapshot().objects[0];
@@ -40,7 +40,7 @@ fn empty_slots_replicate_duplicate_and_restore_without_mesh_renderers() {
     let mut guest = WorldModel::new();
     guest.restore(host.snapshot()).unwrap();
     let parent = host.snapshot().objects[0].address.clone();
-    let created = run(&mut host, structure(StructuralOperation::CreateSlot { parent: Some(parent.clone()), position: [1.0, 2.0, 3.0] }));
+    let created = run(&mut host, structure(StructuralOperation::CreateSlot { parent: Some(parent.clone()), position: [1.0, 2.0, 3.0], rotation: None, position_space: PositionSpace::World, components: vec![] }));
     let id = created.selected.unwrap();
     guest.apply_commit(created.result.unwrap()).unwrap();
     assert_eq!(guest.snapshot(), host.snapshot());
@@ -67,10 +67,11 @@ fn text_creation_is_atomic_for_world_and_child_slots() {
     let mut guest = WorldModel::new();
     guest.restore(host.snapshot()).unwrap();
     let parent = host.snapshot().objects[0].address.clone();
-    let root = run(&mut host, structure(StructuralOperation::CreateText { position: [1.0, 1.6, 2.0] }));
+    let text_component = || InitialComponent { type_id: "WorldText".into(), values: json!({"world_text":"Text", "world_text_color":[1.0,1.0,1.0,1.0]}) };
+    let root = run(&mut host, structure(StructuralOperation::CreateSlot { parent: None, position: [1.0, 1.6, 2.0], rotation: Some([0.0, 1.0, 0.0, 0.0]), position_space: PositionSpace::World, components: vec![text_component()] }));
     let root_id = root.selected.unwrap();
     guest.apply_commit(root.result.unwrap()).unwrap();
-    let child = run(&mut host, structure(StructuralOperation::CreateChildText { parent: parent.clone() }));
+    let child = run(&mut host, structure(StructuralOperation::CreateSlot { parent: Some(parent.clone()), position: [0.0, 0.0, 0.8], rotation: None, position_space: PositionSpace::Parent, components: vec![text_component()] }));
     let child_id = child.selected.unwrap();
     guest.apply_commit(child.result.unwrap()).unwrap();
     assert_eq!(guest.snapshot(), host.snapshot());
@@ -78,6 +79,7 @@ fn text_creation_is_atomic_for_world_and_child_slots() {
     let root_text = snapshot.objects.iter().find(|o| o.address == root_id).unwrap();
     assert!(root_text.renderer.is_none());
     assert_eq!(root_text.world_position, [1.0, 1.6, 2.0]);
+    assert_eq!(root_text.world_rotation, [0.0, 1.0, 0.0, 0.0]);
     assert_eq!(root_text.world_text.as_ref().unwrap().text, "Text");
     assert!(root_text.fields.iter().any(|f| f.id == "world_text"));
     let child_text = snapshot.objects.iter().find(|o| o.address == child_id).unwrap();
@@ -90,6 +92,12 @@ fn text_creation_is_atomic_for_world_and_child_slots() {
     assert_eq!(restored.snapshot(), snapshot);
     let wire = replication::REGISTRY.encode_world(&snapshot);
     assert_eq!(replication::REGISTRY.decode_world(wire).unwrap(), snapshot);
+    let before = host.snapshot();
+    assert!(run(&mut host, structure(StructuralOperation::CreateSlot {
+        parent: None, position: [0.0, 1.5, 0.0], rotation: None, position_space: PositionSpace::World,
+        components: vec![InitialComponent { type_id: "NotAComponent".into(), values: json!({}) }],
+    })).result.is_err());
+    assert_eq!(host.snapshot(), before);
 }
 
 #[test]
@@ -97,7 +105,7 @@ fn renderer_component_attaches_and_detaches_with_revision_and_schema_checks() {
     let mut host = WorldModel::new();
     let mut guest = WorldModel::new();
     guest.restore(host.snapshot()).unwrap();
-    let created = run(&mut host, structure(StructuralOperation::CreateSlot { parent: None, position: [0.0, 1.5, 0.0] }));
+    let created = run(&mut host, structure(StructuralOperation::CreateSlot { parent: None, position: [0.0, 1.5, 0.0], rotation: None, position_space: PositionSpace::World, components: vec![] }));
     let id = created.selected.unwrap();
     guest.apply_commit(created.result.unwrap()).unwrap();
     let initial = host.snapshot().objects.into_iter().find(|o| o.address == id).unwrap();
@@ -139,7 +147,7 @@ fn world_text_is_editable_and_survives_replication_duplication_and_restore() {
     let mut host = WorldModel::new();
     let mut guest = WorldModel::new();
     guest.restore(host.snapshot()).unwrap();
-    let created = run(&mut host, structure(StructuralOperation::CreateSlot { parent: None, position: [0.0, 1.5, 0.0] }));
+    let created = run(&mut host, structure(StructuralOperation::CreateSlot { parent: None, position: [0.0, 1.5, 0.0], rotation: None, position_space: PositionSpace::World, components: vec![] }));
     let id = created.selected.unwrap();
     guest.apply_commit(created.result.unwrap()).unwrap();
     let revision = host.snapshot().objects.iter().find(|o| o.address == id).unwrap().object_revision.clone();

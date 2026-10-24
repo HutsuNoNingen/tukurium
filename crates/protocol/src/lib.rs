@@ -287,9 +287,16 @@ pub struct StructuralCommand {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum StructuralOperation {
-    CreateSlot { parent: Option<Address>, position: [f64; 3] },
-    CreateText { position: [f64; 3] },
-    CreateChildText { parent: Address },
+    CreateSlot {
+        parent: Option<Address>,
+        position: [f64; 3],
+        #[serde(default)]
+        rotation: Option<[f64; 4]>,
+        #[serde(default)]
+        position_space: PositionSpace,
+        #[serde(default)]
+        components: Vec<InitialComponent>,
+    },
     AddComponent { target: Address, type_id: String, expected_revision: String, values: Value },
     RemoveComponent { target: Address, type_id: String, expected_revision: String },
     CreateChild { parent: Address },
@@ -321,6 +328,20 @@ pub enum StructuralOperation {
         target: Address,
         expected_revision: String,
     },
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PositionSpace {
+    #[default]
+    World,
+    Parent,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InitialComponent {
+    pub type_id: String,
+    pub values: Value,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
