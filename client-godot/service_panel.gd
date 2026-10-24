@@ -1,6 +1,7 @@
 extends CanvasLayer
 ## HN home, saved items and workshop. The Engine keeps session credentials.
 const Art = preload("res://service_art.gd")
+const DesktopWindow = preload("res://desktop_window.gd")
 const PAPER = Color("fffdf9")
 const GROUND = Color("eae5db")
 const INK = Color("26262e")
@@ -11,6 +12,7 @@ const PALE = Color("eef3fc")
 var app
 var shade: ColorRect
 var shell: PanelContainer
+var floating_window
 var status: Label
 var identity: Label
 var name_input: LineEdit
@@ -145,16 +147,16 @@ func setup(scene) -> void:
 	open_button.position=Vector2(280,112)
 	open_button.visible=false
 	shade=ColorRect.new()
-	shade.color=Color(0.10,0.11,0.14,0.72)
+	shade.color=Color.TRANSPARENT
+	shade.mouse_filter=Control.MOUSE_FILTER_IGNORE
 	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shade.visible=false
 	add_child(shade)
-	shell=PanelContainer.new()
-	shell.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	shell.offset_left=24
-	shell.offset_right=-24
-	shell.offset_top=20
-	shell.offset_bottom=-20
+	floating_window=DesktopWindow.new()
+	shade.add_child(floating_window)
+	floating_window.size=Vector2(minf(1120,app.get_viewport().get_visible_rect().size.x-48),minf(620,app.get_viewport().get_visible_rect().size.y-180))
+	floating_window.position=Vector2((app.get_viewport().get_visible_rect().size.x-floating_window.size.x)/2,82)
+	shell=floating_window.panel
 	shell.add_theme_stylebox_override("panel",box(GROUND,20,Color.TRANSPARENT,16))
 	var theme := Theme.new()
 	theme.default_font=body_font
@@ -180,10 +182,9 @@ func setup(scene) -> void:
 	theme.set_color("title_color","Window",INK)
 	theme.set_stylebox("embedded_border","Window",box(GROUND,14,LINE,12))
 	shell.theme=theme
-	shade.add_child(shell)
 	var layout := row(shell,18)
 	var side := surface(layout)
-	side.custom_minimum_size.x=184
+	side.custom_minimum_size.x=162
 	var sidebar := column(side,12)
 	sidebar.add_child(text("Kokoverse",24,INK,true))
 	sidebar.add_child(text("ワークスペース",12,MUTED))
@@ -209,18 +210,20 @@ func setup(scene) -> void:
 	var main := column(layout,14)
 	main.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	var top := row(main)
+	floating_window.use_titlebar(top)
 	var titles := column(top,3)
+	titles.mouse_filter=Control.MOUSE_FILTER_IGNORE
 	titles.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	heading=text("セッション",27,INK,true)
 	titles.add_child(heading)
 	subtitle=paragraph("一緒に作る場所を選ぶ。",13)
 	titles.add_child(subtitle)
 	version_label=text(app.app_version,12,MUTED)
+	version_label.mouse_filter=Control.MOUSE_FILTER_IGNORE
 	version_label.name="AppVersion"
 	version_label.tooltip_text="このアプリの配布バージョン"
 	top.add_child(version_label)
-	back_button=button(top,"ワールドへ戻る",func(): if not current_session.is_empty(): shade.hide())
-	back_button.visible=false
+	back_button=button(top,"閉じる",func(): shade.hide())
 	var workspace := row(main,16)
 	workspace.size_flags_vertical=Control.SIZE_EXPAND_FILL
 	var content := Control.new()
@@ -247,6 +250,7 @@ func setup(scene) -> void:
 	main.add_child(status)
 	content.resized.connect(update_columns)
 	switch_page("sessions",false)
+	floating_window.minimum_window_size=Vector2(700,450)
 
 func build_sessions(parent: VBoxContainer) -> void:
 	var panel := surface(parent)
@@ -361,7 +365,6 @@ func receive_state(body: Dictionary) -> void:
 	if not enabled: return
 	current_user=body.user if body.get("user") is Dictionary else {}
 	current_session=body.session if body.get("session") is Dictionary else {}
-	back_button.visible=not current_session.is_empty()
 	name_input.editable=current_session.is_empty()
 	login_button.disabled=not current_session.is_empty()
 	if not current_user.is_empty():
@@ -380,6 +383,14 @@ func show_panel() -> void:
 	save_button.disabled=app.current.is_empty() or current_session.is_empty()
 	save_button.tooltip_text="ワールドでアイテムを選択してから保存します。" if save_button.disabled else "見た目・設定・ロジックを保存します。"
 	if not current_user.is_empty(): refresh()
+
+func open_page(value: String) -> void:
+	if not enabled: return
+	if shade.visible and page==value:
+		shade.hide()
+		return
+	switch_page(value,false)
+	show_panel()
 
 func call_service(action: String, values: Dictionary, completed: Callable, failed: Callable = Callable()) -> void:
 	if not app.connected: status.text="接続を待っています…"; return

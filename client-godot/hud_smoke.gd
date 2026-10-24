@@ -26,6 +26,17 @@ func click(at: Vector2, button: int = MOUSE_BUTTON_LEFT) -> void:
 	event=event.duplicate(); event.pressed=false
 	root.push_input(event,true)
 
+func drag(from: Vector2, to: Vector2) -> void:
+	var down := InputEventMouseButton.new()
+	down.button_index=MOUSE_BUTTON_LEFT; down.position=from; down.global_position=from; down.pressed=true
+	root.push_input(down,true)
+	var motion := InputEventMouseMotion.new()
+	motion.position=to; motion.global_position=to; motion.relative=to-from
+	root.push_input(motion,true)
+	var up := down.duplicate()
+	up.position=to; up.global_position=to; up.pressed=false
+	root.push_input(up,true)
+
 func capture(suffix: String) -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--screenshot="):
@@ -51,8 +62,11 @@ func run() -> void:
 	if not scene.first_person: push_error("F5 did not cycle back to FPS"); quit(1); return
 	key(KEY_ESCAPE)
 	if scene.hud.menu.visible or scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE: push_error("Esc did not release cursor without opening menu"); quit(1); return
-	click(scene.hud.profile_button.get_global_rect().get_center())
-	if not scene.hud.menu.visible or not scene.gameplay_keyboard_blocked(): push_error("Hamburger did not open dashboard"); quit(1); return
+	if not scene.hud.dock_buttons.has("sessions") or not scene.hud.dock_buttons.has("library") or not scene.hud.dock_buttons.has("workshop") or not scene.hud.dock_buttons.has("settings"):
+		push_error("Separate dock icons missing"); quit(1); return
+	click(scene.hud.dock_buttons.settings.get_global_rect().get_center())
+	if not scene.hud.menu.visible or not scene.gameplay_keyboard_blocked(): push_error("Settings dock did not open its window"); quit(1); return
+	if not scene.hud.room_label.is_visible_in_tree(): push_error("Top bar disappeared behind settings"); quit(1); return
 	if not scene.nickname.is_visible_in_tree() or not scene.avatar_button.is_visible_in_tree(): push_error("User settings are not in the menu"); quit(1); return
 	var position: Vector3=scene.player_target_position
 	Input.action_press("move_forward"); Input.action_press("jump")
@@ -62,15 +76,27 @@ func run() -> void:
 	await capture("-menu")
 	key(KEY_ESCAPE)
 	if scene.hud.menu.visible or scene.fps_active: push_error("Esc did not close menu and leave cursor visible"); quit(1); return
-	scene.hud.resume_view()
-	# The connected home surface is another Esc overlay, with the same input rules.
+	# The connected personal surfaces use the separate dock buttons.
 	var workspace=scene.get("service_panel")
 	if workspace != null:
 		workspace.enabled=true
-		scene.hud.open_home()
-		if not workspace.shade.visible or not scene.gameplay_keyboard_blocked(): push_error("Home menu was not opened"); quit(1); return
+		await until(func(): return not scene.hud.dock_buttons.sessions.disabled,"Session dock stayed disabled")
+		click(scene.hud.dock_buttons.sessions.get_global_rect().get_center())
+		if not workspace.shade.visible or workspace.page!="sessions" or not scene.gameplay_keyboard_blocked(): push_error("Session window was not opened"); quit(1); return
+		if not scene.hud.room_label.is_visible_in_tree() or workspace.floating_window.size.x>=root.size.x: push_error("Top bar or floating window layout missing"); quit(1); return
+		await capture("-sessions")
+		var before: Vector2=workspace.floating_window.position
+		drag(workspace.heading.get_global_rect().get_center(),workspace.heading.get_global_rect().get_center()+Vector2(38,24))
+		if workspace.floating_window.position.distance_to(before)<10: push_error("Session window did not drag"); quit(1); return
+		var old_size: Vector2=workspace.floating_window.size
+		drag(workspace.floating_window.grip.get_global_rect().get_center(),workspace.floating_window.grip.get_global_rect().get_center()+Vector2(-40,-32))
+		if workspace.floating_window.size.distance_to(old_size)<10: push_error("Session window did not resize"); quit(1); return
+		click(scene.hud.dock_buttons.library.get_global_rect().get_center())
+		if workspace.page!="library" or not workspace.shade.visible: push_error("Inventory dock did not open library"); quit(1); return
+		click(scene.hud.dock_buttons.workshop.get_global_rect().get_center())
+		if workspace.page!="workshop" or not workspace.shade.visible: push_error("Workshop dock did not open workshop"); quit(1); return
 		key(KEY_ESCAPE)
-		if workspace.shade.visible or scene.fps_active: push_error("Esc did not close home and release cursor"); quit(1); return
+		if workspace.shade.visible or scene.fps_active: push_error("Esc did not close floating window and release cursor"); quit(1); return
 		workspace.enabled=false
 		scene.hud.resume_view()
 	click(root.size*0.5,MOUSE_BUTTON_MIDDLE)
@@ -89,7 +115,7 @@ func run() -> void:
 	click(root.size*0.5,MOUSE_BUTTON_MIDDLE)
 	key(KEY_ESCAPE)
 	if scene.hud.ring.visible or scene.hud.menu.visible: push_error("Esc did not cancel ring"); quit(1); return
-	print("HUD SMOKE PASS: cursor-first FPS, click to capture, F5, Esc release, dashboard, blocked movement, status, ring 2D/3D and cancel")
+	print("HUD SMOKE PASS: cursor-first FPS, top bar, dock, floating window drag/resize, Esc, blocked movement, status and ring 2D/3D")
 	scene.queue_free()
 	await process_frame
 	await process_frame

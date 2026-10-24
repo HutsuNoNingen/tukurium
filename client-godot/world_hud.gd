@@ -1,6 +1,7 @@
 extends CanvasLayer
 ## Local application chrome. The world and edit operations stay in the Engine.
 const RING = preload("res://ring_menu.gd")
+const DesktopWindow = preload("res://desktop_window.gd")
 const INK := Color("101b25")
 const LINE := Color("304550")
 const TEXT := Color("e6f0f4")
@@ -9,8 +10,10 @@ const ACCENT := Color("77dbce")
 var app
 var root := Control.new()
 var ring = RING.new()
-var menu := ColorRect.new()
+var menu = DesktopWindow.new()
 var workspace
+var dock: HBoxContainer
+var dock_buttons := {}
 var room_label: Label
 var sync_label: Label
 var fps_label: Label
@@ -18,9 +21,7 @@ var engine_label: Label
 var profile_button: Button
 var mode_button: Button
 var home_button: Button
-var menu_home_button: Button
 var ring_target := ""
-var last_overlay := false
 var next_status := 0
 
 func style(color: Color, padding: int = 12) -> StyleBoxFlat:
@@ -55,7 +56,7 @@ func button(parent: Node, value: String, action: Callable) -> Button:
 func setup(owner) -> void:
 	app = owner
 	workspace = app.get("service_panel")
-	layer = 5
+	layer = 25
 	add_child(root)
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -70,8 +71,8 @@ func setup(owner) -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation",12)
 	bar.add_child(row)
-	profile_button=button(row,"☰",toggle_menu)
-	profile_button.tooltip_text="ダッシュメニュー"
+	profile_button=button(row,"ユーザー",toggle_menu)
+	profile_button.tooltip_text="ユーザー設定"
 	row.add_child(text("◇  kokoverse",21))
 	row.add_child(VSeparator.new())
 	room_label=text("Workshop",14,MUTED)
@@ -87,56 +88,43 @@ func setup(owner) -> void:
 	row.add_child(fps_label)
 	mode_button=button(row,"FPS",cycle_view)
 	mode_button.tooltip_text="視点切り替え · F5"
-	home_button=button(row,"ホーム / ライブラリ",open_home)
+	home_button=button(row,"セッション",open_home)
 	build_menu()
+	build_dock()
 	root.add_child(ring)
 	ring.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	ring.hide()
 	ring.chosen.connect(choose_action)
 	ring.cancelled.connect(close_ring)
-	# The home entry now lives in the top bar and Esc menu.
+	# The old standalone service button is replaced by the dock.
 	if workspace != null:
 		workspace.open_button.hide()
 		workspace.open_button.visibility_changed.connect(func():
 			if workspace.open_button.visible: workspace.open_button.hide())
 
 func build_menu() -> void:
-	menu.color=Color(0.03,0.05,0.07,0.72)
 	root.add_child(menu)
-	menu.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	menu.size=Vector2(530,400)
+	menu.position=Vector2(128,118)
+	menu.minimum_window_size=Vector2(420,320)
+	menu.panel.add_theme_stylebox_override("panel",style(INK,22))
 	menu.hide()
-	var center := CenterContainer.new()
-	menu.add_child(center)
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var shell := PanelContainer.new()
-	shell.custom_minimum_size=Vector2(700,460)
-	shell.add_theme_stylebox_override("panel",style(INK,24))
-	center.add_child(shell)
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation",18)
-	shell.add_child(column)
+	column.add_theme_constant_override("separation",12)
+	menu.panel.add_child(column)
 	var header := HBoxContainer.new()
 	column.add_child(header)
-	var title := text("メニュー",23)
+	menu.use_titlebar(header)
+	var title := text("ユーザー設定",22)
+	title.mouse_filter=Control.MOUSE_FILTER_IGNORE
 	title.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	header.add_child(title)
-	button(header,"ワールドへ戻る",close_menu)
+	button(header,"閉じる",close_menu)
 	column.add_child(HSeparator.new())
-	var body := HBoxContainer.new()
-	body.add_theme_constant_override("separation",28)
-	column.add_child(body)
-	var nav := VBoxContainer.new()
-	nav.custom_minimum_size.x=180
-	nav.add_theme_constant_override("separation",12)
-	body.add_child(nav)
-	menu_home_button=button(nav,"ホーム / ライブラリ",open_home)
-	var settings_button := button(nav,"ユーザー設定",func(): pass)
-	settings_button.add_theme_color_override("font_color",ACCENT)
 	var settings := VBoxContainer.new()
 	settings.size_flags_horizontal=Control.SIZE_EXPAND_FILL
-	settings.add_theme_constant_override("separation",12)
-	body.add_child(settings)
-	settings.add_child(text("ユーザー設定",20))
+	settings.add_theme_constant_override("separation",9)
+	column.add_child(settings)
 	settings.add_child(text("表示名",13,MUTED))
 	app.nickname.reparent(settings)
 	app.nickname.custom_minimum_size.y=38
@@ -152,6 +140,41 @@ func build_menu() -> void:
 	app.people_label.reparent(settings)
 	app.people_label.max_lines_visible=6
 
+func build_dock() -> void:
+	var holder := CenterContainer.new()
+	holder.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	holder.offset_top=-86
+	holder.offset_bottom=-10
+	holder.mouse_filter=Control.MOUSE_FILTER_PASS
+	root.add_child(holder)
+	dock=HBoxContainer.new()
+	dock.add_theme_constant_override("separation",10)
+	holder.add_child(dock)
+	for item in [["sessions","⌂","セッション"],["library","▦","インベントリ"],["workshop","✦","ワークショップ"],["settings","⚙","設定"]]:
+		var key: String=item[0]
+		var tile := Button.new()
+		tile.text=item[1]+"\n"+item[2]
+		tile.custom_minimum_size=Vector2(108,64)
+		tile.focus_mode=Control.FOCUS_NONE
+		tile.mouse_default_cursor_shape=Control.CURSOR_POINTING_HAND
+		tile.add_theme_font_size_override("font_size",14)
+		tile.add_theme_color_override("font_color",TEXT)
+		tile.add_theme_color_override("font_hover_color",ACCENT)
+		tile.add_theme_stylebox_override("normal",style(INK,5))
+		tile.add_theme_stylebox_override("hover",style(Color("233b47"),5))
+		tile.add_theme_stylebox_override("pressed",style(Color("2b5057"),5))
+		tile.pressed.connect(func(): open_dock(key))
+		dock.add_child(tile)
+		dock_buttons[key]=tile
+
+func open_dock(key: String) -> void:
+	if key=="settings":
+		toggle_menu()
+	elif workspace != null and workspace.enabled:
+		menu.hide()
+		ring.hide()
+		workspace.open_page(key)
+
 func workspace_open() -> bool:
 	return workspace != null and workspace.enabled and workspace.shade.visible
 
@@ -162,10 +185,11 @@ func open_creation() -> void:
 	app.world_panels.open_creation()
 
 func release_to_cursor() -> void:
-	menu.hide()
-	ring.hide()
-	if workspace_open(): workspace.shade.hide()
-	last_overlay=false
+	var captured: bool=Input.mouse_mode==Input.MOUSE_MODE_CAPTURED or app.fps_active
+	if not captured:
+		if ring.visible: ring.hide()
+		elif menu.visible: menu.hide()
+		elif workspace_open(): workspace.shade.hide()
 	app.get_viewport().gui_release_focus()
 	app.world_panels.clear_focus()
 	app.release_cursor()
@@ -178,12 +202,12 @@ func resume_view() -> void:
 
 func close_menu() -> void:
 	menu.hide()
-	resume_view()
 
 func toggle_menu() -> void:
 	if menu.visible: close_menu()
 	else:
 		ring.hide()
+		if workspace_open(): workspace.shade.hide()
 		app.get_viewport().gui_release_focus()
 		app.world_panels.clear_focus()
 		app.release_cursor()
@@ -193,7 +217,7 @@ func open_home() -> void:
 	if workspace == null or not workspace.enabled: return
 	menu.hide()
 	ring.hide()
-	workspace.show_panel()
+	workspace.open_page("sessions")
 
 func close_ring() -> void:
 	ring.hide()
@@ -243,9 +267,6 @@ func handle_input(event: InputEvent) -> bool:
 	return false
 
 func _process(_delta: float) -> void:
-	var overlay := blocking()
-	if last_overlay and not overlay: resume_view()
-	last_overlay=overlay
 	if Time.get_ticks_msec()<next_status: return
 	next_status=Time.get_ticks_msec()+200
 	fps_label.text="%d FPS" % Engine.get_frames_per_second()
@@ -263,4 +284,8 @@ func _process(_delta: float) -> void:
 	engine_label.tooltip_text="ローカルEngineとの往復時間"
 	room_label.text=str(workspace.current_session.get("name",app.session)) if workspace != null else app.session
 	home_button.visible=workspace != null and workspace.enabled
-	menu_home_button.disabled=not home_button.visible
+	for key in ["sessions","library","workshop"]:
+		dock_buttons[key].disabled=not home_button.visible
+		var active: bool=workspace_open() and workspace.page==key
+		dock_buttons[key].add_theme_color_override("font_color",ACCENT if active else TEXT)
+	dock_buttons.settings.add_theme_color_override("font_color",ACCENT if menu.visible else TEXT)
