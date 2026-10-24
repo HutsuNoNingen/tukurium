@@ -27,6 +27,12 @@ pub struct ComponentRegistration {
 pub struct Registry {
     pub components: Vec<ComponentRegistration>,
     pub attachments: Vec<AttachmentRegistration>,
+    pub session_components: Vec<SessionComponentRegistration>,
+}
+
+pub struct SessionComponentRegistration {
+    pub type_id: &'static str,
+    pub validate: fn(&Value) -> Result<(), String>,
 }
 
 pub struct AttachmentRegistration {
@@ -190,6 +196,7 @@ fn no_edit(_: &mut World, _: Entity, _: &str, _: Value) {
 }
 
 pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
+    session_components: vec![SessionComponentRegistration { type_id: "SessionChat", validate: crate::session_chat::validate_value }],
     attachments: vec![
         AttachmentRegistration { type_id: "MeshRenderer", remove: remove_mesh },
         AttachmentRegistration { type_id: "WorldText", remove: remove_world_text },

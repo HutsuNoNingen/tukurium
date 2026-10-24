@@ -497,6 +497,37 @@ fn presence_is_transient_coalesced_and_survives_snapshot_restore() {
 }
 
 #[test]
+fn session_chat_is_bounded_and_survives_world_restore_without_persisting() {
+    use kokoverse_protocol::SessionChatMessage;
+    let mut model = WorldModel::new();
+    let world = model.snapshot();
+    let message = SessionChatMessage {
+        id: "one".into(), sender_id: "peer:epoch".into(), sender_name: "Guest".into(),
+        text: "hello".into(), at_millis: 123,
+    };
+    assert_eq!(model.append_chat(message.clone()).unwrap(), true);
+    assert_eq!(model.append_chat(message.clone()).unwrap(), false);
+    let mut invalid = message.clone();
+    invalid.id = "bad".into();
+    invalid.text = "\u{0000}".into();
+    assert!(model.append_chat(invalid.clone()).is_err());
+    assert!(model.replace_chat(vec![invalid]).is_err());
+    assert_eq!(model.chat_messages(), vec![message.clone()]);
+    assert_eq!(model.snapshot(), world);
+    model.restore(world.clone()).unwrap();
+    assert_eq!(model.chat_messages(), vec![message]);
+    assert_eq!(model.snapshot(), world);
+    let history = (0..=crate::session_chat::MAX_MESSAGES).map(|index| SessionChatMessage {
+        id: format!("m{index}"), sender_id: "peer:epoch".into(), sender_name: "Guest".into(),
+        text: "message".into(), at_millis: index as u64,
+    }).collect::<Vec<_>>();
+    for message in history { model.append_chat(message).unwrap(); }
+    assert_eq!(model.chat_messages().len(), crate::session_chat::MAX_MESSAGES);
+    assert_eq!(model.chat_messages()[0].id, "m1");
+    assert_eq!(model.snapshot(), world);
+}
+
+#[test]
 fn avatar_texture_references_are_validated_and_do_not_edit_the_world() {
     let mut model = WorldModel::new();
     let original = model.snapshot();

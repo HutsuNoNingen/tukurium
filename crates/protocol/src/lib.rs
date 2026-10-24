@@ -47,6 +47,15 @@ pub struct ParticipantView {
     pub avatar_texture: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionChatMessage {
+    pub id: String,
+    pub sender_id: String,
+    pub sender_name: String,
+    pub text: String,
+    pub at_millis: u64,
+}
+
 pub fn valid_asset_id(id: &str) -> bool {
     id.len() == 64
         && id

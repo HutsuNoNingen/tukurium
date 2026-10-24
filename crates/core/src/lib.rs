@@ -10,6 +10,7 @@ mod references;
 pub mod locomotion;
 pub mod panels;
 pub mod presence;
+pub mod session_chat;
 pub mod replication;
 mod resources;
 pub mod scripting;
@@ -64,6 +65,7 @@ impl WorldModel {
         world.init_resource::<presence::PresenceInputs>();
         world.init_resource::<presence::PresenceIndex>();
         world.init_resource::<presence::PresenceCache>();
+        world.init_resource::<session_chat::ChatHistory>();
         world.init_resource::<locomotion::LocalControl>();
         world.init_resource::<collision::CollisionWorld>();
         world.init_resource::<collision::PreviewPositions>();
@@ -518,6 +520,32 @@ impl WorldModel {
         self.world.resource::<presence::PresenceCache>().revision
     }
 
+    pub fn append_chat(&mut self, message: kokoverse_protocol::SessionChatMessage) -> Result<bool, String> {
+        let value = serde_json::to_value(&message).map_err(|error| error.to_string())?;
+        let registration = crate::replication::REGISTRY.session_components.iter()
+            .find(|component| component.type_id == "SessionChat")
+            .ok_or("SessionChat is not registered")?;
+        (registration.validate)(&value)?;
+        Ok(session_chat::append(&mut self.world, message))
+    }
+
+    pub fn replace_chat(&mut self, messages: Vec<kokoverse_protocol::SessionChatMessage>) -> Result<(), String> {
+        if messages.len() > session_chat::MAX_MESSAGES { return Err("Too many chat messages".into()); }
+        for message in &messages {
+            let value = serde_json::to_value(message).map_err(|error| error.to_string())?;
+            let registration = crate::replication::REGISTRY.session_components.iter()
+                .find(|component| component.type_id == "SessionChat")
+                .ok_or("SessionChat is not registered")?;
+            (registration.validate)(&value)?;
+        }
+        session_chat::replace(&mut self.world, messages);
+        Ok(())
+    }
+
+    pub fn chat_messages(&self) -> Vec<kokoverse_protocol::SessionChatMessage> {
+        session_chat::messages(&self.world)
+    }
+
     /// Validate everything before touching the live ECS. Used at initial synchronization.
     pub fn restore(&mut self, snapshot: Snapshot) -> Result<(), String> {
         validate_snapshot(&snapshot)?;
@@ -527,6 +555,7 @@ impl WorldModel {
         for participant in self.participants() {
             replacement.update_participant(participant)?;
         }
+        session_chat::replace(&mut replacement.world,self.chat_messages());
         replacement.world.resource_mut::<WorldRevision>().0 =
             snapshot.world_revision.parse().unwrap();
         replacement.world.resource_mut::<SnapshotCache>().0 = snapshot.clone();

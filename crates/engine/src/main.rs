@@ -11,7 +11,7 @@ mod persistence;
 mod previews;
 use kokoverse_core::{WorldModel, replication::REGISTRY};
 use kokoverse_protocol::{
-    AvatarPose, GrabView, InteractionRay, ObjectPreview, ParticipantView, PlayerInput,
+    AvatarPose, GrabView, InteractionRay, ObjectPreview, ParticipantView, PlayerInput, SessionChatMessage,
     TransformCommand,
 };
 use kokoverse_protocol::{
@@ -127,6 +127,7 @@ struct Engine {
     pose_sequence: u64,
     remote_epochs: HashMap<String, String>,
     remote_seen: HashMap<String, std::time::Instant>,
+    chat_last_sent: HashMap<String, std::time::Instant>,
     outcomes: HashMap<String, Value>,
     order: VecDeque<String>,
     last_script_status: Value,
@@ -187,6 +188,7 @@ impl Engine {
         self.remote_edit_sessions.clear();
         self.last_edit_sessions = Value::Null;
         self.remote_script_status.clear();
+        self.chat_last_sent.clear();
         self.last_script_status = Value::Null;
         self.last_drive_frame = None;
         self.managed_peers.clear();
@@ -402,6 +404,7 @@ impl Engine {
     }
     fn state(&mut self) -> Value {
         json!({"kind":"snapshot", "snapshot": self.model.snapshot(), "editable":self.synced && (self.service.is_none() || self.managed_verified),
+            "chat":self.model.chat_messages(),
             "role":if self.host {"host"} else {"guest"},
             "script_statuses":if self.host {self.model.script_statuses()} else {self.remote_script_status.clone()},
             "drive_frame":self.model.drive_frame(),
@@ -418,6 +421,40 @@ impl Engine {
         self.ui(
             json!({"kind":"presence", "self_id":"local", "participants":self.model.participants(), "local_motion":self.model.local_motion()}),
         );
+    }
+    fn publish_chat(&mut self) {
+        self.ui(json!({"kind":"chat_state", "messages":self.model.chat_messages()}));
+    }
+    fn submit_chat(&mut self, sender_id: &str, text: &str, origin: Origin) {
+        if !self.host || !self.synced || (self.service.is_some() && match &origin {
+            Origin::Local(_) => !self.managed_verified,
+            Origin::Peer(peer) => !self.managed_peers.contains_key(peer),
+        }) {
+            self.reply(origin,json!({"kind":"chat_error","message":"Join the session before sending chat"}));
+            return;
+        }
+        let Some(sender) = self.model.participants().into_iter().find(|person| person.id == sender_id) else {
+            self.reply(origin,json!({"kind":"chat_error","message":"Participant is not ready"}));
+            return;
+        };
+        if self.chat_last_sent.get(sender_id).is_some_and(|last| last.elapsed() < Duration::from_millis(300)) {
+            self.reply(origin,json!({"kind":"chat_error","message":"Wait before sending another message"}));
+            return;
+        }
+        let message = SessionChatMessage {
+            id: Uuid::new_v4().to_string(), sender_id: sender_id.into(), sender_name: sender.name,
+            text: text.trim().into(),
+            at_millis: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+        };
+        match self.model.append_chat(message.clone()) {
+            Ok(true) => {
+                self.chat_last_sent.insert(sender_id.into(),std::time::Instant::now());
+                self.publish_chat();
+                self.network(None,json!({"kind":"chat_message","message":message}));
+            }
+            Ok(false) => {}
+            Err(error) => self.reply(origin,json!({"kind":"chat_error","message":error})),
+        }
     }
     fn clear_remote_presence(&mut self) {
         self.managed_peers.clear();
@@ -692,6 +729,19 @@ impl Engine {
             let body = json!({"kind":"edit_sessions","sessions":if self.host {self.edit_sessions.views()}else{self.remote_edit_sessions.clone()}});
             let envelope = self.envelope(body);
             self.send(id, envelope);
+            return;
+        }
+        if envelope.body["kind"] == "chat_send" {
+            if !self.synced || (self.service.is_some() && !self.managed_verified) || envelope.authority_epoch != self.epoch {
+                self.reply(Origin::Local(id),json!({"kind":"chat_error","message":"Join the session before sending chat"}));
+            } else if let Some(text) = envelope.body["text"].as_str() {
+                if self.host {
+                    self.submit_chat("local",text,Origin::Local(id));
+                } else {
+                    let peer = self.host_peer.clone();
+                    self.network(Some(&peer),json!({"kind":"chat_send","text":text}));
+                }
+            }
             return;
         }
         if envelope.body["kind"].as_str().is_some_and(|kind|kind.starts_with("script_document")) {
@@ -1027,11 +1077,17 @@ impl Engine {
                 if self.host {
                     if e.body["kind"] == "snapshot_request" {
                         let snapshot = self.model.snapshot();
-                        self.network(Some(peer), json!({"kind":"component_snapshot", "snapshot":REGISTRY.encode_world(&snapshot),"script_statuses":self.model.script_statuses()}));
+                        self.network(Some(peer), json!({"kind":"component_snapshot", "snapshot":REGISTRY.encode_world(&snapshot),"script_statuses":self.model.script_statuses(),"chat":self.model.chat_messages()}));
                         self.network(
                             Some(peer),
                             json!({"kind":"edit_sessions","sessions":self.edit_sessions.views()}),
                         );
+                    } else if e.body["kind"] == "chat_send" && e.authority_epoch == self.epoch {
+                        if let (Some(current_epoch),Some(publisher_epoch),Some(text)) =
+                            (self.remote_epochs.get(peer),value["publisher_epoch"].as_str(),e.body["text"].as_str())
+                            && current_epoch == publisher_epoch {
+                                self.submit_chat(&format!("{peer}:{publisher_epoch}"),text,Origin::Peer(peer.into()));
+                        }
                     } else if e.body["kind"] == "edit_session" && e.authority_epoch == self.epoch {
                         if let Ok(input) = serde_json::from_value(e.body["request"].clone()) {
                             let owner = format!(
@@ -1085,7 +1141,8 @@ impl Engine {
                         if self.synced && revision < current {
                             return;
                         }
-                        if self.model.restore(snapshot).is_ok() {
+                        let Ok(chat) = serde_json::from_value::<Vec<SessionChatMessage>>(e.body["chat"].clone()) else { return; };
+                        if self.model.restore(snapshot).is_ok() && self.model.replace_chat(chat).is_ok() {
                             self.remote_script_status =
                                 serde_json::from_value(e.body["script_statuses"].clone())
                                     .unwrap_or_default();
@@ -1094,6 +1151,13 @@ impl Engine {
                             self.publish_state();
                             self.flush_results();
                         }
+                    } else if kind == "chat_message" && self.synced && e.authority_epoch == self.epoch {
+                        if let Ok(message) = serde_json::from_value::<SessionChatMessage>(e.body["message"].clone())
+                            && self.model.append_chat(message).unwrap_or(false) {
+                                self.publish_chat();
+                        }
+                    } else if kind == "chat_error" && e.authority_epoch == self.epoch {
+                        self.ui(e.body);
                     } else if kind == "script_statuses"
                         && self.synced
                         && e.authority_epoch == self.epoch
@@ -1284,6 +1348,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         pose_sequence: 0,
         remote_epochs: HashMap::new(),
         remote_seen: HashMap::new(),
+        chat_last_sent: HashMap::new(),
         outcomes: HashMap::new(),
         order: VecDeque::new(),
         last_script_status: Value::Null,

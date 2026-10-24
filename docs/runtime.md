@@ -42,6 +42,14 @@ Flux、階層Transformはまだない。キャラクターには移動・ジャ�
 
 ローカルIPCは4バイトのbig-endian長さ＋UTF-8 JSON。1フレームの上限は1 MiB。現在のprotocol_versionは3。旧プロトコルおよび旧ObjectView形式の保存データには対応しない。revisionとsequenceは10進文字列。
 
+## セッション参加者とチャット
+
+参加者は従来どおり一時的なECSの `Participant` として保持する。Godotは受け取った位置から一覧の距離と表示順だけを計算する。セッションチャットは登録済みの一時Component `SessionChat` に最大200件を保持し、ワールドの保存用snapshotと `world_revision` には含めない。ホストEngineが送信元のpeerと現在の参加者を照合し、送信者名を確定する。本文は空文字、制御文字、1000文字または4096バイト超を拒否し、同じ参加者の送信には300msの間隔を設ける。
+
+ホストは確定したメッセージをKokoSyncの確実配送で全員へ送り、途中参加者には `component_snapshot` と一緒に履歴を渡す。各端末のGodotはEngineからの表示用コピーだけを描く。セッションを切り替えるとチャットを破棄するが、同じワールドの再同期では履歴を保持する。UIのパネル開閉・入力フォーカス・スクロール位置は各クライアントのローカル状態。
+
+確認：[chat-integration.mjs](../tests/chat-integration.mjs) は2人の送受信、送信者の確定、途中参加、無効本文の拒否とワールドrevisionの不変を調べる。[hud-integration.mjs](../tests/hud-integration.mjs) の `--rendered` はTab、マウス捕捉時の薄い表示と入力停止、チャット投稿の実入力経路を調べる。
+
 内部の `WorldCommit` を、`crates/core/src/replication.rs` の登録表で `ReplicationCommit` へ変換する。通信は `component_commit`、初回状態は `component_snapshot`。各物体はComponentの安定アドレス・型名・スキーマ版と、フィールドID・revision・値を持つ。画像・モデル・動画・パネル・Scriptも同じ形式で運ぶ。保存も同じ登録表を使い、`format_version: 1` の `ReplicatedWorld` を書き込む。
 
 登録表には型検証、編集可否、型付きECSへの書き込み、表示データとの変換をまとめた。`Edit.target` はルートではなく対象Componentのアドレスで、例えば位置編集はlocal_id=3を指定する。新しいComponentを追加する際は登録とECSの抽出処理を追加し、通信のメッセージ分岐や保存形式の処理は増やさない。再生・Scriptのような操作は引き続き専用コマンドで検証する。

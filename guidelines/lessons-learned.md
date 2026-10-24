@@ -256,3 +256,10 @@ Godotのインスペクタから `WorldText` の白色 `[1.0,1.0,1.0,1.0]` を�
 
 - 再現・確認：[hud-integration.mjs](../tests/hud-integration.mjs) の `--rendered` でEscによるスライド表示、再度Escによる収納、ワールドクリック直後のFPS捕捉と収納を確認する。
 - コード：[main.gd](../client-godot/main.gd)、[world_hud.gd](../client-godot/world_hud.gd)。確認日：2026-10-24。
+
+## ワールド復元時にセッションの一時Componentを失わない
+
+`WorldModel::restore()` は保存用snapshotから新しいECSを組み立てるため、新しく追加した一時チャットComponentを引き継がなければ、チャット中のワールド再同期で履歴が消える。参加者と同様に一時履歴を復元先へコピーし、ワールドのrevisionや保存データには入れない。別セッションへ移るときは新しいWorldModelを作り、履歴を持ち越さない。
+
+- 再現・確認：メッセージ投稿後に同じワールドのsnapshotを復元し、履歴が残ること、保存用snapshotが変わらないこと、200件上限を [tests.rs](../crates/core/src/tests.rs) で確認する。2人の送受信と途中参加は [chat-integration.mjs](../tests/chat-integration.mjs) で確認する。
+- コード：[session_chat.rs](../crates/core/src/session_chat.rs)、[lib.rs](../crates/core/src/lib.rs)。確認日：2026-10-24。
