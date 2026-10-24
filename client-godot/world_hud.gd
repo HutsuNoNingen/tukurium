@@ -2,6 +2,7 @@ extends CanvasLayer
 ## Local application chrome. The world and edit operations stay in the Engine.
 const RING = preload("res://ring_menu.gd")
 const DesktopWindow = preload("res://desktop_window.gd")
+const CURSOR_IMAGE = preload("res://assets/ui/selection-cursor.png")
 const INK := Color("101b25")
 const LINE := Color("304550")
 const TEXT := Color("e6f0f4")
@@ -17,6 +18,7 @@ var dock: HBoxContainer
 var dock_buttons := {}
 var dock_tween: Tween
 var dock_open := false
+var cursor_texture: ImageTexture
 var room_label: Label
 var sync_label: Label
 var fps_label: Label
@@ -56,6 +58,11 @@ func button(parent: Node, value: String, action: Callable) -> Button:
 
 func setup(owner) -> void:
 	app = owner
+	var cursor_image := CURSOR_IMAGE.get_image()
+	cursor_image.resize(32,32,Image.INTERPOLATE_LANCZOS)
+	cursor_texture = ImageTexture.create_from_image(cursor_image)
+	Input.set_custom_mouse_cursor(cursor_texture,Input.CURSOR_ARROW,Vector2.ZERO)
+	Input.set_custom_mouse_cursor(cursor_texture,Input.CURSOR_POINTING_HAND,Vector2.ZERO)
 	workspace = app.get("service_panel")
 	layer = 25
 	add_child(root)
@@ -100,6 +107,10 @@ func setup(owner) -> void:
 		workspace.open_button.hide()
 		workspace.open_button.visibility_changed.connect(func():
 			if workspace.open_button.visible: workspace.open_button.hide())
+
+func _exit_tree() -> void:
+	Input.set_custom_mouse_cursor(null,Input.CURSOR_ARROW)
+	Input.set_custom_mouse_cursor(null,Input.CURSOR_POINTING_HAND)
 
 func build_menu() -> void:
 	root.add_child(menu)

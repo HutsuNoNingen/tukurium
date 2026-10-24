@@ -50,6 +50,7 @@ func run() -> void:
 	if not await until(func(): return scene.editable and scene.player_initialized,"Scene not ready"): quit(1); return
 	if not scene.first_person or scene.view_mode.selected!=1: push_error("Default view is not FPS"); quit(1); return
 	if scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE: push_error("Startup captured the mouse"); quit(1); return
+	if scene.hud.cursor_texture==null or scene.hud.cursor_texture.get_size()!=Vector2(32,32): push_error("Custom cursor was not installed"); quit(1); return
 	if scene.hud.dock_open or scene.hud.dock_holder.visible: push_error("Dock appeared before Esc"); quit(1); return
 	for top_button in scene.hud.root.get_node("TopBar").find_children("*", "Button", true, false):
 		if top_button.text in ["ユーザー","セッション"]: push_error("Old top bar entry remains"); quit(1); return
