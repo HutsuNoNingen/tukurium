@@ -15,6 +15,8 @@ Rust / bevy_ecs のEngineとGodotの表示クライアントを別プロセス�
 
 ### 公開サーバーのセッション・ライブラリ版
 
+開発中のソースを画面で確認する場合は、リポジトリ直下の `Debug.bat` をダブルクリックする。現在のRust・Go・Godotをビルドして、公開サーバーへ `debug` プロファイルで接続する。終了は `StopDebug.bat`。配布済みのテスター版を確認する場合は、ランチャーZIPを展開したフォルダーの `Start.bat` を使う。
+
 ```powershell
 ./scripts/start-online.ps1 -Build
 ```
