@@ -92,6 +92,15 @@ GodotのMeshはピック判定やパネル入力との互換性のため同じ�
 - コード：[render_hierarchy.gd](../client-godot/render_hierarchy.gd)、[hierarchy.rs](../crates/core/src/hierarchy.rs)。
 - テスト：[render_hierarchy_smoke.gd](../client-godot/render_hierarchy_smoke.gd)、[hierarchy-integration.mjs](../tests/hierarchy-integration.mjs)。確認日：2026-10-24。
 
+## 親子付けした子をギズモで動かすと飛ぶ
+
+ギズモはワールド座標でドラッグするが、子Slotの`position`フィールドは親を基準にしたローカル座標。ドラッグのワールド座標をそのまま共有フィールドへ送ると、Rustがさらに親の位置・回転・スケールを合成し、子が意図しない場所へ移動する。ドラッグ中の旧インスペクタ表示にもワールド座標が入っていた。
+
+プレビューの配送と描画はワールド座標のままにし、フィールド表示と確定Editだけを、表示中の親の姿勢の逆変換でローカル座標へ戻す。親にローカルDriveがある場合も、そのクライアントで見ている姿勢を使う。親のスケールがゼロに近く逆変換できない場合は確定しない。
+
+- 再現・確認：親を移動・拡縮し、Driveで回転させた状態で子の実ギズモをドラッグする。保存した子のローカル`position`が逆変換結果と一致することを確認する。
+- コード：[main.gd](../client-godot/main.gd)の`gizmo_local_position`。テスト：[hierarchy_smoke.gd](../client-godot/hierarchy_smoke.gd)を[描画付き統合テスト](../tests/hierarchy-integration.mjs)で実行。修正：2026-10-24。
+
 ## Remove Scriptを押すと操作できなくなる
 
 3Dインスペクタ内のScriptエディタが、削除確認にConfirmationDialogを使っていた。

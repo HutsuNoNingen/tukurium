@@ -615,15 +615,28 @@ func start_gizmo_drag() -> void:
 	send_gizmo_preview()
 	feedback.text = "Drag to move · Shift: 0.25 snap · Esc: cancel"
 
+func gizmo_local_position(world_position: Vector3) -> Variant:
+	if not objects.has(gizmo_target): return null
+	var parent: Variant=objects[gizmo_target].get("parent")
+	if not parent is Dictionary: return world_position
+	var parent_id: String=str(parent.get("instance_id",""))
+	if not render_nodes.has(parent_id): return null
+	var parent_node: Node3D=render_nodes[parent_id]
+	var parent_scale: Vector3=parent_node.scale
+	if absf(parent_scale.x)<0.000001 or absf(parent_scale.y)<0.000001 or absf(parent_scale.z)<0.000001: return null
+	return parent_node.quaternion.inverse()*(world_position-parent_node.position)/parent_scale
+
 func preview_gizmo_drag(position: Vector3) -> void:
 	gizmo_preview = position
 	if not render_nodes.has(gizmo_target): return
 	render_nodes[gizmo_target].position = position
 	draw_render_hierarchy()
 	selection_outline.position = position
-	filling = true
-	for i in range(3): position_inputs[i].value = position[i]
-	filling = false
+	var local_position: Variant=gizmo_local_position(position)
+	if local_position is Vector3:
+		filling = true
+		for i in range(3): position_inputs[i].value = local_position[i]
+		filling = false
 
 func restore_gizmo_visual() -> void:
 	if gizmo_preview_active and connected: queue_message({"kind":"drag_preview", "preview":null})
@@ -712,7 +725,11 @@ func finish_gizmo_drag(position: Vector3) -> void:
 	if position.distance_squared_to(gizmo.drag_origin) < 0.000001:
 		cancel_gizmo_drag()
 		return
-	submit("position", [position.x, position.y, position.z])
+	var local_position: Variant=gizmo_local_position(position)
+	if not local_position is Vector3:
+		cancel_gizmo_drag()
+		return
+	submit("position", [local_position.x, local_position.y, local_position.z])
 	if pending: pending_action = "gizmo"
 	else: cancel_gizmo_drag()
 
