@@ -10,10 +10,12 @@ const SCRIPT_EDITOR = preload("res://script_editor.gd")
 const WORLD_PANELS = preload("res://world_panels.gd")
 const REQUEST_BROKER = preload("res://request_broker.gd")
 const WORLD_HUD = preload("res://world_hud.gd")
+const SOCIAL_PANELS = preload("res://social_panels.gd")
 const PRIMITIVE_MESH = preload("res://primitive_mesh.gd")
 const RENDER_HIERARCHY = preload("res://render_hierarchy.gd")
 var render_hierarchy = RENDER_HIERARCHY.new()
 var hud = WORLD_HUD.new()
+var social_panels = SOCIAL_PANELS.new()
 var requests = REQUEST_BROKER.new()
 var world_panels = WORLD_PANELS.new()
 var script_editor = SCRIPT_EDITOR.new()
@@ -157,6 +159,8 @@ func _ready() -> void:
 	asset_status.setup(self)
 	add_child(asset_importer)
 	asset_importer.configure(self)
+	add_child(social_panels)
+	social_panels.setup(self)
 	add_child(hud)
 	hud.setup(self)
 	set_view_mode(1, false)
@@ -1080,6 +1084,8 @@ func accept_message(message: Dictionary) -> void:
 			reset_media_clock()
 			for avatar in avatars.values(): avatar.queue_free()
 			avatars.clear()
+			social_panels.update_participants([],"local")
+			social_panels.set_messages([])
 			apply_snapshot({"world_revision":"0","objects":[]})
 			queue_message({"kind":"hello"})
 		service_panel.receive_state(service_body)
@@ -1105,6 +1111,10 @@ func accept_message(message: Dictionary) -> void:
 		"script_statuses":
 			script_statuses = body.statuses
 			script_editor.refresh()
+		"chat_state":
+			social_panels.set_messages(body.messages)
+		"chat_error":
+			social_panels.show_error(str(body.get("message","チャットを送信できませんでした")))
 		"interaction_rays":
 			interaction_rays = body.rays
 			aiming_at_collider = false
@@ -1156,8 +1166,10 @@ func accept_message(message: Dictionary) -> void:
 					avatars[id].queue_free()
 					avatars.erase(id)
 			people_label.text = "\n".join(names)
+			social_panels.update_participants(body.participants,self_id)
 		"snapshot":
 			editable = body.editable
+			social_panels.set_messages(body.get("chat",[]))
 			script_templates = body.get("script_templates", [])
 			script_statuses = body.get("script_statuses", [])
 			DisplayServer.window_set_title("Kokoverse Workshop · " + app_version + " — " + str(body.role).capitalize())

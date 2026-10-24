@@ -286,6 +286,9 @@ func handle_input(event: InputEvent) -> bool:
 		if event.keycode == KEY_ESCAPE or event.physical_keycode == KEY_ESCAPE:
 			release_to_cursor()
 			return true
+		if (event.keycode == KEY_TAB or event.physical_keycode == KEY_TAB) and not event.ctrl_pressed and not event.alt_pressed and not event.meta_pressed and not app.gameplay_keyboard_blocked():
+			app.social_panels.set_stowed(not app.social_panels.stowed)
+			return true
 		if (event.keycode == KEY_F5 or event.physical_keycode == KEY_F5) and not app.gameplay_keyboard_blocked():
 			cycle_view()
 			return true

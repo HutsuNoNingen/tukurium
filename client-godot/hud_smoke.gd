@@ -52,11 +52,22 @@ func run() -> void:
 	if scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE: push_error("Startup captured the mouse"); quit(1); return
 	if scene.hud.cursor_texture==null or scene.hud.cursor_texture.get_size()!=Vector2(32,32): push_error("Custom cursor was not installed"); quit(1); return
 	if scene.hud.dock_open or scene.hud.dock_holder.visible: push_error("Dock appeared before Esc"); quit(1); return
+	if not scene.social_panels.left.visible or not scene.social_panels.right.visible: push_error("Session side panels are missing"); quit(1); return
+	if not await until(func(): return scene.social_panels.count_label.text=="1人","Participant list did not receive presence"): quit(1); return
 	for top_button in scene.hud.root.get_node("TopBar").find_children("*", "Button", true, false):
 		if top_button.text in ["ユーザー","セッション"]: push_error("Old top bar entry remains"); quit(1); return
 	click(root.size*0.5)
 	if not scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_CAPTURED: push_error("Clicking the world did not start FPS controls"); quit(1); return
 	if scene.hud.dock_open or scene.hud.dock_holder.visible: push_error("Dock appeared during FPS controls"); quit(1); return
+	await create_timer(0.05).timeout
+	if not scene.social_panels.input_locked or scene.social_panels.left.modulate.a>0.5 or scene.social_panels.chat_input.editable: push_error("FPS controls did not dim and lock session panels: %s %s %s" % [scene.social_panels.input_locked,scene.social_panels.left.modulate.a,scene.social_panels.chat_input.editable]); quit(1); return
+	key(KEY_TAB)
+	if not scene.social_panels.stowed: push_error("Tab did not stow session panels"); quit(1); return
+	await create_timer(0.25).timeout
+	if scene.social_panels.left.visible or not scene.social_panels.left_edge.visible: push_error("Stowed session panel did not leave an edge handle"); quit(1); return
+	key(KEY_TAB)
+	await create_timer(0.25).timeout
+	if scene.social_panels.stowed or not scene.social_panels.left.visible or scene.social_panels.left.modulate.a>0.5: push_error("Tab did not restore dimmed panels"); quit(1); return
 	if scene.find_child("LegacyWorldSidebar",true,false).is_visible_in_tree(): push_error("Old world sidebar is visible"); quit(1); return
 	if not await until(func(): return scene.hud.sync_label.text.contains("同期済み") and scene.hud.fps_label.text.contains("FPS"),"HUD status missing"): quit(1); return
 	await create_timer(1.1).timeout
@@ -68,6 +79,8 @@ func run() -> void:
 	key(KEY_ESCAPE)
 	if scene.hud.menu.visible or scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE: push_error("Esc did not release cursor without opening menu"); quit(1); return
 	if not scene.hud.dock_open or not scene.hud.dock_holder.visible: push_error("Esc did not reveal the dock"); quit(1); return
+	await create_timer(0.05).timeout
+	if scene.social_panels.input_locked or scene.social_panels.left.modulate.a<0.9 or not scene.social_panels.chat_input.editable: push_error("Esc did not reactivate session panels"); quit(1); return
 	await create_timer(0.33).timeout
 	if absf(scene.hud.dock_holder.offset_top+86.0)>1.0: push_error("Dock did not slide into place"); quit(1); return
 	key(KEY_ESCAPE)
@@ -76,6 +89,15 @@ func run() -> void:
 	key(KEY_ESCAPE)
 	await create_timer(0.33).timeout
 	await capture("-dock")
+	scene.social_panels.chat_input.grab_focus()
+	key(KEY_TAB)
+	if scene.social_panels.stowed: push_error("Tab closed panels while typing chat"); quit(1); return
+	scene.social_panels.chat_input.release_focus()
+	scene.social_panels.chat_input.text="hello from HUD"
+	click(scene.social_panels.send_button.get_global_rect().get_center())
+	if not await until(func(): return scene.social_panels.messages.size()==1,"Chat did not return from the Engine"): quit(1); return
+	if scene.social_panels.messages[0].text!="hello from HUD": push_error("Chat text changed in transit"); quit(1); return
+	await capture("-chat")
 	if not scene.hud.dock_buttons.has("sessions") or not scene.hud.dock_buttons.has("library") or not scene.hud.dock_buttons.has("workshop") or not scene.hud.dock_buttons.has("settings"):
 		push_error("Separate dock icons missing"); quit(1); return
 	click(scene.hud.dock_buttons.settings.get_global_rect().get_center())
@@ -145,7 +167,7 @@ func run() -> void:
 	click(root.size*0.5,MOUSE_BUTTON_MIDDLE)
 	key(KEY_ESCAPE)
 	if scene.hud.ring.visible or scene.hud.menu.visible: push_error("Esc did not cancel ring"); quit(1); return
-	print("HUD SMOKE PASS: cursor-first FPS, top bar, separate windows, drag/resize, focus, Esc, blocked movement and ring 2D/3D")
+	print("HUD SMOKE PASS: participant/chat panels, Tab, FPS dimming, Engine chat, windows, Esc and ring")
 	scene.queue_free()
 	await process_frame
 	await process_frame
