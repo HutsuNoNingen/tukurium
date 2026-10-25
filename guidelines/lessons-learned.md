@@ -11,6 +11,14 @@
 
 - コード：[world_panels.gd](../client-godot/world_panels.gd) の `edit()`。確認日：2026-10-26。
 
+## 階層解決ループは進捗なしで止め、失敗モードを揃える
+
+`hierarchy::evaluate()` は親不在・循環があると解決ループが進捗なしのまま回り続け（無限ループ）、同じ不整合に対して `propagate()` は `assert!` で panic していた。入口の `validate` が弾く前提でも、内部状態が壊れた場合の帰結が経路ごとに「ハング」と「クラッシュ」に分かれていると、セッション全体が止まる形でしか顕在化しない。
+
+反復で依存を解くループには進捗なし検出を入れ、進まなくなったら未解決の対象を除外して戻る。同じ前提条件に対する失敗モードは経路ごとに揃え、片方だけ強い前提（assert や添字アクセス）に依存しない。
+
+- コード：[hierarchy.rs](../crates/core/src/hierarchy.rs) の `evaluate()` / `propagate()` と単体テスト `broken_hierarchy_is_excluded_instead_of_hanging_or_panicking`。確認日：2026-10-26。
+
 ## レーザーだけ延ばしても遠くの物体は保持できない
 
 レーザーの見た目、Rustの当たり判定、保持開始時の距離、保持中のホイール距離、3Dパネルのポインターは別の上限を持っていた。Rust側の6mだけを延ばさないと、遠い物体を指しても保持できない。ワールドの有効座標±1000mを基準に、判定と保持距離を4000mへ揃える。無限大をraycastへ渡さず、有限の全域到達値を使う。[grabbing.rs](../crates/core/src/grabbing.rs) の遠距離テストと描画付きの [interaction-reach-integration.mjs](../tests/interaction-reach-integration.mjs) で、30m以上の右クリック保持と配置を確認する。確認日：2026-10-25。
