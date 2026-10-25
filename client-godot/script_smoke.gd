@@ -102,6 +102,25 @@ func run() -> void:
 		if not await check_until(func(): return scene.objects[id].scripts.size() == index and editor.pending_id.is_empty(), "Removing a selected blank script failed"): quit(1); return
 	if editor.new_button.disabled: push_error("Adding remains disabled below the limit"); quit(1); return
 	editor.scripts.item_selected.emit(1)
+	# Build a graph through the same controls used in the desktop and 3D editors.
+	editor.graph_button.pressed.emit()
+	if not await check_until(func(): return scene.objects[id].scripts.size() == 3 and editor.pending_id.is_empty(), "Node graph was not attached"): quit(1); return
+	editor.refresh()
+	if not editor.is_graph() or not editor.graph.visible:
+		push_error("Node graph did not open in the editor"); quit(1); return
+	editor.graph.add_node("on_interact")
+	editor.graph.add_node("set_state")
+	editor.graph.add_node("number")
+	editor.graph.find_item("n4").value = 1.0
+	editor.graph.redraw()
+	editor.graph.connect_ports(&"n2",0,&"n3",0)
+	editor.graph.connect_ports(&"n4",0,&"n3",1)
+	editor.apply_button.pressed.emit()
+	if not await check_until(func(): return editor.pending_id.is_empty() and scene.objects[id].scripts[2].source.contains("set_state"), "Node graph did not save"): quit(1); return
+	editor.click_button.pressed.emit()
+	if not await check_until(func(): return scene.objects[id].scripts[2].state.get("value", null) == 1, "Node graph did not execute on interaction"): quit(1); return
+	editor.click_button.pressed.emit()
+	if not await check_until(func(): return scene.objects[id].scripts[1].state.get("active", false), "Existing interaction script did not keep running beside graph"): quit(1); return
 	var screenshot := ""
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--screenshot="): screenshot = arg.trim_prefix("--screenshot=")
@@ -110,5 +129,5 @@ func run() -> void:
 		var image: Image = editor.window.get_texture().get_image()
 		if image.is_empty(): push_error("No script editor screenshot"); quit(1); return
 		image.save_png(screenshot)
-	print("SCRIPT EDITOR SMOKE PASS")
+	print("SCRIPT EDITOR SMOKE PASS · NODE GRAPH PASS")
 	quit(0)

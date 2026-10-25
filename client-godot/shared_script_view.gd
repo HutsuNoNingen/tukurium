@@ -35,6 +35,11 @@ func setup(controller, id: String, mount: Control) -> void:
 	editor.draft_changed = func(): due = Time.get_ticks_msec() + 80
 	editor.reload_button.text = "Reload draft"
 	editor.reload_guard = func():
+		if editor.is_graph():
+			editor.source_dirty = false
+			editor.config_signature = ""
+			editor.refresh()
+			return
 		if not flight.is_empty():
 			editor.feedback.text = "Wait for the draft to finish synchronizing."
 		else:
@@ -82,6 +87,11 @@ func refresh(target: String, selected: Variant) -> void:
 	if current.is_empty():
 		leave()
 		return
+	if editor.is_graph():
+		if not document.is_empty(): leave()
+		editor.external_readonly = false
+		editor.refresh_buttons()
+		return
 	if document.get("script_id", "") != editor.selected and not opening:
 		leave()
 		open_document()
@@ -90,6 +100,9 @@ func refresh(target: String, selected: Variant) -> void:
 		if flight.is_empty() and editor.code.text == document.text: display(document.text, caret_offset())
 
 func can_select() -> bool:
+	if editor.is_graph() and editor.source_dirty:
+		editor.feedback.text = "Apply or Reload this graph before switching."
+		return false
 	if not flight.is_empty() or (not document.is_empty() and editor.code.text != document.text):
 		editor.feedback.text = "Synchronizing the draft before switching…"
 		return false
@@ -103,6 +116,7 @@ func select_shared(id: String) -> void:
 	open_document()
 
 func open_document() -> void:
+	if editor.is_graph(): return
 	if editor.selected.is_empty() or opening or not manager.app.objects.has(target_id): return
 	generation += 1
 	var token := generation
@@ -241,6 +255,9 @@ func remap_caret(old_ids: Array, new_ids: Array, offset: int) -> int:
 	return 0
 
 func authorize(action: Dictionary) -> void:
+	if editor.is_graph():
+		editor.dispatch_action(action)
+		return
 	if opening or (not flight.is_empty()) or (not document.is_empty() and editor.code.text != document.text):
 		pending_action = action
 		flush()
@@ -253,6 +270,7 @@ func authorize(action: Dictionary) -> void:
 
 func tick() -> void:
 	editor.tick()
+	if editor.is_graph(): return
 	if not busy() and not deferred_target.is_empty():
 		var target := deferred_target
 		deferred_target = {}

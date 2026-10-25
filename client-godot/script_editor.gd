@@ -3,6 +3,7 @@ extends RefCounted
 var app
 const REFERENCE_CHIP = preload("res://reference_chip.gd")
 const SCRIPT_CODE_EDIT = preload("res://script_code_edit.gd")
+const SCRIPT_GRAPH = preload("res://script_graph.gd")
 var action_guard: Callable
 var reload_guard: Callable
 var selection_guard: Callable
@@ -17,6 +18,9 @@ var add_hint: Label
 var scripts: ItemList
 var templates: OptionButton
 var code: CodeEdit
+var graph
+var code_heading: Label
+var graph_button: Button
 var drop_choices: HBoxContainer
 var dropped_field: Dictionary = {}
 var parameters: VBoxContainer
@@ -133,6 +137,11 @@ func setup(owner, mount: Control = null) -> void:
 	new_button.tooltip_text = "Add your own script with a unique name, then paste or write its code."
 	new_button.pressed.connect(add_blank)
 	sidebar.add_child(new_button)
+	graph_button = Button.new()
+	graph_button.text = "+ Node graph"
+	graph_button.tooltip_text = "Create a visual script. Connect events, values and actions."
+	graph_button.pressed.connect(add_graph)
+	sidebar.add_child(graph_button)
 	add_hint = Label.new()
 	add_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_hint.add_theme_font_size_override("font_size", 13)
@@ -160,7 +169,7 @@ func setup(owner, mount: Control = null) -> void:
 	toolbar.add_child(pause_button)
 	run_status = Label.new()
 	editor.add_child(run_status)
-	var code_heading := Label.new()
+	code_heading = Label.new()
 	code_heading.text = "Source code · Apply to save"
 	editor.add_child(code_heading)
 	code = SCRIPT_CODE_EDIT.new()
@@ -189,6 +198,14 @@ func setup(owner, mount: Control = null) -> void:
 			refresh_buttons()
 			if draft_changed.is_valid(): draft_changed.call())
 	editor.add_child(code)
+	graph = SCRIPT_GRAPH.new()
+	graph.changed.connect(func():
+		if not filling:
+			source_dirty = true
+			feedback.text = "Graph draft · Apply to save. Bind field references below after applying."
+			refresh_buttons())
+	editor.add_child(graph)
+	graph.hide()
 	drop_choices = HBoxContainer.new()
 	drop_choices.add_theme_constant_override("separation", 8)
 	editor.add_child(drop_choices)
@@ -315,6 +332,16 @@ func add_blank() -> void:
 	var source := "return {\n    name = \"Script%d\",\n    fields = {},\n    drive = function(ctx)\n        -- Derive values with ctx:drive. Use ctx.time or ctx.world_time.\n    end\n}\n" % number
 	send_action({"action":"attach", "source":source})
 
+func add_graph() -> void:
+	var names: Array = app.objects.get(target, {}).get("scripts", []).map(func(c): return c.schema.name)
+	var number := 1
+	while names.has("Graph%d" % number): number += 1
+	graph.fresh("Graph%d" % number)
+	send_action({"action":"attach", "source":graph.source()})
+
+func is_graph() -> bool:
+	return str(current_script().get("source", "")).begins_with(SCRIPT_GRAPH.PREFIX)
+
 func remove_component() -> void:
 	var component := current_script()
 	var requested := removal
@@ -338,12 +365,18 @@ func cancel_removal() -> void:
 func update_component(apply_code: bool, run: bool) -> void:
 	var component := current_script()
 	if component.is_empty(): return
-	var source: String = code.text if apply_code else component.source
+	var source: String = (graph.source() if is_graph() else code.text) if apply_code else component.source
 	if source.to_utf8_buffer().size() > 8192:
 		feedback.text = "Code exceeds 8192 bytes."
 		return
 	var changed_source: bool = apply_code and source != component.source
 	var values: Dictionary = {} if changed_source else component.parameters.duplicate(true)
+	if changed_source and is_graph():
+		var parsed = JSON.parse_string(source.substr(SCRIPT_GRAPH.PREFIX.length()))
+		if parsed is Dictionary:
+			for item in parsed.get("nodes", []):
+				var key := "ref_" + str(item.id) if item.kind in ["read_field", "write_field", "drive_field"] else ("p_" + str(item.id) if item.kind == "public_number" else "")
+				if component.parameters.has(key): values[key] = component.parameters[key]
 	values.merge(queued_parameters, true)
 	queued_parameters.clear()
 	send_action({"action":"update", "script_id":component.id,
@@ -474,7 +507,7 @@ func receive_result(body: Dictionary) -> bool:
 		if pending_action == "attach":
 			selected = ""
 			list_signature = ""
-		if not shared_document_mode or pending_action in ["attach", "remove"]:
+		if not shared_document_mode or pending_action in ["attach", "remove"] or is_graph():
 			source_dirty = false
 			config_signature = ""
 		last_error = ""
@@ -525,15 +558,24 @@ func refresh() -> void:
 	if component.is_empty():
 		source_dirty = false
 		code.text = "Add a component template to begin."
+		code.show()
+		graph.hide()
 		clear_parameters()
 	elif config_signature != component.id + component.revision:
 		if not source_dirty:
 			config_signature = component.id + component.revision
 			base_revision = component.revision
 			code.text = component.source
+			if is_graph(): graph.load_source(component.source)
 			build_parameters(component)
 		elif component.revision != base_revision:
 			feedback.text = "Shared code changed while this draft was open. Reload before retrying."
+	if not component.is_empty():
+		graph.visible = is_graph()
+		code.visible = not is_graph()
+		code_heading.text = "Node graph · Apply to save" if is_graph() else "Source code · Apply to save"
+		apply_button.text = "Apply graph" if is_graph() else "Apply code"
+		drop_choices.visible = false if is_graph() else drop_choices.visible
 	for status in app.local_script_statuses + app.script_statuses:
 		if status.script_id == selected and status.get("error") is String and status.error != last_error:
 			last_error = status.error
@@ -634,6 +676,7 @@ func refresh_buttons() -> void:
 	if full: add_hint.text = "4 / 4 scripts attached. Remove a script before adding another."
 	if source_dirty: add_hint.text = "Apply or Reload this code draft before adding another script."
 	new_button.disabled = not ready or source_dirty or full
+	graph_button.disabled = not ready or source_dirty or full
 	for i in scripts.item_count: scripts.set_item_disabled(i, not ready or components.is_empty())
 	apply_button.disabled = not ready or component.is_empty()
 	remove_button.disabled = not ready or component.is_empty() or source_dirty
@@ -642,6 +685,7 @@ func refresh_buttons() -> void:
 	pause_button.disabled = not can_control or not component.get("enabled", false)
 	reload_button.disabled = not app.editable or not pending_id.is_empty() or component.is_empty()
 	code.editable = ready and not component.is_empty()
+	graph.mouse_filter = Control.MOUSE_FILTER_STOP if ready else Control.MOUSE_FILTER_IGNORE
 	parameters.mouse_filter = Control.MOUSE_FILTER_STOP if source_dirty else Control.MOUSE_FILTER_PASS
 	parameters.modulate.a = 0.5 if source_dirty else 1.0
 	for control in parameter_controls.values():

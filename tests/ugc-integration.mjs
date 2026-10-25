@@ -52,9 +52,10 @@ try {
   const godot=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(rendered?['--rendering-method','gl_compatibility']:['--headless']),'--path','client-godot','--script','res://script_smoke.gd','--',`--port=${guest.port}`,`--session=${session}`,...(rendered?[`--screenshot=${resolve(work,'script-editor.png')}`]:[])]);
   await until(()=>godot.exitCode!==null,'Godot UGC test did not finish',45000);
   assert.equal(godot.exitCode,0,godot.logs);assert.doesNotMatch(godot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(godot.logs,/SCRIPT EDITOR SMOKE PASS/);
-  await until(()=>host.client.latest().snapshot.objects[0].scripts?.length===2,'Host did not receive script edits');
+  await until(()=>host.client.latest().snapshot.objects[0].scripts?.length===3,'Host did not receive script edits');
   let object=host.client.latest().snapshot.objects[0];
   assert.equal(object.scripts[0].parameters.speed,120);assert.equal(object.scripts[0].enabled,false);assert.equal(object.scripts[1].state.active,true);
+  assert.equal(object.scripts[2].state.value,1);assert.ok(object.scripts[2].source.startsWith('@tukurium-graph-v1\n'));
   try {
     await until(()=>JSON.stringify(host.client.latest().snapshot)===JSON.stringify(guest.client.latest().snapshot),'Script results differ across peers');
   } catch(error) {
@@ -62,7 +63,7 @@ try {
     writeFileSync(resolve(work,'guest.json'),JSON.stringify(guest.client.latest().snapshot,null,2));
     console.error(`UGC snapshots: ${work}`);throw error;
   }
-  console.log('PASS: Godot code editor attaches and edits Luau; public parameter auto-sync; rotation, pause and click state replicate; invalid code preserves working component');
+  console.log('PASS: Godot edits Luau and node graphs; graph interaction, public parameter auto-sync, pause and click state replicate; invalid code preserves working component');
 
   const failed=await command(guest.client,{action:'attach',source:'while true do end'},object.address);
   assert.equal(failed.ok,false);assert.match(failed.message,/budget/);

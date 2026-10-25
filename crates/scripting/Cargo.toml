@@ -6,5 +6,6 @@ edition = "2024"
 [dependencies]
 kokoverse-protocol = { path = "../protocol" }
 serde_json.workspace = true
+serde.workspace = true
 mlua = { version = "=0.12.2", features = ["luau", "vendored", "serde", "send"] }
 glam = "0.30.10"

@@ -55,6 +55,28 @@ Luaは複数人が同時に入力でき、他の人のカーソルが名前と�
 
 ## 作り方
 
+### ノードグラフ
+
+**+ Node graph** でビジュアルスクリプトを物体へ追加する。上部の一覧からノードを選んで **+ Node**、ポートをドラッグして接続し、**Apply graph** で保存する。オレンジ色はイベントから処理へ進む線で、ほかの色は値を処理の入力へ渡す線。ノードはドラッグで移動でき、選択してDeleteで削除する。同じ編集画面が個人の2Dウィンドウと共有インスペクタの3Dパネルに出る。
+
+| 種類 | ノード |
+|---|---|
+| イベント | On Update（ホストの定期更新）、On Interact（クリック）、On Drive（各クライアントの表示更新） |
+| 実行の流れ | Branch、Sequence、Set State、Write Field、Drive Field |
+| 値・入力 | Number、Bool、String、Vec3、Color、Public Number、Delta、Time、World Time、Read Field、Get State |
+| 計算・比較 | Add、Subtract、Multiply、Divide、Modulo、Min、Max、Less、Greater、Equal、And、Or、Not、Select |
+| 変換 | To String、Join、Rotation Y |
+
+Read/Write/Drive Fieldを追加して適用すると、そのノード用のField reference欄が公開パラメータに現れる。インスペクタのフィールド見出しから参照をドラッグして設定する。Write FieldはOn UpdateまたはOn Interactから、Drive FieldはOn Driveからつなぐ。Set Stateは共有イベント側でのみ使える。グラフはScript Componentのソースとして保存され、Rustが接続・型・循環を検証し、既存のスクリプト実行器とComponent登録表を通して実行する。
+
+たとえばローカル表示のストップウォッチは、`On Drive → Drive Field` のflowをつなぎ、`Time → To String → Drive Field.value` をつなぐ。Apply後、Drive Fieldの参照欄へText子スロットの`world_text`を入れる。表示は各端末で更新され、共有ワールドの文字列は変更しない。共有のカウントなら `On Update → Set State` と `Get State + Delta → Set State.value` を組む。
+
+1グラフは最大64ノード・128接続、公開フィールドは16個まで。ソース全体の8 KiB制限はLuauと共通。入力が未接続、型が違う、循環がある、イベントに対して不正なWrite/DriveがあるグラフはApply時に拒否され、直前の実行可能な版を維持する。グラフを変更しても同じノードIDの公開パラメータ値は保持する。
+
+共有のLuauコードは複数人で同時編集できる。グラフは共有テキストドラフトを使わず、Script Componentのrevisionを検査して一括更新する。同時にグラフを編集した場合、後からのApplyは競合として拒否される。
+
+### Luauコード
+
 1. 物体を選択し、Inspectorの **Script Systems…** を開く。
 2. **Add a script** の **Rotator** / **ClickColor** を選び、**+ Add template** で追加する。自作する場合は **+ Blank script** を押して、生成されたコードを編集・貼り替える。
 3. コードを書き換え、**Apply code** で共有ワールドへ反映する。構文エラー時は前のコードを保持する。

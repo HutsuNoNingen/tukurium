@@ -10,6 +10,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+mod graph;
 
 pub const MAX_SOURCE: usize = 8 * 1024;
 pub const MAX_SCRIPTS_PER_OBJECT: usize = 4;
@@ -215,6 +216,12 @@ impl Program {
         if source.is_empty() || source.len() > MAX_SOURCE {
             return Err("Luau source must be 1–8192 bytes".into());
         }
+        let generated = if graph::is_graph(source) {
+            Some(graph::compile(source)?)
+        } else {
+            None
+        };
+        let source = generated.as_deref().unwrap_or(source);
         let build = || -> mlua::Result<Self> {
             let lua = Lua::new();
             lua.set_memory_limit(4 * 1024 * 1024)?;

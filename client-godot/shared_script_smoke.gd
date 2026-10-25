@@ -115,6 +115,13 @@ func run() -> void:
 	await fps_click(scene,panel,a.editor.remove_button)
 	await fps_click(scene,panel,a.editor.remove_confirm_button)
 	if not await until(func(): return scene.objects[target].get("scripts",[]).is_empty() and a.editor.pending_id.is_empty(),"FPS script removal failed"): quit(1); return
+	await fps_click(scene,panel,a.editor.graph_button)
+	if not await until(func(): return scene.objects[target].get("scripts",[]).size() == 1 and a.editor.pending_id.is_empty() and a.editor.is_graph(),"FPS node graph creation failed"): quit(1); return
+	if not a.document.is_empty() or not a.editor.graph.visible:
+		push_error("Graph editor incorrectly uses the Lua text draft"); quit(1); return
+	a.editor.graph.add_node("on_interact")
+	await fps_click(scene,panel,a.editor.apply_button)
+	if not await until(func(): return a.editor.pending_id.is_empty() and scene.objects[target].scripts[0].source.contains("on_interact"),"Shared graph Apply failed"): quit(1); return
 	# The New entry must open an operable world panel even immediately after removal.
 	mouse(MOUSE_BUTTON_MIDDLE,true,root.size*0.5)
 	mouse(MOUSE_BUTTON_MIDDLE,false,root.size*0.5)
@@ -125,7 +132,7 @@ func run() -> void:
 	if not await until(func(): return scene.world_panels.panels.values().any(func(p): return not p.inspector_content),"New object dialog did not appear after script removal"): quit(1); return
 	var creation = scene.world_panels.panels.values().filter(func(p): return not p.inspector_content)[0]
 	var creation_id: String = creation.panel_id
-	if scene.gameplay_keyboard_blocked() or not scene.fps_active: push_error("New object panel blocks FPS"); quit(1); return
+	if not await until(func(): return not scene.gameplay_keyboard_blocked() and scene.fps_active,"New object panel blocks FPS"): quit(1); return
 	var count: int = scene.objects.size()
 	await fps_click(scene,creation,creation.content.create_button)
 	if not await until(func(): return not scene.objects.has(creation_id) and scene.objects.size()==count,"Creating an object after script removal failed"): quit(1); return

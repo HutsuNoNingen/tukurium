@@ -1132,6 +1132,7 @@ dependencies = [
  "glam",
  "kokoverse-protocol",
  "mlua",
+ "serde",
  "serde_json",
 ]
 
