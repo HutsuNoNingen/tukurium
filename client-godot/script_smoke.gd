@@ -152,6 +152,18 @@ func run() -> void:
 	editor.graph.tick_preview()
 	if not editor.graph.display_labels.n5.text.contains("1"):
 		push_error("Display did not refresh from replicated script state: " + editor.graph.display_labels.n5.text); quit(1); return
+	# A saved graph with a bound Field reference must remain editable.
+	editor.graph.add_node("write_field")
+	editor.apply_button.pressed.emit()
+	if not await check_until(func(): return editor.pending_id.is_empty() and scene.objects[id].scripts[2].parameters.has("ref_n8"), "Field node did not add its reference parameter"): quit(1); return
+	var color_reference := {"kind":"field","target":scene.field_address(id,"color"),"field_id":"color"}
+	editor.parameter_controls.ref_n8.received.call({"kind":"kokoverse_reference","reference":color_reference})
+	if not await check_until(func(): return editor.pending_id.is_empty() and scene.objects[id].scripts[2].parameters.get("ref_n8") is Dictionary and scene.objects[id].scripts[2].parameters.ref_n8.get("field_id") == "color", "Field reference did not save"): quit(1); return
+	editor.graph.canvas.get_node("n8").position_offset += Vector2(20,0)
+	editor.graph.canvas.end_node_move.emit()
+	editor.apply_button.pressed.emit()
+	if not await check_until(func(): return editor.pending_id.is_empty() and not editor.source_dirty, "Bound graph did not reapply: " + editor.feedback.text): quit(1); return
+	if scene.objects[id].scripts[2].parameters.ref_n8.get("field_id") != "color": push_error("Reapplying graph lost its field reference"); quit(1); return
 	editor.click_button.pressed.emit()
 	if not await check_until(func(): return scene.objects[id].scripts[1].state.get("active", false), "Existing interaction script did not keep running beside graph"): quit(1); return
 	var screenshot := ""

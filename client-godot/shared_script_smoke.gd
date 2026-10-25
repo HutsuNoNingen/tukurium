@@ -122,6 +122,38 @@ func run() -> void:
 	a.editor.graph.add_node("on_interact")
 	await fps_click(scene,panel,a.editor.apply_button)
 	if not await until(func(): return a.editor.pending_id.is_empty() and scene.objects[target].scripts[0].source.contains("on_interact"),"Shared graph Apply failed"): quit(1); return
+	# Editing a graph with an existing Field binding must preserve the reference.
+	a.editor.graph.add_node("write_field")
+	a.editor.graph.data.nodes[2].id = "paint"
+	a.editor.graph.redraw()
+	a.editor.graph.touch()
+	await fps_click(scene,panel,a.editor.apply_button)
+	if not await until(func(): return a.editor.pending_id.is_empty() and scene.objects[target].scripts[0].parameters.has("ref_paint"),"Shared graph Field parameter missing"): quit(1); return
+	var reference := {"kind":"field","target":scene.field_address(target,"color"),"field_id":"color"}
+	var destination = a.editor.parameter_controls.ref_paint
+	await process_frame
+	if destination.get_global_rect().size.x < 80 or destination.get_global_rect().end.x > a.editor.parameters.get_global_rect().end.x + 2:
+		push_error("Field binding control is clipped in the shared inspector"); quit(1); return
+	var malformed := {"kind":"kokoverse_reference","reference":{"kind":"field","target":{"instance_id":target,"local_id":"2"},"field_id":"color"}}
+	if destination._can_drop_data(Vector2.ZERO,malformed): push_error("Malformed Field reference was accepted"); quit(1); return
+	var dragged := {"kind":"kokoverse_reference","reference":reference}
+	if not destination._can_drop_data(Vector2.ZERO,dragged): push_error("Valid Field reference was rejected"); quit(1); return
+	scene.world_panels.carried_reference = dragged
+	var drop := InputEventMouseButton.new()
+	drop.button_index = MOUSE_BUTTON_LEFT
+	drop.pressed = true
+	destination._gui_input(drop)
+	if not scene.world_panels.carried_reference.is_empty(): push_error("Dropped Field reference remained carried"); quit(1); return
+	if not await until(func(): return a.editor.pending_id.is_empty() and scene.objects[target].scripts[0].parameters.get("ref_paint") is Dictionary,"Shared graph Field binding not saved"): quit(1); return
+	a.editor.graph.canvas.get_node("paint").position_offset += Vector2(20,0)
+	a.editor.graph.canvas.end_node_move.emit()
+	a.editor.queued_parameters.ref_paint = malformed.reference
+	await fps_click(scene,panel,a.editor.apply_button)
+	if not a.editor.pending_id.is_empty() or not a.editor.feedback.text.contains("Invalid field reference for ref_paint") or a.editor.queued_parameters.has("ref_paint"):
+		push_error("Malformed queued Field reference was sent or not explained"); quit(1); return
+	await fps_click(scene,panel,a.editor.apply_button)
+	if not await until(func(): return a.editor.pending_id.is_empty() and not a.editor.source_dirty,"Bound shared graph did not reapply: " + a.editor.feedback.text): quit(1); return
+	if scene.objects[target].scripts[0].parameters.ref_paint.get("field_id") != "color": push_error("Shared graph Apply lost Field binding"); quit(1); return
 	scene.release_cursor()
 	await process_frame
 	var graph_point: Vector2 = a.editor.graph.canvas.get_global_rect().position + Vector2(120,55)

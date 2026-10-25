@@ -379,6 +379,11 @@ func update_component(apply_code: bool, run: bool) -> void:
 				var key := "ref_" + str(item.id) if item.kind in ["read_field", "write_field", "drive_field"] else ("p_" + str(item.id) if item.kind == "public_number" else "")
 				if component.parameters.has(key): values[key] = component.parameters[key]
 	values.merge(queued_parameters, true)
+	for field in component.schema.fields:
+		if field.value_type == "field_ref" and values.has(field.id) and values[field.id] != null and not valid_field_reference(values[field.id]):
+			queued_parameters.erase(field.id)
+			feedback.text = "Invalid field reference for %s was discarded. Apply again, then rebind the field." % field.id
+			return
 	queued_parameters.clear()
 	send_action({"action":"update", "script_id":component.id,
 		"expected_revision":base_revision if changed_source else component.revision,
@@ -386,8 +391,26 @@ func update_component(apply_code: bool, run: bool) -> void:
 
 func queue_parameter(id: String, value: Variant) -> void:
 	if filling or source_dirty: return
+	if value is Dictionary and not valid_field_reference(value):
+		feedback.text = "Invalid field reference for %s. Drag a field from an inspector or Clear this binding." % id
+		return
 	queued_parameters[id] = value
 	flush_at = Time.get_ticks_msec() + 180
+
+func valid_field_reference(value: Variant) -> bool:
+	if not value is Dictionary or value.get("kind") != "field" or not value.get("target") is Dictionary:
+		return false
+	var address: Dictionary = value.target
+	var owner: Variant = address.get("instance_id")
+	var local_id: Variant = address.get("local_id")
+	var field_id: Variant = value.get("field_id")
+	return owner is String and owner.length() == 36 and (local_id is int or local_id is float) and float(local_id) == float(int(local_id)) and int(local_id) > 0 and field_id is String and not field_id.is_empty() and field_id.length() <= 80
+
+func available_field_reference(value: Variant) -> bool:
+	if not valid_field_reference(value): return false
+	var address: Dictionary = value.target
+	var fields: Array = app.objects.get(address.instance_id, {}).get("fields", [])
+	return fields.any(func(field): return field.id == value.field_id and int(field.component_id) == int(address.local_id))
 
 func choose_field_operation(reference: Dictionary) -> void:
 	if current_script().is_empty() or not app.editable or not reference.has("target"): return
@@ -596,31 +619,35 @@ func clear_parameters() -> void:
 func build_parameters(component: Dictionary) -> void:
 	clear_parameters()
 	for field in component.schema.fields:
-		var row := HBoxContainer.new()
+		var row: BoxContainer = VBoxContainer.new() if field.value_type == "field_ref" and window == null else HBoxContainer.new()
 		parameters.add_child(row)
 		var title := Label.new()
 		title.text = field.label
-		title.custom_minimum_size.x = 160
+		if row is HBoxContainer: title.custom_minimum_size.x = 160
 		row.add_child(title)
 		var value: Variant = component.parameters[field.id]
 		match field.value_type:
 			"field_ref":
+				var control_row: BoxContainer = row
+				if row is VBoxContainer:
+					control_row = HBoxContainer.new()
+					row.add_child(control_row)
 				var reference = REFERENCE_CHIP.new()
 				reference.manager = app.world_panels
 				reference.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-				reference.text = "Drop a field reference" if value == null else str(app.world_panels.field_data(value.target.instance_id,"name").get("value","Deleted Slot")) + " · " + str(value.field_id)
-				reference.payload = func(): return null if value == null else {"kind":"kokoverse_reference","reference":value}
-				reference.accepts = func(data): return data is Dictionary and data.get("kind") == "kokoverse_reference" and data.get("reference",{}).get("kind") == "field"
+				reference.text = "Drop a field reference" if value == null else (str(app.world_panels.field_data(value.target.instance_id,"name").get("value","Deleted Slot")) + " · " + str(value.field_id) if valid_field_reference(value) else "Invalid reference · Clear or rebind")
+				reference.payload = func(): return null if not valid_field_reference(value) else {"kind":"kokoverse_reference","reference":value}
+				reference.accepts = func(data): return data is Dictionary and data.get("kind") == "kokoverse_reference" and available_field_reference(data.get("reference"))
 				reference.received = func(data): queue_parameter(field.id,data.reference)
 				reference.pressed.connect(func():
-					if value != null: app.world_panels.open_inspector(value.target.instance_id))
-				row.add_child(reference)
+					if valid_field_reference(value): app.world_panels.open_inspector(value.target.instance_id))
+				control_row.add_child(reference)
 				parameter_controls[field.id] = reference
 				var clear := Button.new()
 				clear.text = "Clear"
 				clear.focus_mode = Control.FOCUS_NONE
 				clear.pressed.connect(func(): queue_parameter(field.id,null))
-				row.add_child(clear)
+				control_row.add_child(clear)
 			"number":
 				var spin := SpinBox.new()
 				spin.min_value = float(field.min) if field.min != null else -1000000000
