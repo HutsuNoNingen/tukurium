@@ -182,7 +182,7 @@ func line_field(parent: Node, field: String, part: String) -> LineEdit:
 	var line := LineEdit.new()
 	line.custom_minimum_size = Vector2(0, 30 if desktop else 44)
 	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	line.max_length = 80 if field == "name" else 32
+	line.max_length = 80 if field in ["name", "world_text"] else 32
 	line.set_meta("field", field)
 	line.set_meta("part", part)
 	parent.add_child(line)
@@ -242,6 +242,7 @@ func build_fields() -> void:
 	for schema in manager.component_schemas:
 		var fields: Array = object.fields.filter(func(field): return int(field.component_id) == int(schema.local_id))
 		if fields.is_empty(): continue
+		if schema.type_id == "MediaPlayback" and object.get("playback") == null: continue
 		component_section(str(schema.type_id),int(schema.local_id),schema.get("attach_defaults") != null)
 		for field in fields: build_field(field)
 	building_field = {}
@@ -311,7 +312,7 @@ func change_component(type_id: String, add: bool) -> void:
 	if schema.is_empty() or schema.get("attach_defaults") == null: return
 	var present: bool = object.fields.any(func(field): return int(field.component_id) == int(schema.local_id))
 	if present == add or (add and type_id == "Mirror" and not mirror_surface(object)): return
-	if not add and type_id == "MeshRenderer" and (object.get("playback") != null or object.get("mirror") != null): return
+	if not add and type_id == "MeshRenderer" and (object.get("panel") != null or object.get("playback") != null or object.get("mirror") != null or not object.get("scripts",[]).is_empty()): return
 	var command: Dictionary = {"action":"add_component" if add else "remove_component", "target":manager.app.address_of(object), "type_id":type_id, "expected_revision":object.object_revision}
 	if add:
 		command["values"] = schema.attach_defaults.duplicate(true)
@@ -344,7 +345,7 @@ func component_section(name: String, component_id: int = 0, removable: bool = fa
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if removable and manager.app.editable:
 		var remove_button := add_button(header, "Remove", change_component.bind(name, false))
-		remove_button.disabled = name == "MeshRenderer" and (manager.app.objects[target_id].get("playback") != null or manager.app.objects[target_id].get("mirror") != null)
+		remove_button.disabled = name == "MeshRenderer" and (manager.app.objects[target_id].get("panel") != null or manager.app.objects[target_id].get("playback") != null or manager.app.objects[target_id].get("mirror") != null or not manager.app.objects[target_id].get("scripts",[]).is_empty())
 		remove_button.tooltip_text = "Remove dependent components first" if remove_button.disabled else "Remove this component"
 		component_remove_buttons[name] = remove_button
 	field_container = section
@@ -599,7 +600,7 @@ func changed(field: String, control: Control, one_shot: bool = false) -> void:
 func read_value(field: String) -> Dictionary:
 	var parts: Array = controls[field]
 	var type: String = manager.field_data(target_id, field).get("value_type", "")
-	if type == "string": return {"ok":not parts[0].text.strip_edges().is_empty(),"value":parts[0].text}
+	if type == "string": return {"ok":field != "name" or not parts[0].text.strip_edges().is_empty(),"value":parts[0].text}
 	if type == "bool": return {"ok":true,"value":parts[0].button_pressed}
 	if type == "collider" and not parts[0].button_pressed: return {"ok":true,"value":null}
 	var values := []

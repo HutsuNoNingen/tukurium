@@ -38,8 +38,9 @@ try {
   const slot=host.client.latest().snapshot.objects.find(o=>o.visual.kind==='none'&&o.renderer===undefined&&o.fields.some(f=>f.id==='name'&&f.value==='Slot'));
   assert.ok(slot,'Empty Slot was not retained');
   assert.ok(observed.some(o=>o.address.instance_id===slot.address.instance_id&&o.visual.kind==='primitive'&&o.renderer),'Renderer attachment did not reach host');
-  assert.equal(slot.world_text?.text,'Text','WorldText did not reach host');
+  assert.equal(slot.world_text?.text,'','Cleared WorldText did not reach host');
   assert.ok(observed.some(o=>o.address.instance_id===slot.address.instance_id&&o.world_text?.text==='Text'),'WorldText attachment was not observed');
+  assert.ok(observed.some(o=>o.address.instance_id===slot.address.instance_id&&o.world_text?.text==='A shared WorldText field accepts more than thirty two characters'),'Long WorldText edit did not reach host');
   assert.ok(host.client.latest().snapshot.objects.some(o=>o.parent===null&&o.world_text?.text==='Text'&&o.address.instance_id!==slot.address.instance_id),'Standalone text did not reach host');
   assert.ok(host.client.latest().snapshot.objects.some(o=>o.parent?.instance_id===slot.address.instance_id&&o.world_text?.text==='Text'),'Text child did not reach host');
   const manipulated=observed.find(o=>o.creation && o.world_scale[0]>1.05 && Math.abs(o.world_rotation[1])>0.01);
@@ -55,7 +56,7 @@ try {
   const late=await peer('guest',2);
   await until(()=>shapes.every(shape=>late.client.latest().snapshot.objects.some(o=>o.visual.kind==='primitive'&&o.visual.shape===shape)),'Late join missed primitives');
   assert.ok(late.client.latest().snapshot.objects.some(o=>o.visual.kind==='none'&&o.renderer===undefined),'Late join missed empty Slot');
-  assert.ok(late.client.latest().snapshot.objects.some(o=>o.address.instance_id===slot.address.instance_id&&o.world_text?.text==='Text'),'Late join missed WorldText');
+  assert.ok(late.client.latest().snapshot.objects.some(o=>o.address.instance_id===slot.address.instance_id&&o.world_text?.text===''),'Late join missed cleared WorldText');
   assert.ok(late.client.latest().snapshot.objects.some(o=>o.parent?.instance_id===slot.address.instance_id&&o.world_text?.text==='Text'),'Late join missed text child');
   assert.ok(late.client.latest().snapshot.objects.some(o=>o.visual.kind==='image'&&o.fields.some(f=>f.id==='name'&&f.value.startsWith('Photo '))),'Late join missed camera photo');
   await until(()=>late.client.latest().snapshot.objects.filter(o=>o.creation?.shape==='box').length===2,'Late join missed creation panels or selection');

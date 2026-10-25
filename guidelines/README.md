@@ -17,6 +17,7 @@ Rustが共有ワールドの正本を持ち、Godotが入力と描画を担当�
 | ECS・通信・保存の実装詳細 | [ランタイム構成](../docs/runtime.md) |
 | 共有WriteとローカルDriveの違い | [UGCのローカル実行](../docs/ugc-driving.md) |
 | 機能コンポーネントのオン・オフとECSの境界 | [機能コンポーネントの有効状態](component-enablement.md) |
+| 既存ComponentのFieldとインスペクタの不足 | [Componentとインスペクタの監査](../docs/component-inspector-review.md) |
 | 作品の境界と、保留中のライセンス設計 | [先に作品の境界を整える](../docs/item-boundaries-and-rights.md) |
 
 ## 記録は設計判断と根拠を残す

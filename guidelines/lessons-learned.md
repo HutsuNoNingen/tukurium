@@ -370,3 +370,12 @@ Godotのインスペクタから `WorldText` の白色 `[1.0,1.0,1.0,1.0]` を�
 
 - 再現・確認：メッセージ投稿後に同じワールドのsnapshotを復元し、履歴が残ること、保存用snapshotが変わらないこと、200件上限を [tests.rs](../crates/core/src/tests.rs) で確認する。2人の送受信と途中参加は [chat-integration.mjs](../tests/chat-integration.mjs) で確認する。
 - コード：[session_chat.rs](../crates/core/src/session_chat.rs)、[lib.rs](../crates/core/src/lib.rs)。確認日：2026-10-24。
+
+## インスペクタの入力制限は共有Fieldの検証と揃える
+
+WorldTextの共有Fieldは空文字と80文字までを受け付けるが、共通インスペクタの入力欄は32文字で切り、空文字の変更を送らなかった。Rustの検証だけを見ても制作画面から実際に入力できるとは限らない。Fieldを追加・変更するときは、登録表の型・範囲、Godotの入力Control、2D/3Dからの送信、ホストの確定値、途中参加の復元を一続きで確認する。
+
+Component欄もスキーマの存在だけで表示すると、未装着のMediaPlaybackに空の節が出る。Removeの可否は、Rustが拒否する依存Componentと合わせる。新しいFieldは「編集設定」「読み取り専用の派生値」「専用コマンド」「内部状態」の役割を決めてから表示する。
+
+- 再現・確認：[creation-integration.mjs](../tests/creation-integration.mjs) の `--rendered` で3Dインスペクタから長文入力と空文字への変更、ホストへの同期、途中参加を確認する。[inspector-integration.mjs](../tests/inspector-integration.mjs) の `--rendered` で共通インスペクタの操作を確認する。
+- コード：[inspector_view.gd](../client-godot/inspector_view.gd)、[replication.rs](../crates/core/src/replication.rs)。設計上の不足は[Componentとインスペクタの対応](../docs/component-inspector-review.md)に整理する。確認日：2026-10-26。

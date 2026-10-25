@@ -58,9 +58,17 @@ func run() -> void:
 	if not await until(func(): return view.drive_labels.has("rotation") and view.drive_labels.rotation.visible, "Drive provenance is missing"): quit(1); return
 	if view.controls.rotation[0].editable: push_error("Driven output should not appear writable"); quit(1); return
 	if not view.controls.position[0].editable: push_error("Un-driven field should stay editable"); quit(1); return
-	var sections: Array = view.fields_box.get_children().map(func(section): return section.get_child(1).text)
+	var sections: Array = []
+	for section in view.fields_box.get_children():
+		if section.get_child_count() < 2: continue
+		var header: Node = section.get_child(1)
+		if header is HBoxContainer and header.get_child_count() > 0:
+			sections.append(header.get_child(0).text)
 	for expected in ["Slot", "Transform", "MeshRenderer", "Scripts"]:
 		if not sections.has(expected): push_error("Missing component section " + expected); quit(1); return
+	if sections.has("MediaPlayback"): push_error("Non-video object showed MediaPlayback"); quit(1); return
+	if not view.component_remove_buttons.has("MeshRenderer") or not view.component_remove_buttons.MeshRenderer.disabled:
+		push_error("MeshRenderer with an attached script was removable"); quit(1); return
 	if not scene.world_panels.has_window_focus() or not scene.gameplay_keyboard_blocked(): push_error("Native focus did not block gameplay"); quit(1); return
 	var line: LineEdit = view.controls.name[0]
 	line.grab_focus()

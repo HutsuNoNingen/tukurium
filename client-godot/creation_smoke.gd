@@ -479,6 +479,26 @@ func run() -> void:
 	if not await until(func(): return scene.objects[slot_id].get("world_text")==null and not scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not detach"): quit(1); return
 	await add_component_ui(scene,surface,panel,"WorldText")
 	if not await until(func(): return scene.objects[slot_id].get("world_text")!=null and scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not reattach"): quit(1); return
+	var text_line: LineEdit=panel.controls.world_text[0]
+	panel.scroll.ensure_control_visible(text_line)
+	await process_frame
+	await click_control(scene,surface,text_line)
+	if not await until(func(): return text_line.has_focus(),"WorldText field did not receive 3D input focus"): quit(1); return
+	text_line.select_all()
+	var long_text := "A shared WorldText field accepts more than thirty two characters"
+	for character in long_text:
+		var typed := InputEventKey.new()
+		typed.keycode=character.unicode_at(0); typed.unicode=typed.keycode; typed.pressed=true
+		root.push_input(typed,true)
+		typed=typed.duplicate(); typed.pressed=false; root.push_input(typed,true)
+	if not await until(func(): return scene.objects[slot_id].world_text.text==long_text,"WorldText was truncated by the inspector"): quit(1); return
+	text_line=panel.controls.world_text[0]
+	text_line.select_all()
+	var erase := InputEventKey.new()
+	erase.keycode=KEY_BACKSPACE; erase.pressed=true
+	root.push_input(erase,true)
+	erase=erase.duplicate(); erase.pressed=false; root.push_input(erase,true)
+	if not await until(func(): return scene.objects[slot_id].world_text.text=="","Inspector could not clear WorldText"): quit(1); return
 	await click_control(scene,surface,panel.hierarchy.child_text_button)
 	if not await until(func(): return scene.objects.values().any(func(o): return o.get("parent")!=null and o.parent.instance_id==slot_id and o.get("world_text")!=null),"Text child was not created"): quit(1); return
 	var child_id: String=scene.selected_id
