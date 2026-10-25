@@ -122,6 +122,19 @@ func run() -> void:
 	a.editor.graph.add_node("on_interact")
 	await fps_click(scene,panel,a.editor.apply_button)
 	if not await until(func(): return a.editor.pending_id.is_empty() and scene.objects[target].scripts[0].source.contains("on_interact"),"Shared graph Apply failed"): quit(1); return
+	scene.release_cursor()
+	await process_frame
+	var graph_point: Vector2 = a.editor.graph.canvas.get_global_rect().position + Vector2(120,55)
+	var graph_local := Vector3((graph_point.x/panel.viewport.size.x-0.5)*panel.mesh.size.x,(0.5-graph_point.y/panel.viewport.size.y)*panel.mesh.size.y,0.025)
+	var graph_screen: Vector2 = scene.camera.unproject_position(panel.to_global(graph_local))
+	mouse(MOUSE_BUTTON_RIGHT,true,graph_screen)
+	mouse(MOUSE_BUTTON_RIGHT,false,graph_screen)
+	if not await until(func(): return a.editor.graph.context_panel.visible,"Right-click did not reach the shared graph canvas"): quit(1); return
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--screenshot="):
+			panel.viewport.get_texture().get_image().save_png(arg.trim_prefix("--screenshot=").get_base_dir().path_join("graph-context.png"))
+	a.editor.graph.context_panel.hide()
+	scene.set_view_mode(1)
 	# The New entry must open an operable world panel even immediately after removal.
 	mouse(MOUSE_BUTTON_MIDDLE,true,root.size*0.5)
 	mouse(MOUSE_BUTTON_MIDDLE,false,root.size*0.5)

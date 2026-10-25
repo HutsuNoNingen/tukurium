@@ -57,7 +57,7 @@ Luaは複数人が同時に入力でき、他の人のカーソルが名前と�
 
 ### ノードグラフ
 
-**+ Node graph** でビジュアルスクリプトを物体へ追加する。上部の一覧からノードを選んで **+ Node**、ポートをドラッグして接続し、**Apply graph** で保存する。オレンジ色はイベントから処理へ進む線で、ほかの色は値を処理の入力へ渡す線。ノードはドラッグで移動でき、選択してDeleteで削除する。同じ編集画面が個人の2Dウィンドウと共有インスペクタの3Dパネルに出る。
+**+ Node graph** でビジュアルスクリプトを物体へ追加する。キャンバスの空白を右クリックし、検索してノードをその位置に追加する。上部の一覧と **+ Node** からも追加できる。ポートをドラッグして接続し、**Apply graph** で保存する。オレンジ色はイベントから処理へ進む線で、ほかの色は値を処理の入力へ渡す線。ノードはドラッグで移動でき、選択してDeleteで削除する。追加しても既存ノードの位置と表示倍率は維持する。同じ編集画面が個人の2Dウィンドウと共有インスペクタの3Dパネルに出る。3DパネルのFPS操作中は右クリックが物体の保持に使われるため、Escでカーソルを出してからグラフを右クリックする。
 
 | 種類 | ノード |
 |---|---|
@@ -65,7 +65,9 @@ Luaは複数人が同時に入力でき、他の人のカーソルが名前と�
 | 実行の流れ | Branch、Sequence、Set State、Write Field、Drive Field |
 | 値・入力 | Number、Bool、String、Vec3、Color、Public Number、Delta、Time、World Time、Read Field、Get State |
 | 計算・比較 | Add、Subtract、Multiply、Divide、Modulo、Min、Max、Less、Greater、Equal、And、Or、Not、Select |
-| 変換 | To String、Join、Rotation Y |
+| 変換・確認 | To String、Join、Rotation Y、Display |
+
+Displayは接続した値をノード上に表示する確認用ノードで、値の出力もそのまま次へ渡せる。共有状態や保存済みStateには表示結果を書き込まない。数値・演算・公開パラメータ・共有フィールド・保存済みStateなど、編集画面で読める値からプレビューを計算する。実行時にしか決まらないDeltaや未接続の入力は「—」と表示する。表示値は編集用プレビューなので、共有WriteやローカルDriveの確定値ではない。[ResoniteのValue Display](https://wiki.resonite.com/ProtoFlux:ValueDisplay) が入力値をノード上に示す用途を参考にした（確認日：2026-10-25）。
 
 Read/Write/Drive Fieldを追加して適用すると、そのノード用のField reference欄が公開パラメータに現れる。インスペクタのフィールド見出しから参照をドラッグして設定する。Write FieldはOn UpdateまたはOn Interactから、Drive FieldはOn Driveからつなぐ。Set Stateは共有イベント側でのみ使える。グラフはScript Componentのソースとして保存され、Rustが接続・型・循環を検証し、既存のスクリプト実行器とComponent登録表を通して実行する。
 

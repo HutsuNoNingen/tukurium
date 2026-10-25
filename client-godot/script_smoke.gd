@@ -113,12 +113,45 @@ func run() -> void:
 	editor.graph.add_node("number")
 	editor.graph.find_item("n4").value = 1.0
 	editor.graph.redraw()
+	var moved_node := editor.graph.canvas.get_node("n2") as GraphNode
+	moved_node.position_offset = Vector2(333,160)
+	var right_click := InputEventMouseButton.new()
+	right_click.button_index = MOUSE_BUTTON_RIGHT
+	right_click.pressed = true
+	right_click.position = editor.graph.canvas.get_global_rect().position + Vector2(150,210)
+	editor.window.push_input(right_click,true)
+	await process_frame
+	if not editor.graph.context_panel.visible:
+		push_error("Right-click did not open the graph node menu"); quit(1); return
+	right_click.pressed = false
+	editor.window.push_input(right_click,true)
+	editor.graph.context_buttons.display.pressed.emit()
+	if editor.graph.find_item("n5").get("kind") != "display" or editor.graph.canvas.get_node("n2").position_offset != Vector2(333,160):
+		push_error("Adding Display moved existing graph nodes"); quit(1); return
+	editor.graph.canvas.zoom = 1.2
+	editor.graph.canvas.scroll_offset = Vector2(25,10)
+	var graph_scroll: Vector2 = editor.graph.canvas.scroll_offset
+	editor.graph.add_node("bool")
+	if not is_equal_approx(editor.graph.canvas.zoom,1.2) or editor.graph.canvas.scroll_offset != graph_scroll:
+		push_error("Adding a node reset graph zoom or scroll"); quit(1); return
+	editor.graph.canvas.zoom = 1.0
+	editor.graph.canvas.scroll_offset = Vector2.ZERO
 	editor.graph.connect_ports(&"n2",0,&"n3",0)
 	editor.graph.connect_ports(&"n4",0,&"n3",1)
+	editor.graph.connect_ports(&"n4",0,&"n5",0)
+	editor.graph.tick_preview()
+	if not editor.graph.display_labels.n5.text.contains("1"):
+		push_error("Display did not show the connected value"); quit(1); return
+	editor.graph.add_node("get_state")
+	editor.graph.connect_ports(&"n7",0,&"n5",0)
 	editor.apply_button.pressed.emit()
 	if not await check_until(func(): return editor.pending_id.is_empty() and scene.objects[id].scripts[2].source.contains("set_state"), "Node graph did not save"): quit(1); return
 	editor.click_button.pressed.emit()
 	if not await check_until(func(): return scene.objects[id].scripts[2].state.get("value", null) == 1, "Node graph did not execute on interaction"): quit(1); return
+	editor.graph.next_preview = 0
+	editor.graph.tick_preview()
+	if not editor.graph.display_labels.n5.text.contains("1"):
+		push_error("Display did not refresh from replicated script state: " + editor.graph.display_labels.n5.text); quit(1); return
 	editor.click_button.pressed.emit()
 	if not await check_until(func(): return scene.objects[id].scripts[1].state.get("active", false), "Existing interaction script did not keep running beside graph"): quit(1); return
 	var screenshot := ""

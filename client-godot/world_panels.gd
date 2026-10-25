@@ -17,6 +17,7 @@ var windows: Dictionary = {}
 var dock_inspector_id := ""
 var pending_panel_close: Dictionary = {}
 var carried_reference: Dictionary = {}
+var graph_context_id := ""
 
 func setup(application) -> void:
 	app = application
@@ -241,6 +242,7 @@ func clear_focus() -> void:
 	for panel in panels.values(): panel.clear_focus()
 	keyboard_id = ""
 	capture_id = ""
+	graph_context_id = ""
 
 func pick(screen: Vector2) -> Dictionary:
 	var origin: Vector3 = app.camera.project_ray_origin(screen)
@@ -260,6 +262,25 @@ func route_input(event: InputEvent) -> bool:
 		return true
 	if not event is InputEventMouse: return false
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT:
+		if not event.pressed and not graph_context_id.is_empty():
+			if panels.has(graph_context_id):
+				var release_hit := pick(event.position)
+				panels[graph_context_id].forward_pointer(event, release_hit.position if release_hit.get("id", "") == graph_context_id else Vector2(-1000,-1000))
+			graph_context_id = ""
+			return true
+		# In cursor mode the graph canvas owns its context menu. FPS right-click
+		# still belongs to grabbing, and Ctrl+right-click still extracts references.
+		if event.pressed and not app.fps_active and not event.ctrl_pressed and app.hand_grab.is_empty() and not app.grab_waiting:
+			var graph_hit := pick(event.position)
+			if not graph_hit.is_empty():
+				var panel = panels[graph_hit.id]
+				if panel.inspector_content and panel.content.script_mount.visible:
+					var graph = panel.content.script_view.editor.graph
+					if graph.visible and graph.canvas.get_global_rect().has_point(graph_hit.position):
+						panel.forward_pointer(InputEventMouseMotion.new(),graph_hit.position)
+						panel.forward_pointer(event,graph_hit.position)
+						graph_context_id = graph_hit.id
+						return true
 		# Plain RMB and every in-progress grab release belong to world manipulation.
 		if not event.pressed or not event.ctrl_pressed or not app.hand_grab.is_empty() or app.grab_waiting: return false
 		var reference_hit := pick(app.get_viewport().get_visible_rect().size * 0.5 if app.fps_active else event.position)

@@ -96,6 +96,10 @@ fn spec(kind: &str) -> Option<Spec> {
             inputs: &[],
             outputs: &[("value", "any")],
         },
+        "display" => Spec {
+            inputs: &[("value", "any")],
+            outputs: &[("value", "any")],
+        },
         "add" | "subtract" | "multiply" | "divide" | "modulo" | "min" | "max" => Spec {
             inputs: &[("a", "number"), ("b", "number")],
             outputs: &[("value", "number")],
@@ -229,6 +233,7 @@ impl Compiler<'_> {
             "world_time" => "ctx.world_time".into(),
             "read_field" => format!("ctx:read(ctx.self.{}.ref_{})", self.graph.name, id),
             "get_state" => format!("ctx:get_state({}, 0)", lua_string(state_key(node)?)),
+            "display" => self.input(id, "value", stack)?,
             "add" | "subtract" | "multiply" | "divide" | "modulo" | "less" | "greater"
             | "equal" | "and" | "or" | "min" | "max" => {
                 let a = self.input(id, "a", stack)?;
@@ -646,6 +651,7 @@ mod tests {
             "to_string",
             "join",
             "rotation_y",
+            "display",
         ] {
             let value = match kind {
                 "number" | "public_number" => json!(1),

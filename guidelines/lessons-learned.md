@@ -3,6 +3,15 @@
 確認日：2026-10-24。以下は再現・修正を確認した記録。
 現在の操作規則は [3Dパネルの実装指針](world-space-panels.md) を参照する。
 
+## グラフにノードを追加すると、移動済みノードが元の位置へ戻る
+
+GraphEdit上でノードをドラッグしてから別のノードを追加すると、表示を作り直す際に古いJSON上の座標を使い、移動済みノードが元の配置へ戻っていた。GraphNodeの`position_offset`はドラッグ中のローカル編集状態で、共有ソースへ保存する前にも追加・削除が起こる。
+
+ノード移動の終了時と再描画の前に、表示中の各`position_offset`をグラフドラフトへ取り込む。再描画時はスクロール位置と倍率を保ち、右クリック追加ではクリック位置をグラフ座標へ変換して新しいノードだけの位置を決める。共有のグラフソースを更新するのは引き続きApply時だけ。
+
+- 再現・確認：ノードを移動し、空白の右クリックからDisplayを追加しても既存位置が変わらないこと。2Dウィンドウと、カーソルを解放した3Dパネルで右クリックが届くこと。
+- コード：[script_graph.gd](../client-godot/script_graph.gd)、[world_panels.gd](../client-godot/world_panels.gd)。テスト：[script_smoke.gd](../client-godot/script_smoke.gd)、[shared_script_smoke.gd](../client-godot/shared_script_smoke.gd)を描画付き統合テストで実行。確認日：2026-10-25。
+
 ## パネルを開くと歩けなくなる
 
 最初の新規作成パネルは3Dに描画していたが、表示中はHUD全体を入力停止の対象にしていた。

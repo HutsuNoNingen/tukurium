@@ -199,6 +199,7 @@ func setup(owner, mount: Control = null) -> void:
 			if draft_changed.is_valid(): draft_changed.call())
 	editor.add_child(code)
 	graph = SCRIPT_GRAPH.new()
+	graph.app = app
 	graph.changed.connect(func():
 		if not filling:
 			source_dirty = true
@@ -490,6 +491,7 @@ func insert_field_operation(mode: String) -> void:
 	refresh_buttons()
 
 func tick() -> void:
+	graph.tick_preview()
 	if not source_dirty and not queued_parameters.is_empty() and pending_id.is_empty() and Time.get_ticks_msec() >= flush_at:
 		update_component(false, bool(current_script().get("enabled", false)))
 
@@ -571,6 +573,8 @@ func refresh() -> void:
 		elif component.revision != base_revision:
 			feedback.text = "Shared code changed while this draft was open. Reload before retrying."
 	if not component.is_empty():
+		graph.target_id = target
+		graph.script_id = selected
 		graph.visible = is_graph()
 		code.visible = not is_graph()
 		code_heading.text = "Node graph · Apply to save" if is_graph() else "Source code · Apply to save"
