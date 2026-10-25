@@ -5,17 +5,20 @@
 # Script configuration
 ##############################
 
+# TODO: Get -ServerAddress default from distribution/connection.json --GM
 array set ::option_types {
   -Headless switch
   -Local switch -Online switch
   -Session arg -WorldFile arg
   -Profile arg
+  -ServerAddress arg
 }
 array set ::options {
   -Headless 0
   -Local 0 -Online 0
   -WorldFile ""
   -Profile "default"
+  -ServerAddress "45.77.130.146"
 }
 
 # These are the executable program files we need.
@@ -34,8 +37,8 @@ array set ::service_modes {
   demo {relay host-engine host-adapter host-gui guest-engine guest-adapter guest-gui}
   demo-headless {relay host-engine host-adapter guest-engine guest-adapter}
   local {relay local-asset-server local-engine local-gui}
-  local-headless {relay local-asset-server local-engine local-adapter}
-  online {relay online-asset-server client-engine client-adapter client-gui}
+  local-headless {relay local-asset-server local-engine}
+  online {client-engine client-gui}
 }
 set ::service_names [list]
 
@@ -56,10 +59,13 @@ array set ::service_specs {
   guest-gui {list godot --path client-godot -- --port=47010 --session=$::options(-Session)}
 
   local-engine {list engine --server http://127.0.0.1:8787 --port 47000 --transport-port 47001 --profile .run/Kokoverse/profiles/$::options(-Profile)/profile.dat --data-dir .run/local/$::options(-Profile) --asset-dir .run/local/$::options(-Profile)/assets --adapter [EXE $::exe_paths(adapter)] --session $::options(-Session) --console --console-title "tukurium Engine ($::options(-Profile))"}
-  local-gui {list godot --path client-godot -- --port=47000 --session=lobby --close-with-engine --lof-file}
-}
-array set ::service_args {}
+  local-gui {list godot --path client-godot -- --port=47000 --session=lobby --close-with-engine}
 
+  client-engine {list engine --server https://$::options(-ServerAddress)/api --port 47000 --transport-port 47001 --profile .run/Kokoverse/servers/$::options(-ServerAddress)/profiles/$::options(-Profile)/profile.dat --data-dir .run/online/$::options(-Profile) --asset-dir .run/online/$::options(-Profile)/assets --adapter [EXE $::exe_paths(adapter)] --session $::options(-Session) --console --console-title "tukurium Engine ($::options(-Profile))"}
+  client-gui {list godot --path client-godot -- --port=47000 --session=lobby --close-with-engine}
+}
+
+array set ::service_args {}
 array set ::service_process_handles {}
 
 ##############################
@@ -120,7 +126,6 @@ proc main args {
     set mode local
     if {$::options(-Headless)} { set mode local-headless }
   } elseif {$::options(-Online)} {
-    # TODO!
     set mode online
   } else {
     set mode demo
