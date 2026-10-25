@@ -25,6 +25,19 @@ restore_nginx() {
         fi
     done
 }
+restore_api() {
+    if test -f "$backup/kokoverse-asset-server"; then
+        cp -p "$backup/kokoverse-asset-server" /opt/kokoverse/bin/kokoverse-asset-server.restore
+        mv /opt/kokoverse/bin/kokoverse-asset-server.restore /opt/kokoverse/bin/kokoverse-asset-server
+    fi
+    if test -f "$backup/kokoverse-api.service"; then
+        cp -p "$backup/kokoverse-api.service" /etc/systemd/system/kokoverse-api.service
+    else
+        rm -f /etc/systemd/system/kokoverse-api.service
+    fi
+    systemctl daemon-reload
+    systemctl restart kokoverse-api.service || true
+}
 if test -f /var/lib/kokoverse/catalog.sqlite; then
     python3 - "$backup/catalog.sqlite" <<'PY'
 import sqlite3, sys
@@ -35,6 +48,9 @@ PY
 fi
 if test -f /opt/kokoverse/bin/kokoverse-asset-server; then
     cp -p /opt/kokoverse/bin/kokoverse-asset-server "$backup/kokoverse-asset-server"
+fi
+if test -f /etc/systemd/system/kokoverse-api.service; then
+    cp -p /etc/systemd/system/kokoverse-api.service "$backup/kokoverse-api.service"
 fi
 install -m 644 deploy/nginx-api.conf /etc/nginx/snippets/kokoverse-api.conf
 install -m 644 deploy/nginx-rate-limits.conf /etc/nginx/conf.d/kokoverse-rate-limits.conf
@@ -68,15 +84,17 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
     sleep 1
 done
 if test "$healthy" != true; then
-    if test -f "$backup/kokoverse-asset-server"; then
-        cp -p "$backup/kokoverse-asset-server" /opt/kokoverse/bin/kokoverse-asset-server.restore
-        mv /opt/kokoverse/bin/kokoverse-asset-server.restore /opt/kokoverse/bin/kokoverse-asset-server
-        systemctl restart kokoverse-api.service
-    fi
+    restore_api
     restore_nginx
-    echo 'API health check failed; restored previous binary and nginx site.' >&2
+    echo 'API health check failed; restored previous binary, service unit and nginx site.' >&2
     exit 1
 fi
 systemctl reload nginx
-curl --fail --silent --show-error https://45.77.130.146/api/health
+if ! curl --fail --silent --show-error https://45.77.130.146/api/health; then
+    restore_api
+    restore_nginx
+    systemctl reload nginx
+    echo 'Public health check failed; restored previous binary, service unit and nginx site.' >&2
+    exit 1
+fi
 printf '\nDeployment backup: %s\n' "$backup"
