@@ -719,10 +719,10 @@ pub(crate) fn extract_snapshot(
         objects.push(object);
     }
     objects.sort_by(|a, b| a.address.instance_id.cmp(&b.address.instance_id));
-    cache.0 = kokoverse_protocol::Snapshot {
+    cache.0 = std::sync::Arc::new(kokoverse_protocol::Snapshot {
         world_revision: revision.0.to_string(),
         objects,
-    };
+    });
 }
 
 /// Publish one atomic commit per accepted command, after derived transforms and extraction.

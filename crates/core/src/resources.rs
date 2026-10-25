@@ -69,8 +69,14 @@ pub(crate) struct ChangeSet {
     pub removed: Vec<Address>,
 }
 
+/// The latest extracted world snapshot. Held behind an `Arc` because
+/// several schedules (scripts, drives, motion, contacts) read the
+/// whole snapshot every frame; replacing the extraction swaps the
+/// `Arc` instead of each reader cloning the world (which includes
+/// image payloads). The snapshot itself stays immutable, exactly as
+/// before — readers never mutated their clones.
 #[derive(Resource)]
-pub(crate) struct SnapshotCache(pub Snapshot);
+pub(crate) struct SnapshotCache(pub std::sync::Arc<Snapshot>);
 
 pub struct CommandOutcome {
     pub ticket: u64,
