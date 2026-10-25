@@ -1,6 +1,7 @@
 extends VBoxContainer
 ## Visual source editor. The graph JSON is stored in ScriptComponent.source.
 signal changed
+signal operations(ops: Array)
 const PREFIX := "@tukurium-graph-v1\n"
 const PORT_HELP := "Port colors and labels show types · Right-click empty space to add nodes."
 const TYPES := {
@@ -53,6 +54,8 @@ var target_id := ""
 var script_id := ""
 var next_preview := 0
 var loading := false
+var collaborative_ids := false
+var observed: Dictionary = {}
 
 func _ready() -> void:
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -167,6 +170,7 @@ func capture_layout() -> void:
 func fresh(name: String) -> void:
 	data = {"name":name,"nodes":[{"id":"n1","kind":"on_update","x":40.0,"y":80.0}],"links":[]}
 	redraw()
+	observed = data.duplicate(true)
 
 func load_source(source: String) -> void:
 	if not source.begins_with(PREFIX): return
@@ -174,13 +178,85 @@ func load_source(source: String) -> void:
 	if parsed is Dictionary and parsed.has("nodes") and parsed.has("links"):
 		data = parsed.duplicate(true)
 		redraw()
+		observed = data.duplicate(true)
+
+func load_data(value: Dictionary) -> void:
+	var focused := ""
+	var caret := 0
+	var owner := get_viewport().gui_get_focus_owner() if is_inside_tree() else null
+	if owner is LineEdit and owner != component_name:
+		var parent := owner.get_parent()
+		if parent is GraphNode:
+			focused = parent.name
+			caret = owner.caret_column
+	data = value.duplicate(true)
+	redraw()
+	observed = data.duplicate(true)
+	if not focused.is_empty():
+		var node := canvas.get_node_or_null(focused)
+		if node != null:
+			var inputs := node.find_children("*", "LineEdit", true, false)
+			if not inputs.is_empty():
+				inputs[0].grab_focus.call_deferred()
+				inputs[0].set_caret_column.call_deferred(caret)
 
 func source() -> String:
 	capture_layout()
 	return PREFIX + JSON.stringify(data)
 
 func touch() -> void:
-	if not loading: changed.emit()
+	if loading: return
+	var ops := difference(observed, data)
+	observed = data.duplicate(true)
+	changed.emit()
+	if not ops.is_empty(): operations.emit(ops)
+
+func difference(before: Dictionary, after: Dictionary) -> Array:
+	var ops: Array = []
+	if before.get("name") != after.get("name"): ops.append({"kind":"name","value":after.name})
+	var old_nodes := {}
+	var new_nodes := {}
+	for node in before.get("nodes",[]): old_nodes[str(node.id)] = node
+	for node in after.get("nodes",[]): new_nodes[str(node.id)] = node
+	for id in old_nodes:
+		if not new_nodes.has(id): ops.append({"kind":"remove_node","id":id})
+	for id in new_nodes:
+		if not old_nodes.has(id):
+			ops.append({"kind":"add_node","node":new_nodes[id].duplicate(true)})
+		else:
+			var old: Dictionary = old_nodes[id]
+			var node: Dictionary = new_nodes[id]
+			if old.get("x") != node.get("x") or old.get("y") != node.get("y"):
+				ops.append({"kind":"position","id":id,"x":node.x,"y":node.y})
+			if old.get("value") != node.get("value"):
+				ops.append({"kind":"value","id":id,"value":node.get("value")})
+	for link in before.get("links",[]):
+		if not after.get("links",[]).has(link) and new_nodes.has(str(link.from)) and new_nodes.has(str(link.to)):
+			ops.append({"kind":"disconnect","link":link.duplicate(true)})
+	for link in after.get("links",[]):
+		if not before.get("links",[]).has(link): ops.append({"kind":"connect","link":link.duplicate(true)})
+	return ops
+
+func project(base: Dictionary, changes: Array) -> Dictionary:
+	var result := base.duplicate(true)
+	for op in changes:
+		match str(op.kind):
+			"name": result.name = op.value
+			"add_node":
+				if not result.nodes.any(func(n): return n.id == op.node.id): result.nodes.append(op.node.duplicate(true))
+			"remove_node":
+				result.nodes = result.nodes.filter(func(n): return n.id != op.id)
+				result.links = result.links.filter(func(l): return l.from != op.id and l.to != op.id)
+			"position", "value":
+				for node in result.nodes:
+					if node.id != op.id: continue
+					if op.kind == "position": node.x = op.x; node.y = op.y
+					else: node.value = op.value
+			"connect":
+				result.links = result.links.filter(func(l): return l.to != op.link.to or l.input != op.link.input)
+				result.links.append(op.link.duplicate(true))
+			"disconnect": result.links.erase(op.link)
+	return result
 
 func bound_field_type(node_id: String) -> String:
 	if app == null or target_id.is_empty() or script_id.is_empty(): return "any"
@@ -285,6 +361,7 @@ func add_node(kind: String, at_position: Vector2 = Vector2.INF) -> void:
 		return
 	var index := 1
 	while data.nodes.any(func(item): return item.id == "n%d" % index): index += 1
+	var id := "n%s_%s" % [Time.get_ticks_usec(), randi()] if collaborative_ids else "n%d" % index
 	var value: Variant = null
 	match kind:
 		"number", "public_number": value = 0.0
@@ -296,7 +373,7 @@ func add_node(kind: String, at_position: Vector2 = Vector2.INF) -> void:
 	var column := (index - 1) % 3
 	var row := (index - 1) / 3
 	var position := Vector2(float(40 + column * 230),float(80 + row * 180)) if at_position == Vector2.INF else at_position
-	data.nodes.append({"id":"n%d" % index,"kind":kind,"x":position.x,"y":position.y,"value":value})
+	data.nodes.append({"id":id,"kind":kind,"x":position.x,"y":position.y,"value":value})
 	redraw()
 	touch()
 

@@ -61,6 +61,9 @@ func receive(body: Dictionary) -> bool:
 	if body.get("kind") == "script_document_state":
 		for view in views(): view.script_view.receive(body.document)
 		return true
+	if body.get("kind") == "script_graph_state":
+		for view in views(): view.script_view.receive_graph(body.document)
+		return true
 	if body.get("kind") == "edit_sessions":
 		sessions = body.get("sessions", [])
 		for view in views(): view.refresh_sessions()

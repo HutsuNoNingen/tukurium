@@ -3,6 +3,13 @@
 確認日：2026-10-24。以下は再現・修正を確認した記録。
 現在の操作規則は [3Dパネルの実装指針](world-space-panels.md) を参照する。
 
+## 共同編集のApplyはゲストの通常コマンド結果にも登録する
+
+ノードグラフの下書き操作は`script_graph_result`で返すが、`Apply graph`はRustの`ScriptAction::Update`として実行され、結果は通常の`result`になる。ゲストがグラフ要求をホストへ転送するだけでは、戻ってきた`result`を受け取る保留コマンド表にIDがなく、UIへの応答が落ちる。ゲストのApply時に通常コマンドの保留表へ登録し、ホストで下書き世代・版が古いときも`result`で拒否を返す。
+
+- 再現・確認：ゲストから古い下書き版のApplyを拒否し、続いて最新版をApplyする。ホスト・ゲストのSnapshotと保存・復元後のScript sourceが一致し、未Applyの下書きが保存されないことを [script-documents-integration.mjs](../tests/script-documents-integration.mjs) `--rendered` で確認する。
+- コード：[graph_documents.rs](../crates/engine/src/graph_documents.rs)、[main.rs](../crates/engine/src/main.rs)。確認日：2026-10-25。
+
 ## ノードグラフのField参照は送信前に整数のAddressへ戻す
 
 Godotが共有SnapshotのJSONを読むと、Rustでは整数の`Address.local_id`が`2.0`のような浮動小数点になる。ノードグラフで数字だけを変えてもApplyは既存の`ref_paint`を再送するため、ホスト直結ではRustの`u32`への復元が失敗し、`Invalid script parameter: ref_paint`になる。ゲスト経由ではGoアダプターがJSONを再構築して`2.0`を`2`へ直していたため、同じUIテストが通り、ホスト側だけの不具合を隠していた。

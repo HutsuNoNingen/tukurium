@@ -119,6 +119,23 @@ func run() -> void:
 	if not await until(func(): return scene.objects[target].get("scripts",[]).size() == 1 and a.editor.pending_id.is_empty() and a.editor.is_graph(),"FPS node graph creation failed"): quit(1); return
 	if not a.document.is_empty() or not a.editor.graph.visible:
 		push_error("Graph editor incorrectly uses the Lua text draft"); quit(1); return
+	scene.world_panels.open_inspector(target)
+	if not await until(func(): return scene.world_panels.panels.size() == 2,"Second graph inspector missing"): quit(1); return
+	var other = scene.world_panels.panels.values().filter(func(p): return p.panel_id != panel.panel_id)[0]
+	other.content.tabs.current_tab = 1
+	var graph_peer = other.content.script_view
+	if not await until(func(): return not a.graph_document.is_empty() and not graph_peer.graph_document.is_empty(),"Graph drafts did not open on both panels"): quit(1); return
+	var original_graph: String = scene.objects[target].scripts[0].source
+	a.editor.graph.component_name.text = "SharedGraph"
+	a.editor.graph.component_name.text_changed.emit("SharedGraph")
+	graph_peer.editor.graph.canvas.get_node("n1").position_offset += Vector2(30,0)
+	graph_peer.editor.graph.canvas.end_node_move.emit()
+	if not await until(func(): return a.graph_queue.is_empty() and graph_peer.graph_queue.is_empty() and a.editor.graph.data == graph_peer.editor.graph.data and a.editor.graph.data.name == "SharedGraph" and float(a.editor.graph.data.nodes[0].x) == 70.0,"Concurrent graph edits did not converge"): quit(1); return
+	if scene.objects[target].scripts[0].source != original_graph: push_error("Graph draft executed before Apply"); quit(1); return
+	a.editor.apply_button.pressed.emit()
+	if not await until(func(): return a.editor.pending_id.is_empty() and scene.objects[target].scripts[0].source.contains("SharedGraph"),"Shared graph draft Apply failed"): quit(1); return
+	scene.world_panels.close_panel(other.panel_id)
+	if not await until(func(): return scene.world_panels.panels.size() == 1,"Second graph inspector did not close"): quit(1); return
 	a.editor.graph.add_node("on_interact")
 	await fps_click(scene,panel,a.editor.apply_button)
 	if not await until(func(): return a.editor.pending_id.is_empty() and scene.objects[target].scripts[0].source.contains("on_interact"),"Shared graph Apply failed"): quit(1); return
@@ -155,12 +172,13 @@ func run() -> void:
 	if not await until(func(): return a.editor.pending_id.is_empty() and not a.editor.source_dirty,"Bound shared graph did not reapply: " + a.editor.feedback.text): quit(1); return
 	if scene.objects[target].scripts[0].parameters.ref_paint.get("field_id") != "color": push_error("Shared graph Apply lost Field binding"); quit(1); return
 	a.editor.graph.add_node("number")
-	var number_input: LineEdit = a.editor.graph.canvas.get_node("n3").find_children("*","LineEdit",true,false)[0]
+	var number_id: String = str(a.editor.graph.data.nodes[3].id)
+	var number_input: LineEdit = a.editor.graph.canvas.get_node(number_id).find_children("*","LineEdit",true,false)[0]
 	number_input.text = "2"
 	number_input.text_changed.emit("2")
 	await fps_click(scene,panel,a.editor.apply_button)
 	if not await until(func(): return a.editor.pending_id.is_empty() and not a.editor.source_dirty,"Graph with number and Field binding did not apply"): quit(1); return
-	number_input = a.editor.graph.canvas.get_node("n3").find_children("*","LineEdit",true,false)[0]
+	number_input = a.editor.graph.canvas.get_node(number_id).find_children("*","LineEdit",true,false)[0]
 	number_input.text = "3"
 	number_input.text_changed.emit("3")
 	await fps_click(scene,panel,a.editor.apply_button)

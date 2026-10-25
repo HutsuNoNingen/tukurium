@@ -51,6 +51,8 @@ Goアダプターは配送を担当し、UIやワールドの編集規則を解�
 
 ノードグラフの型は接続口の色だけに任せず、型名も併記する。`ANY`は未確定の値として表示し、Field参照や既存の接続から型が分かる場合は表示だけを具体化する。型の確定と実行時の検証はRust側に置く。
 
+共同編集するノードグラフの下書きは、JSON文字列全体を書き換えずにノード・接続単位の操作としてホストへ送る。ホストは操作を検証して順序を決め、セッション参加者へ下書きを配る。これにより別のノードへの同時編集を残す。下書きは永続化せず、`Apply graph` でホストの最新の下書きからScriptComponentの更新コマンドを作り、通常の検証と保存を通す。実装は [graph_documents.rs](../crates/core/src/graph_documents.rs)、[shared_script_view.gd](../client-godot/shared_script_view.gd) を参照する。
+
 現在の外部インスペクタは、3Dのテクスチャを拡大表示する方式ではない。
 共通の編集処理を使い、デスクトップ用のレイアウトで同じデータを表示する。
 実装は [desktop_inspector.gd](../client-godot/desktop_inspector.gd) を参照。

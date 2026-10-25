@@ -21,6 +21,13 @@ var generation := 0
 var selecting := false
 var local_selection := false
 var overlay
+var graph_document: Dictionary = {}
+var graph_latest: Dictionary = {}
+var graph_queue: Array = []
+var graph_flight := false
+var graph_due := 0
+var graph_failed := false
+var graph_heartbeat := 0
 
 func setup(controller, id: String, mount: Control) -> void:
 	manager = controller
@@ -33,12 +40,21 @@ func setup(controller, id: String, mount: Control) -> void:
 	editor.selection_guard = can_select
 	editor.selection_changed = select_shared
 	editor.draft_changed = func(): due = Time.get_ticks_msec() + 80
+	editor.graph.operations.connect(graph_changed)
 	editor.reload_button.text = "Reload draft"
 	editor.reload_guard = func():
 		if editor.is_graph():
-			editor.source_dirty = false
-			editor.config_signature = ""
-			editor.refresh()
+			if graph_flight:
+				editor.feedback.text = "Wait for the graph draft to synchronize."
+			else:
+				graph_queue.clear()
+				graph_failed = false
+				graph_document = {}
+				graph_latest = {}
+				editor.source_dirty = false
+				editor.config_signature = ""
+				editor.refresh()
+				open_document()
 			return
 		if not flight.is_empty():
 			editor.feedback.text = "Wait for the draft to finish synchronizing."
@@ -88,9 +104,11 @@ func refresh(target: String, selected: Variant) -> void:
 		leave()
 		return
 	if editor.is_graph():
-		if not document.is_empty(): leave()
-		editor.external_readonly = false
-		editor.refresh_buttons()
+		if graph_document.get("script_id", "") != editor.selected and not opening:
+			leave()
+			open_document()
+		elif not graph_document.is_empty():
+			graph_display()
 		return
 	if document.get("script_id", "") != editor.selected and not opening:
 		leave()
@@ -116,7 +134,9 @@ func select_shared(id: String) -> void:
 	open_document()
 
 func open_document() -> void:
-	if editor.is_graph(): return
+	if editor.is_graph():
+		open_graph()
+		return
 	if editor.selected.is_empty() or opening or not manager.app.objects.has(target_id): return
 	generation += 1
 	var token := generation
@@ -153,6 +173,85 @@ func receive(value: Dictionary) -> void:
 	var offset := remap_caret(document.ids, value.ids, caret_offset())
 	document = value
 	display(document.text, offset)
+
+func graph_request(action: String, extra: Dictionary, callback: Callable) -> String:
+	if not manager.app.objects.has(target_id) or editor.selected.is_empty(): return ""
+	var input := {"target":manager.app.address_of(manager.app.objects[target_id]), "script_id":editor.selected,
+		"client_id":client_id, "action":action, "generation":graph_document.get("generation", "")}
+	input.merge(extra)
+	return manager.app.requests.request({"kind":"script_graph","request":input},callback,
+		["request","request_id"],"command_id" if action == "apply" else "request_id",10000,
+		"result" if action == "apply" else "script_graph_result")
+
+func open_graph() -> void:
+	if editor.selected.is_empty() or opening or not manager.app.objects.has(target_id): return
+	generation += 1
+	var token := generation
+	opening = true
+	editor.external_readonly = true
+	editor.refresh_buttons()
+	graph_request("open", {}, func(result):
+		if token != generation: return
+		opening = false
+		if not result.ok:
+			editor.feedback.text = result.get("message", "Cannot open shared graph")
+			return
+		graph_document = result.document
+		graph_latest = result.document
+		graph_failed = false
+		graph_heartbeat = Time.get_ticks_msec()
+		editor.graph.collaborative_ids = true
+		editor.external_readonly = false
+		graph_display())
+
+func graph_changed(ops: Array) -> void:
+	if graph_document.is_empty() or graph_failed or opening: return
+	graph_queue.append(ops.duplicate(true))
+	graph_due = Time.get_ticks_msec() + 60
+
+func receive_graph(value: Dictionary) -> void:
+	if value.target.instance_id != target_id or value.script_id != editor.selected or graph_document.is_empty(): return
+	if value.generation != graph_document.generation:
+		graph_failed = true
+		editor.external_readonly = true
+		editor.feedback.text = "Graph draft was reset. Reload draft to continue."
+		editor.refresh_buttons()
+		return
+	if int(value.revision) < int(graph_latest.get("revision", 0)): return
+	graph_latest = value
+	graph_display()
+
+func graph_display() -> void:
+	if graph_document.is_empty() or graph_failed: return
+	var projected: Dictionary = graph_latest.graph.duplicate(true)
+	for batch in graph_queue: projected = editor.graph.project(projected, batch)
+	if editor.graph.data != projected: editor.graph.load_data(projected)
+	var current: Dictionary = editor.current_script()
+	var applied = JSON.parse_string(str(current.get("source", "")).substr(editor.graph.PREFIX.length())) if str(current.get("source", "")).begins_with(editor.graph.PREFIX) else null
+	var dirty: bool = projected != applied
+	editor.source_dirty = dirty
+	if not current.is_empty(): editor.base_revision = current.revision
+	editor.feedback.text = "Shared graph draft · %d editors · Apply graph to run/save" % int(graph_latest.editors) if dirty else "Shared graph · synchronized with applied code"
+	editor.refresh_buttons()
+
+func flush_graph() -> void:
+	if opening or graph_flight or graph_failed or graph_document.is_empty() or graph_queue.is_empty(): return
+	graph_flight = true
+	var token := generation
+	graph_request("edit", {"ops":graph_queue[0]}, func(result):
+		if token != generation: return
+		graph_flight = false
+		if not result.ok:
+			graph_failed = true
+			editor.external_readonly = true
+			editor.feedback.text = result.get("message", "Graph synchronization failed. Reload draft to retry.")
+			editor.refresh_buttons()
+			return
+		graph_queue.pop_front()
+		if graph_latest.is_empty() or int(result.document.revision) >= int(graph_latest.revision): graph_latest = result.document
+		graph_document = graph_latest
+		graph_display()
+		if not graph_queue.is_empty(): flush_graph())
 
 func delta(before: String, after: String, ids: Array) -> Dictionary:
 	var prefix := 0
@@ -256,7 +355,12 @@ func remap_caret(old_ids: Array, new_ids: Array, offset: int) -> int:
 
 func authorize(action: Dictionary) -> void:
 	if editor.is_graph():
-		editor.dispatch_action(action)
+		if action.action == "update" and editor.source_dirty:
+			pending_action = action
+			flush_graph()
+			if graph_queue.is_empty() and not graph_flight: apply_graph()
+			else: editor.feedback.text = "Synchronizing shared graph before Apply…"
+		else: editor.dispatch_action(action)
 		return
 	if opening or (not flight.is_empty()) or (not document.is_empty() and editor.code.text != document.text):
 		pending_action = action
@@ -268,9 +372,34 @@ func authorize(action: Dictionary) -> void:
 		action.expected_revision = editor.current_script().revision
 	editor.dispatch_action(action)
 
+func apply_graph() -> void:
+	if pending_action.is_empty() or graph_document.is_empty() or graph_failed or graph_flight or not graph_queue.is_empty(): return
+	var action := pending_action
+	pending_action = {}
+	var current: Dictionary = editor.current_script()
+	if current.is_empty(): return
+	editor.pending_action = "update"
+	editor.pending_id = graph_request("apply", {"revision":int(graph_latest.revision),
+		"expected_revision":current.revision,"enabled":action.enabled,"parameters":action.parameters}, func(result):
+		editor.receive_result(result)
+		graph_request("open", {}, func(opened):
+			if opened.ok:
+				graph_document = opened.document
+				graph_latest = opened.document
+				graph_display()))
+	editor.feedback.text = "Waiting for host…"
+	editor.refresh_buttons()
+
 func tick() -> void:
 	editor.tick()
-	if editor.is_graph(): return
+	if editor.is_graph():
+		if not graph_queue.is_empty() and Time.get_ticks_msec() >= graph_due: flush_graph()
+		if not graph_flight and graph_queue.is_empty() and not pending_action.is_empty(): apply_graph()
+		if not graph_document.is_empty() and not opening and not graph_failed and manager.app.editable and Time.get_ticks_msec() - graph_heartbeat > 45000:
+			graph_heartbeat = Time.get_ticks_msec()
+			graph_request("open", {}, func(result):
+				if result.ok: receive_graph(result.document))
+		return
 	if not busy() and not deferred_target.is_empty():
 		var target := deferred_target
 		deferred_target = {}
@@ -296,6 +425,17 @@ func tick() -> void:
 			if result.ok: receive(result.document))
 
 func leave() -> void:
+	if not graph_document.is_empty() and not graph_flight:
+		manager.app.requests.request({"kind":"script_graph","request":{
+			"target":graph_document.target,"script_id":graph_document.script_id,
+			"client_id":client_id,"action":"leave","generation":graph_document.generation}},
+			func(_r): pass,["request","request_id"],"request_id",10000,"script_graph_result")
+	graph_document = {}
+	graph_latest = {}
+	graph_queue.clear()
+	graph_flight = false
+	graph_failed = false
+	if editor != null: editor.graph.collaborative_ids = false
 	if not document.is_empty() and flight.is_empty():
 		manager.app.requests.request({"kind":"script_document","request":{"target":document.target,"script_id":document.script_id,"client_id":client_id,"action":"leave","generation":document.generation}},func(_r): pass,["request","request_id"],"request_id",10000,"script_document_result")
 	generation += 1
@@ -306,7 +446,7 @@ func leave() -> void:
 	pending_action = {}
 
 func busy() -> bool:
-	return not flight.is_empty() or (not document.is_empty() and editor.code.text != document.text)
+	return graph_flight or not graph_queue.is_empty() or not flight.is_empty() or (not document.is_empty() and editor.code.text != document.text)
 
 func disconnected() -> void:
 	if busy(): recovery_text = editor.code.text
