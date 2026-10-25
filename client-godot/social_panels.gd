@@ -25,6 +25,7 @@ var stowed := false
 var input_locked := false
 var next_roster := 0
 var roster_identity := ""
+var roster_signature := ""
 var slide: Tween
 
 func panel_style() -> StyleBoxFlat:
@@ -156,11 +157,6 @@ func horizontal_distance(person: Dictionary, origin: Vector3) -> float:
 
 func refresh_roster() -> void:
 	if player_rows==null: return
-	for child in player_rows.get_children(): child.queue_free()
-	count_label.text="%d人" % participants.size()
-	if participants.is_empty():
-		player_rows.add_child(label("まだ誰もいません",13,MUTED))
-		return
 	var others: Array=[]
 	var own: Dictionary={}
 	for value in participants:
@@ -169,17 +165,33 @@ func refresh_roster() -> void:
 		else: others.append(value)
 	var origin: Vector3=app.player_target_position
 	others.sort_custom(func(a,b): return horizontal_distance(a,origin)<horizontal_distance(b,origin))
-	if not own.is_empty(): add_player(own,0.0,true)
+	# The rows render exactly: the count, the own name, then per other person a
+	# band heading on band changes plus (name, formatted distance). Skip the
+	# rebuild while that rendered content is unchanged.
+	var rows: Array=[]
+	var signature_parts: Array=[str(participants.size()),str(own.get("name",""))]
 	var last_band := -1
 	for person in others:
 		var distance := horizontal_distance(person,origin)
 		var band := 0 if distance<=3.0 else (1 if distance<=15.0 else 2)
-		if band!=last_band:
-			var heading := label(["●  すぐそば · 3m以内","●  近く · 15m以内","●  とおく"][band],12,[ACCENT,Color("e9bc70"),MUTED][band])
+		rows.append([person,distance,band,band!=last_band])
+		if band!=last_band: last_band=band
+		signature_parts.append("%d|%s|%s" % [band,person.get("name",""),("%.1fm" % distance) if is_finite(distance) else "—"])
+	var signature := "\n".join(signature_parts)
+	if signature==roster_signature: return
+	roster_signature=signature
+	for child in player_rows.get_children(): child.queue_free()
+	count_label.text="%d人" % participants.size()
+	if participants.is_empty():
+		player_rows.add_child(label("まだ誰もいません",13,MUTED))
+		return
+	if not own.is_empty(): add_player(own,0.0,true)
+	for row in rows:
+		if row[3]:
+			var heading := label(["●  すぐそば · 3m以内","●  近く · 15m以内","●  とおく"][row[2]],12,[ACCENT,Color("e9bc70"),MUTED][row[2]])
 			heading.mouse_filter=Control.MOUSE_FILTER_IGNORE
 			player_rows.add_child(heading)
-			last_band=band
-		add_player(person,distance,false)
+		add_player(row[0],row[1],false)
 
 func add_player(person: Dictionary, distance: float, own: bool) -> void:
 	var row := HBoxContainer.new()
@@ -279,4 +291,4 @@ func _process(_delta: float) -> void:
 	send_button.disabled=locked or not app.editable
 	if Time.get_ticks_msec()>=next_roster:
 		next_roster=Time.get_ticks_msec()+500
-		refresh_roster()
+		if not stowed: refresh_roster()
