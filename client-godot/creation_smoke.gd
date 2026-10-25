@@ -185,6 +185,45 @@ func run() -> void:
 	if not await until(func(): return scene.objects.values().any(func(o): return o.visual.kind=="image" and str(o.fields[0].value).begins_with("Photo ")),"Camera did not share an image item"): quit(1); return
 	scene.camera_tool.park()
 	if not await until(func(): return not scene.camera_tool.active and Vector3(scene.objects[camera_id].world_position[0],scene.objects[camera_id].world_position[1],scene.objects[camera_id].world_position[2]).distance_to(camera_start)>0.2,"Drone pose did not commit"): quit(1); return
+	scene.hud.open_creation()
+	if not await until(func(): return scene.world_panels.panels.size()==1,"Creation panel did not reopen for Mirror"): quit(1); return
+	surface=scene.world_panels.panels.values()[0]
+	panel=surface.content
+	await click_control(scene,surface,panel.mirror_button)
+	if not await until(func(): return scene.current.get("visual",{}).get("shape","")=="mirror" and scene.mirror_renderer.entries.has(scene.selected_id),"Mirror preset was not created"): quit(1); return
+	var mirror_id: String=scene.selected_id
+	var mirror_node: MeshInstance3D=scene.render_nodes[mirror_id]
+	if mirror_node.mesh is not QuadMesh or mirror_node.layers!=scene.mirror_renderer.MIRROR_LAYER:
+		push_error("Mirror has no isolated reflection surface"); quit(1); return
+	scene.set_view_mode(2,false)
+	var normal: Vector3=mirror_node.global_basis.z.normalized()
+	scene.camera.global_position=mirror_node.global_position+normal*3.0
+	scene.camera.look_at(mirror_node.global_position,mirror_node.global_basis.y.normalized())
+	var red := MeshInstance3D.new()
+	var red_mesh := SphereMesh.new()
+	red_mesh.radius=0.23; red_mesh.height=0.46
+	red.mesh=red_mesh
+	var red_material := StandardMaterial3D.new()
+	red_material.albedo_color=Color.RED
+	red_material.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
+	red.material_override=red_material
+	scene.add_child(red)
+	red.global_position=mirror_node.global_position+normal*1.2+mirror_node.global_basis.x.normalized()*0.5
+	await create_timer(0.3).timeout
+	var reflected: Image=scene.mirror_renderer.entries[mirror_id].viewport.get_texture().get_image()
+	var has_red := false
+	for y in range(0,reflected.get_height(),8):
+		for x in range(0,reflected.get_width(),8):
+			var pixel: Color=reflected.get_pixel(x,y)
+			if pixel.r>0.65 and pixel.r>pixel.g*1.8 and pixel.r>pixel.b*1.8: has_red=true; break
+		if has_red: break
+	if not has_red: push_error("Mirror viewport did not reflect an object in front of it"); quit(1); return
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--screenshot="):
+			await RenderingServer.frame_post_draw
+			root.get_texture().get_image().save_png(arg.trim_prefix("--screenshot=").replace(".png","-mirror.png"))
+	red.queue_free()
+	scene.set_view_mode(1)
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--screenshot="):
 			await RenderingServer.frame_post_draw
@@ -264,7 +303,7 @@ func run() -> void:
 	escape.keycode=KEY_ESCAPE; escape.pressed=true
 	root.push_input(escape,true)
 	if not scene.world_panels.panels.has(id) or Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE: push_error("Esc deleted world panel or captured cursor"); quit(1); return
-	print("CREATION SMOKE PASS: nine shapes, drone preview and pose, local and shared photos, empty and text Slot presets, inspector component editing and text child")
+	print("CREATION SMOKE PASS: mirror reflection, drone preview and pose, local and shared photos, empty and text Slot presets, inspector component editing and text child")
 	scene.queue_free()
 	await process_frame
 	await process_frame

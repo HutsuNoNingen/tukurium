@@ -9,6 +9,9 @@ use bevy_ecs::prelude::*;
 use glam::{DMat3, DQuat, DVec3};
 use kokoverse_protocol::{GrabView, InteractionRay, ObjectPreview};
 use std::time::{Duration, Instant};
+// World coordinates are bounded to ±1000 m. This reaches every valid collider
+// from any valid player position without passing infinity into the raycast.
+pub const INTERACTION_REACH: f64 = 4000.0;
 #[derive(Clone)]
 pub(crate) struct Held {
     pub view: GrabView,
@@ -53,11 +56,11 @@ pub(crate) fn begin(world: &mut World) -> Result<(), String> {
         .0
         .iter()
         .filter_map(|b| {
-            b.raycast(origin.to_array(), axes[2].to_array(), 6.0)
+            b.raycast(origin.to_array(), axes[2].to_array(), INTERACTION_REACH)
                 .map(|(t, _)| (b, t))
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))
-        .ok_or("Aim at a collider within 6 m")?;
+        .ok_or("Aim at a collider")?;
     let anchor = bounds
         .frame()
         .inverse()
@@ -84,7 +87,7 @@ pub(crate) fn begin(world: &mut World) -> Result<(), String> {
     world.resource_mut::<GrabState>().0 = Some(Held {
         view: GrabView {
             preview,
-            distance: distance.clamp(0.5, 6.0),
+            distance: distance.clamp(0.5, INTERACTION_REACH),
             released: false,
         },
         anchor,
@@ -116,11 +119,11 @@ pub(crate) fn interaction_ray(world: &World) -> Option<InteractionRay> {
             .0
             .iter()
             .filter_map(|b| {
-                b.raycast(origin.to_array(), dir.to_array(), 6.0)
+                b.raycast(origin.to_array(), dir.to_array(), INTERACTION_REACH)
                     .map(|(d, _)| (d, b.address.clone()))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0));
-        hit.map_or((6.0, None, false), |(d, t)| (d, Some(t), false))
+        hit.map_or((INTERACTION_REACH, None, false), |(d, t)| (d, Some(t), false))
     };
     Some(InteractionRay {
         origin: origin.to_array(),
@@ -321,6 +324,30 @@ mod tests {
         m.advance(Duration::from_millis(17));
         assert_eq!(m.snapshot().objects[0].world_position, released.position);
         assert!(m.grab_view().is_none());
+    }
+    #[test]
+    fn ray_and_grab_reach_a_distant_world_object() {
+        let mut m = setup();
+        let object = m.snapshot().objects.remove(0);
+        let field = object.fields.iter().find(|f| f.id == "position").unwrap();
+        m.enqueue(WorldCommand::Edit {
+            edit: Edit {
+                command_id: "distant".into(),
+                target: crate::replication::REGISTRY.field_address(&object.address, "position").unwrap(),
+                field_id: "position".into(),
+                expected_revision: field.revision.clone(),
+                value: serde_json::json!([0.0, 0.75, -100.0]),
+            },
+        }).unwrap();
+        m.tick()[0].result.as_ref().unwrap();
+        m.advance(Duration::from_millis(17));
+        let ray = m.interaction_ray().unwrap();
+        assert_eq!(ray.target, Some(object.address));
+        assert!(ray.point[2] < -90.0);
+        m.begin_grab().unwrap();
+        assert!(m.grab_view().unwrap().distance > 90.0);
+        m.adjust_grab_distance(0.5);
+        assert!(m.grab_view().unwrap().distance > 120.0);
     }
     #[test]
     fn releasing_child_of_rotator_keeps_its_visible_position() {

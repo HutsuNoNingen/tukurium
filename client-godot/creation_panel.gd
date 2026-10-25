@@ -10,6 +10,7 @@ var create_button: Button
 var slot_button: Button
 var text_button: Button
 var camera_button: Button
+var mirror_button: Button
 var status: Label
 var busy := false
 
@@ -105,6 +106,12 @@ func build_ui() -> void:
 	camera_button.focus_mode=Control.FOCUS_NONE
 	camera_button.pressed.connect(spawn_camera)
 	footer.add_child(camera_button)
+	mirror_button=Button.new()
+	mirror_button.text="▣ Mirror を作成"
+	mirror_button.custom_minimum_size=Vector2(190,48)
+	mirror_button.focus_mode=Control.FOCUS_NONE
+	mirror_button.pressed.connect(spawn_mirror)
+	footer.add_child(mirror_button)
 	var presets := VBoxContainer.new()
 	presets.add_theme_constant_override("separation",4)
 	footer.add_child(presets)
@@ -176,6 +183,7 @@ func refresh(object: Dictionary) -> void:
 	slot_button.disabled=busy or not app.editable
 	text_button.disabled=busy or not app.editable
 	camera_button.disabled=busy or not app.editable
+	mirror_button.disabled=busy or not app.editable
 	create_button.disabled=busy or not app.editable
 
 func finish_all() -> void:
@@ -186,6 +194,8 @@ func spawn_slot(with_text: bool) -> void:
 	busy=true
 	slot_button.disabled=true
 	text_button.disabled=true
+	camera_button.disabled=true
+	mirror_button.disabled=true
 	create_button.disabled=true
 	status.text="作成中…"
 	var position: Vector3=app.camera.global_position-app.camera.global_basis.z*4.0
@@ -203,6 +213,8 @@ func spawn_slot(with_text: bool) -> void:
 		busy=false
 		slot_button.disabled=not app.editable
 		text_button.disabled=not app.editable
+		camera_button.disabled=not app.editable
+		mirror_button.disabled=not app.editable
 		create_button.disabled=not app.editable
 		if result.ok:
 			app.select_object(result.selected.instance_id)
@@ -216,6 +228,9 @@ func spawn_selected(index: int = -1) -> void:
 func spawn_camera() -> void:
 	spawn_shape("camera","Camera")
 
+func spawn_mirror() -> void:
+	spawn_shape("mirror","Mirror")
+
 func spawn_shape(shape: String, name_text: String) -> void:
 	if busy or not app.editable: return
 	busy=true
@@ -223,16 +238,20 @@ func spawn_shape(shape: String, name_text: String) -> void:
 	slot_button.disabled=true
 	text_button.disabled=true
 	camera_button.disabled=true
+	mirror_button.disabled=true
 	status.text="作成中…"
 	var position: Vector3=app.camera.global_position-app.camera.global_basis.z*4.0+app.camera.global_basis.x*2.2
-	position.y=app.player_position.y+(0.03 if shape=="grid" else (1.6 if shape=="camera" else 0.75))
-	var orientation: Quaternion=app.camera.global_basis.get_rotation_quaternion() if shape=="camera" else Quaternion.IDENTITY
+	position.y=app.player_position.y+(0.03 if shape=="grid" else (1.6 if shape in ["camera","mirror"] else 0.75))
+	var orientation := Quaternion.IDENTITY
+	if shape=="camera": orientation=app.camera.global_basis.get_rotation_quaternion()
+	elif shape=="mirror": orientation=Quaternion(Vector3.UP,app.camera.rotation.y)
 	manager.command({"kind":"structure","command":{"action":"import_asset","name":name_text,"position":[position.x,position.y,position.z],"rotation":[orientation.x,orientation.y,orientation.z,orientation.w],"visual":{"kind":"primitive","shape":shape}}},func(result):
 		busy=false
 		create_button.disabled=not app.editable
 		slot_button.disabled=not app.editable
 		text_button.disabled=not app.editable
 		camera_button.disabled=not app.editable
+		mirror_button.disabled=not app.editable
 		if result.ok:
 			app.select_object(result.selected.instance_id)
 			manager.close_panel(panel_id)

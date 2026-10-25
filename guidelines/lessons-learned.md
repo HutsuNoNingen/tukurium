@@ -3,6 +3,14 @@
 確認日：2026-10-24。以下は再現・修正を確認した記録。
 現在の操作規則は [3Dパネルの実装指針](world-space-panels.md) を参照する。
 
+## レーザーだけ延ばしても遠くの物体は保持できない
+
+レーザーの見た目、Rustの当たり判定、保持開始時の距離、保持中のホイール距離、3Dパネルのポインターは別の上限を持っていた。Rust側の6mだけを延ばさないと、遠い物体を指しても保持できない。ワールドの有効座標±1000mを基準に、判定と保持距離を4000mへ揃える。無限大をraycastへ渡さず、有限の全域到達値を使う。[grabbing.rs](../crates/core/src/grabbing.rs) の遠距離テストと描画付きの [interaction-reach-integration.mjs](../tests/interaction-reach-integration.mjs) で、30m以上の右クリック保持と配置を確認する。確認日：2026-10-25。
+
+## 反射面を同じワールドのカメラで描くと再帰する
+
+鏡は共有の`MeshRenderer`の形状として保存し、反射画像はGodotのローカルなSubViewportで生成する。反射カメラが鏡面を再び描くと、自己参照や複数鏡の再帰で負荷と表示が不安定になる。鏡面を専用の描画レイヤーへ置き、反射カメラから除外する。鏡の枠は通常レイヤーに残す。表側から見える鏡を最大4枚、間隔を空けて更新する。描画付きの [creation-integration.mjs](../tests/creation-integration.mjs) で、鏡の前の物体が反射に映ることを確認する。関連コード：[mirror_renderer.gd](../client-godot/mirror_renderer.gd)。確認日：2026-10-25。
+
 ## 3D作成パネルの道具を形状カードに増やすと操作が隠れる
 
 4列の形状カードを8個から9個へ増やすと、固定寸法の共有3Dパネルで3行目が生じ、下部の作成ボタンが操作できなくなった。カメラのように専用の操作画面を持つ道具は形状カードではなく、フッターのプリセット入口に分ける。カード数やボタン配置を変えたら、単体のレイアウト表示だけでなく、[creation-integration.mjs](../tests/creation-integration.mjs) の描画付き入力テストで、パレットの選択から作成まで確認する。関連コード：[creation_panel.gd](../client-godot/creation_panel.gd)。確認日：2026-10-25。

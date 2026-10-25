@@ -109,6 +109,28 @@ func run() -> void:
 	await create_timer(0.15).timeout
 	if not scene.hand_grab.is_empty() or scene.current.world_position != placed or scene.fps_active:
 		push_error("Escape did not cancel grab and release cursor"); quit(1); return
+	scene.set_view_mode(1)
+	scene.orbit_yaw = 0.0
+	scene.orbit_pitch = 0.0
+	p = scene.player_target_position
+	if not await setup_box(scene, Vector3(p.x,0.75,p.z-30.0)):
+		push_error("Distant interaction setup failed"); quit(1); return
+	await create_timer(0.1).timeout
+	mouse(MOUSE_BUTTON_RIGHT,true)
+	for _i in range(100):
+		await create_timer(0.02).timeout
+		if not scene.hand_grab.is_empty(): break
+	if scene.hand_grab.is_empty() or scene.hand_grab.distance < 20.0 or not scene.aiming_at_collider:
+		push_error("FPS laser did not reach the distant object: "+scene.feedback.text); quit(1); return
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--screenshot="):
+			await RenderingServer.frame_post_draw
+			root.get_texture().get_image().save_png(arg.trim_prefix("--screenshot="))
+	mouse(MOUSE_BUTTON_RIGHT,false)
+	for _i in range(150):
+		await create_timer(0.03).timeout
+		if not scene.pending and scene.hand_grab.is_empty(): break
+	if scene.pending or not scene.hand_grab.is_empty(): push_error("Distant grab did not release"); quit(1); return
 	p = scene.player_target_position
 	if not await setup_box(scene, Vector3(p.x,0.75,p.z-1.5)):
 		push_error("Platform setup failed"); quit(1); return

@@ -250,7 +250,7 @@ func clear_focus() -> void:
 func pick(screen: Vector2) -> Dictionary:
 	var origin: Vector3 = app.camera.project_ray_origin(screen)
 	var direction: Vector3 = app.camera.project_ray_normal(screen)
-	var hit: Dictionary = app.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(origin, origin + direction * 100.0))
+	var hit: Dictionary = app.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(origin, origin + direction * 4000.0))
 	if hit.is_empty() or not hit.collider.has_meta("object_id"): return {}
 	var id := str(hit.collider.get_meta("object_id"))
 	if not panels.has(id) or direction.dot(panels[id].global_basis.z) >= 0.0: return {}

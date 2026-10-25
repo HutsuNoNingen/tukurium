@@ -299,7 +299,7 @@ impl WorldModel {
             && !held.view.released
         {
             held.view.distance =
-                (held.view.distance + delta * held.view.distance.max(1.0)).clamp(0.5, 6.0);
+                (held.view.distance + delta * held.view.distance.max(1.0)).clamp(0.5, grabbing::INTERACTION_REACH);
         }
     }
 

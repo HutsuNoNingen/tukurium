@@ -28,7 +28,7 @@ try {
   const godot=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(process.argv.includes('--rendered')?['--rendering-method','gl_compatibility']:['--headless']),'--path','client-godot','--script','res://creation_smoke.gd','--',`--port=${guest.port}`,`--session=${session}`,`--photo-dir=${resolve(work,'photos')}`,...(process.argv.includes('--rendered')?[`--screenshot=${resolve(work,'creation.png')}`]:[])]);
   await until(()=>godot.exitCode!==null,'Creation UI timed out',60000);
   assert.equal(godot.exitCode,0,godot.logs);assert.doesNotMatch(godot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(godot.logs,/CREATION SMOKE PASS/);
-  const shapes=['box','sphere','capsule','cylinder','cone','torus','grid','quad','camera'];
+  const shapes=['box','sphere','capsule','cylinder','cone','torus','grid','quad','camera','mirror'];
   await until(()=>shapes.every(shape=>host.client.latest().snapshot.objects.some(o=>o.visual.kind==='primitive'&&o.visual.shape===shape)),'Primitives did not reach host');
   await until(()=>host.client.latest().snapshot.objects.some(o=>o.visual.kind==='none'&&o.renderer===undefined&&o.collider===null),'Empty Slot did not reach host');
   const observed=host.client.messages.filter(m=>m.kind==='snapshot').flatMap(m=>m.snapshot.objects);
@@ -44,7 +44,7 @@ try {
   assert.ok(host.client.latest().snapshot.objects.some(o=>o.parent?.instance_id===slot.address.instance_id&&o.world_text?.text==='Text'),'Text child did not reach host');
   const manipulated=observed.find(o=>o.creation && o.world_scale[0]>1.05 && Math.abs(o.world_rotation[1])>0.01);
   assert.ok(manipulated?.panel && manipulated.collider && !manipulated.inspector,'Grabbed creation surface did not reach host');
-  assert.ok(shapes.filter(shape=>shape!=='camera').every(shape=>observed.some(o=>o.creation?.shape===shape)),'Selection did not reach host');
+  assert.ok(shapes.filter(shape=>!['camera','mirror'].includes(shape)).every(shape=>observed.some(o=>o.creation?.shape===shape)),'Selection did not reach host');
   assert.ok(readdirSync(resolve(work,'photos')).some(name=>name.endsWith('.png')),'Camera photo was not saved locally');
   assert.ok(host.client.latest().snapshot.objects.some(o=>o.visual.kind==='image'&&o.fields.some(f=>f.id==='name'&&f.value.startsWith('Photo '))),'Camera photo item did not reach host');
   // Each successful creation consumes its source panel; the script opens one more to test Esc.
@@ -63,7 +63,7 @@ try {
   host.client.send({kind:'structure',command:{command_id:randomUUID(),action:'delete',target:copy.address,expected_revision:copy.object_revision}});
   await until(()=>late.client.latest().snapshot.objects.filter(o=>o.creation).length===1,'Panel removal did not replicate');
   assert.ok(host.client.latest().snapshot.objects.every(o=>o.visual.asset_id===undefined));
-  console.log('PASS: shared creation surface, movement, grab/rotation/scale, nine shapes, drone camera, local/shared photo, duplicate/delete and late join');
+  console.log('PASS: shared creation surface, distant interaction, drone camera, mirror reflection, local/shared photo, duplicate/delete and late join');
   if(process.argv.includes('--rendered'))console.log(`SCREENSHOT=${resolve(work,'creation.png')}`);
 }catch(error){for(const child of children)if(child.logs)console.error(child.logs.slice(-5000));throw error;}
 finally{for(const socket of sockets)socket.destroy();for(const child of children)if(child.exitCode===null)child.kill();}

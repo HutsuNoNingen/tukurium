@@ -25,9 +25,9 @@ static func create(shape: String) -> PrimitiveMesh:
 			var mesh := PlaneMesh.new()
 			mesh.size=Vector2(1.5,1.5); mesh.subdivide_width=8; mesh.subdivide_depth=8
 			return mesh
-		"quad":
+		"quad", "mirror":
 			var mesh := QuadMesh.new()
-			mesh.size=Vector2(1.5,1.5)
+			mesh.size=Vector2(2.0,2.0) if shape=="mirror" else Vector2(1.5,1.5)
 			return mesh
 		"camera":
 			var mesh := BoxMesh.new()

@@ -14,8 +14,10 @@ const SOCIAL_PANELS = preload("res://social_panels.gd")
 const PRIMITIVE_MESH = preload("res://primitive_mesh.gd")
 const RENDER_HIERARCHY = preload("res://render_hierarchy.gd")
 const CAMERA_TOOL = preload("res://camera_tool.gd")
+const MIRROR_RENDERER = preload("res://mirror_renderer.gd")
 var render_hierarchy = RENDER_HIERARCHY.new()
 var camera_tool = CAMERA_TOOL.new()
+var mirror_renderer = MIRROR_RENDERER.new()
 var hud = WORLD_HUD.new()
 var social_panels = SOCIAL_PANELS.new()
 var requests = REQUEST_BROKER.new()
@@ -168,6 +170,8 @@ func _ready() -> void:
 	hud.setup(self)
 	add_child(camera_tool)
 	camera_tool.setup(self)
+	add_child(mirror_renderer)
+	mirror_renderer.setup(self)
 	set_view_mode(1, false)
 	connect_engine()
 
@@ -1069,6 +1073,7 @@ func _process(delta: float) -> void:
 		avatars[self_id].visible = not first_person or not avatar_camera
 		avatars[self_id].target_position = player_position
 		avatars[self_id].target_yaw = player_yaw
+	mirror_renderer.tick()
 	if connected and Time.get_ticks_msec() - last_input_at >= 16:
 		last_input_at = Time.get_ticks_msec()
 		send_player_input()
@@ -1309,6 +1314,7 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 		if not objects.has(id):
 			render_nodes[id].queue_free()
 			render_nodes.erase(id)
+	mirror_renderer.sync(objects, render_nodes)
 	for source in image_textures.keys():
 		if not used_images.has(source): image_textures.erase(source)
 	camera_tool.world_updated()
@@ -1339,6 +1345,11 @@ func create_render_node(object: Dictionary) -> MeshInstance3D:
 	mat.roughness = 0.45
 	if object.visual.get("kind") == "primitive" and object.visual.shape in ["grid","quad"]:
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	if object.visual.get("kind") == "primitive" and object.visual.shape == "mirror":
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.uv1_scale = Vector3(-1,1,1)
+		mat.uv1_offset = Vector3(1,0,0)
+		node.layers = MIRROR_RENDERER.MIRROR_LAYER
 	if image_panel:
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
@@ -1359,6 +1370,23 @@ func create_render_node(object: Dictionary) -> MeshInstance3D:
 		lens_material.metallic = 0.35
 		lens.material_override = lens_material
 		node.add_child(lens)
+	if object.visual.get("kind") == "primitive" and object.visual.shape == "mirror":
+		var border_material := StandardMaterial3D.new()
+		border_material.albedo_color = Color("1d2731")
+		border_material.metallic = 0.5
+		for piece in [
+			["Top",Vector3(2.12,0.08,0.14),Vector3(0,1.04,0)],
+			["Bottom",Vector3(2.12,0.08,0.14),Vector3(0,-1.04,0)],
+			["Left",Vector3(0.08,2.0,0.14),Vector3(-1.04,0,0)],
+			["Right",Vector3(0.08,2.0,0.14),Vector3(1.04,0,0)]]:
+			var edge := MeshInstance3D.new()
+			edge.name = piece[0]
+			var box := BoxMesh.new()
+			box.size = piece[1]
+			edge.mesh = box
+			edge.position = piece[2]
+			edge.material_override = border_material
+			node.add_child(edge)
 	var body := StaticBody3D.new()
 	body.set_meta("object_id", object.address.instance_id)
 	var collision := CollisionShape3D.new()

@@ -238,7 +238,7 @@ fn primitives_replicate_and_restore_without_mesh_assets() {
     guest.restore(host.snapshot()).unwrap();
     for shape in [PrimitiveShape::Box, PrimitiveShape::Sphere, PrimitiveShape::Capsule,
         PrimitiveShape::Cylinder, PrimitiveShape::Cone, PrimitiveShape::Torus,
-        PrimitiveShape::Grid, PrimitiveShape::Quad, PrimitiveShape::Camera] {
+        PrimitiveShape::Grid, PrimitiveShape::Quad, PrimitiveShape::Camera, PrimitiveShape::Mirror] {
         let result = run(&mut host, structure(StructuralOperation::ImportAsset {
             name: format!("{shape:?}"), position: [2.0, 0.75, 0.0],
             rotation: [0.0, 0.0, 0.0, 1.0], visual: Visual::Primitive { shape },

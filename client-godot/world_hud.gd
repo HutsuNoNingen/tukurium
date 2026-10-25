@@ -308,7 +308,7 @@ func show_ring(position: Vector2) -> void:
 	var screen: Vector2 = app.get_viewport().get_visible_rect().size*0.5 if app.fps_active else position
 	ring_target=app.selected_id
 	var origin: Vector3=app.camera.project_ray_origin(screen)
-	var query := PhysicsRayQueryParameters3D.create(origin,origin+app.camera.project_ray_normal(screen)*1000)
+	var query := PhysicsRayQueryParameters3D.create(origin,origin+app.camera.project_ray_normal(screen)*4000)
 	var hit: Dictionary=app.get_world_3d().direct_space_state.intersect_ray(query)
 	if not hit.is_empty() and hit.collider.has_meta("object_id"):
 		ring_target=str(hit.collider.get_meta("object_id"))

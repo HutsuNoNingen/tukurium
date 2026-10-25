@@ -246,6 +246,7 @@ pub enum PrimitiveShape {
     Grid,
     Quad,
     Camera,
+    Mirror,
 }
 
 impl PrimitiveShape {
@@ -256,6 +257,7 @@ impl PrimitiveShape {
             Self::Grid => [0.75, 0.025, 0.75],
             Self::Quad => [0.75, 0.75, 0.025],
             Self::Camera => [0.4, 0.25, 0.45],
+            Self::Mirror => [1.0, 1.0, 0.05],
             _ => [0.75; 3],
         }
     }
