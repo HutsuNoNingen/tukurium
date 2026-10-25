@@ -218,6 +218,17 @@ func run() -> void:
 			if pixel.r>0.65 and pixel.r>pixel.g*1.8 and pixel.r>pixel.b*1.8: has_red=true; break
 		if has_red: break
 	if not has_red: push_error("Mirror viewport did not reflect an object in front of it"); quit(1); return
+	var mirror_entry: Dictionary=scene.mirror_renderer.entries[mirror_id]
+	var original_pose: Transform3D=mirror_node.global_transform
+	var reflection_eye: Vector3=mirror_entry.camera.global_position
+	mirror_entry.last_update=Time.get_ticks_msec()+1000
+	mirror_node.global_position+=normal*0.2
+	scene.mirror_renderer.tick()
+	if mirror_entry.camera.global_position.distance_to(reflection_eye)<0.3:
+		push_error("Moving mirror waited for the idle reflection interval"); quit(1); return
+	mirror_node.global_transform=original_pose
+	mirror_entry.last_update=0
+	scene.mirror_renderer.tick()
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--screenshot="):
 			await RenderingServer.frame_post_draw

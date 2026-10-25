@@ -31,7 +31,7 @@ func sync(objects: Dictionary, nodes: Dictionary) -> void:
 		reflection.current = true
 		viewport.add_child(reflection)
 		node.material_override.albedo_texture = viewport.get_texture()
-		entries[id] = {"node":node, "viewport":viewport, "camera":reflection, "last_update":0}
+		entries[id] = {"node":node, "viewport":viewport, "camera":reflection, "last_update":0, "last_transform":node.global_transform}
 
 func tick() -> void:
 	if entries.is_empty(): return
@@ -49,8 +49,11 @@ func tick() -> void:
 		var id: String = candidates[index].id
 		var entry: Dictionary = entries[id]
 		var now := Time.get_ticks_msec()
-		if now - int(entry.last_update) < UPDATE_INTERVAL_MS: continue
+		var displayed_transform: Transform3D = entry.node.global_transform
+		var moving: bool = displayed_transform != entry.last_transform
+		if not moving and now - int(entry.last_update) < UPDATE_INTERVAL_MS: continue
 		entry.last_update = now
+		entry.last_transform = displayed_transform
 		update_reflection(entry, viewer)
 
 func update_reflection(entry: Dictionary, viewer: Camera3D) -> void:
