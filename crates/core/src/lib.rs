@@ -171,6 +171,19 @@ impl WorldModel {
         Ok(self.next_ticket)
     }
 
+    pub fn enqueue_script_interaction_as(&mut self, command: WorldCommand, requester: String) -> Result<u64, String> {
+        if !matches!(&command, WorldCommand::Script { command } if matches!(command.action, kokoverse_protocol::ScriptAction::Interact)) {
+            return Err("Expected a script interaction".into());
+        }
+        let ticket = self.enqueue(command)?;
+        self.world.resource_mut::<scripting::ScriptRuntime>().actors.insert(ticket, requester);
+        Ok(ticket)
+    }
+
+    pub fn take_camera_captures(&mut self) -> Vec<scripting::CameraCapture> {
+        std::mem::take(&mut self.world.resource_mut::<scripting::ScriptRuntime>().camera_captures)
+    }
+
     /// Ordered command boundaries preserve per-field conflicts within one engine tick.
     pub fn tick(&mut self) -> Vec<CommandOutcome> {
         let count = self.world.resource::<InputQueue>().0.len().clamp(1, 128);

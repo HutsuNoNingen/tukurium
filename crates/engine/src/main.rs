@@ -579,7 +579,9 @@ impl Engine {
         }
         // Asset references can be committed before their bytes arrive.
         // Missing bytes are resolved by the bounded asset waiters, not world edits.
-        let queued = if let Some(editor) = actor {
+        let queued = if matches!(&command, WorldCommand::Script { command } if matches!(command.action, kokoverse_protocol::ScriptAction::Interact)) {
+            self.model.enqueue_script_interaction_as(command, requester.to_string())
+        } else if let Some(editor) = actor {
             self.model.enqueue_as(command, editor)
         } else {
             self.model.enqueue(command)
@@ -617,6 +619,17 @@ impl Engine {
         self.previews.prune(&self.model, now);
         self.model.set_collision_previews(self.previews.positions());
         let outcomes = self.model.advance(elapsed);
+        for capture in self.model.take_camera_captures() {
+            let body = json!({"kind":"camera_capture","target":capture.target});
+            if let Some(client) = capture.requester.strip_prefix("local-").and_then(|id| id.parse::<u64>().ok()) {
+                let envelope = self.envelope(body);
+                self.send(client, envelope);
+            } else if let Some((peer, epoch)) = capture.requester.split_once(':')
+                && self.remote_epochs.get(peer).is_some_and(|current| current == epoch)
+            {
+                self.network(Some(peer), body);
+            }
+        }
         self.sync_grab();
         let frame = self.model.drive_frame();
         if self.last_drive_frame.as_ref().is_none_or(|last| last.objects != frame.objects || last.statuses != frame.statuses || last.transforms != frame.transforms) {
@@ -1168,6 +1181,8 @@ impl Engine {
                                 self.publish_chat();
                         }
                     } else if kind == "chat_error" && e.authority_epoch == self.epoch {
+                        self.ui(e.body);
+                    } else if kind == "camera_capture" && self.synced && e.authority_epoch == self.epoch {
                         self.ui(e.body);
                     } else if kind == "script_statuses"
                         && self.synced

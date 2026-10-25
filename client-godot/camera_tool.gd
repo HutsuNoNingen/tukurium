@@ -29,6 +29,8 @@ var held_keys := {}
 var last_preview_at := 0
 var captured_image: Image
 var photo_directory := ""
+var script_capture_pending := false
+var script_capture_generation := 0
 
 func setup(owner) -> void:
 	app = owner
@@ -162,6 +164,8 @@ func close_without_commit() -> void:
 	stop_looking()
 	if app.connected: app.queue_message({"kind":"drag_preview", "preview":null})
 	active = false
+	script_capture_pending = false
+	script_capture_generation += 1
 	busy = false
 	changed = false
 	target_id = ""
@@ -317,6 +321,22 @@ func shoot() -> void:
 	save_button.disabled = false
 	share_button.disabled = not app.editable
 	status.text = "撮影しました。ローカル保存かワールドへの配置を選べます。"
+
+func capture_from_script(id: String) -> void:
+	if script_capture_pending or not is_camera(id):
+		return
+	if active and target_id != id and changed:
+		return
+	if not active or target_id != id: open(id)
+	if not active or target_id != id: return
+	script_capture_pending = true
+	script_capture_generation += 1
+	var generation := script_capture_generation
+	if generation == script_capture_generation and active and target_id == id and is_camera(id):
+		await shoot()
+		if generation == script_capture_generation and active and target_id == id and captured_image != null and not captured_image.is_empty():
+			save_local()
+	if generation == script_capture_generation: script_capture_pending = false
 
 func save_local() -> void:
 	if captured_image == null or captured_image.is_empty(): return

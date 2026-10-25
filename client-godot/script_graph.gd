@@ -11,6 +11,7 @@ const TYPES := {
 	"write_field":[[["flow","flow"],["value","any"]],[["next","flow"]]],
 	"drive_field":[[["flow","flow"],["value","any"]],[["next","flow"]]],
 	"set_state":[[["flow","flow"],["value","any"]],[["next","flow"]]],
+	"capture_camera":[[["flow","flow"]],[["next","flow"]]],
 	"number":[[],[["value","number"]]], "public_number":[[],[["value","number"]]],
 	"bool":[[],[["value","bool"]]], "string":[[],[["value","string"]]],
 	"vec3":[[],[["value","vec3"]]], "color":[[],[["value","color"]]],
@@ -72,7 +73,7 @@ func _ready() -> void:
 	palette = OptionButton.new()
 	palette.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for kind in TYPES:
-		var category := "Event" if kind.begins_with("on_") else ("Flow" if kind in ["branch","sequence","write_field","drive_field","set_state"] else ("Value" if kind in ["number","public_number","bool","string","vec3","color","delta","time","world_time","read_field","get_state"] else ("Convert" if kind in ["to_string","join","rotation_y"] else "Math / Logic")))
+		var category := "Event" if kind.begins_with("on_") else ("Flow" if kind in ["branch","sequence","write_field","drive_field","set_state","capture_camera"] else ("Value" if kind in ["number","public_number","bool","string","vec3","color","delta","time","world_time","read_field","get_state"] else ("Convert" if kind in ["to_string","join","rotation_y"] else "Math / Logic")))
 		palette.add_item(category + " · " + kind.replace("_", " ").capitalize())
 	tools.add_child(palette)
 	var add := Button.new()

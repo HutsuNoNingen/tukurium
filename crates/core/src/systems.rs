@@ -321,6 +321,7 @@ pub(crate) fn apply_commands(world: &mut World) {
         return;
     };
     let editor = world.resource_mut::<Authors>().0.remove(&prepared.ticket);
+    let script_actor = world.resource_mut::<crate::scripting::ScriptRuntime>().actors.remove(&prepared.ticket);
     let result = match prepared.mutation {
         Err(error) => Err(error),
         Ok(mutation) => {
@@ -351,7 +352,7 @@ pub(crate) fn apply_commands(world: &mut World) {
                         .0
                         .iter()
                         .filter(|s| s.enabled && s.schema.has_interact)
-                        .map(|s| (target.clone(), s.id.clone()))
+                        .map(|s| (target.clone(), s.id.clone(), script_actor.clone()))
                         .collect();
                     world
                         .resource_mut::<crate::scripting::ScriptRuntime>()

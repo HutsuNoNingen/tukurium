@@ -19,6 +19,26 @@ Editの「新規作成…」パネルで「Camera を作成」を押すと、カ
 
 「撮影」はワールドと参加者のアバターを写し、自分のアバターも入る。ウィンドウやチャットは写真に入れない。撮影後は「ローカル保存」で自分の`user://photos`フォルダーへPNGを書き出すか、「写真をワールドに置く」で画像アイテムを参加者全員に共有できる。実際のローカル保存先はウィンドウの下部に表示する。ワールドの写真アイテムは既存のライブラリ保存操作でも作品として扱える。共有用写真は画像の上限に合わせてJPEGへ縮小するため、ローカルPNGと画質が異なる。
 
+CameraのSlotにScriptを付けると、クリックを起点にタイマーを組んで撮影できる。タイマーは共有Scriptの状態と`ctx.time`で管理し、`ctx:capture_camera(ctx.self)`は撮影だけを要求する。Cameraコンポーネントがオンの自身のSlotだけを撮影できる。
+
+```lua
+return {
+    name = "Shutter",
+    on_interact = function(ctx)
+        ctx:set_state("deadline", ctx.time + 3)
+    end,
+    update = function(ctx)
+        local deadline = ctx:get_state("deadline", 0)
+        if deadline > 0 and ctx.time >= deadline then
+            ctx:capture_camera(ctx.self)
+            ctx:set_state("deadline", 0)
+        end
+    end
+}
+```
+
+ノードでは`On Interact → Set State(deadline)`へ`Time + Number(3)`を入れる。`On Update`から`deadline > 0`と`Time > deadline`を`And`でまとめて`Branch`へつなぎ、`Yes → Capture Camera → Set State(deadline, 0)`とする。`Apply graph`後、そのCameraをクリックするとスクリプトが3秒を数え、期限に達してから操作した本人の撮影ウィンドウが開く。写真は本人の`user://photos`へPNGで自動保存される。共有したい場合は「写真をワールドに置く」を押す。撮影要求は一時的な操作で、ワールドの保存データには含めない。
+
 - カーソルが表示された状態で `Esc` を押すと、リング、設定、手前の個人ウィンドウを一つ閉じる。カーソルは表示したままにする。複数の個人ウィンドウを同時に開け、ドックの同じアイコンをもう一度押すとそのウィンドウだけを閉じる。共有の3Dパネルはワールドに残る。FPS操作に戻るにはワールドをクリックする。
 - FPS操作中は視点中央で3Dパネルのボタンを押す。クリックやドラッグ中もマウスは視点操作のままで、カーソルには切り替わらない。TPS・Fly cameraやEscでカーソルを出した状態では、マウスポインターでパネルを操作する。
 - 上部バーは個人画面を開いても常時表示し、Play/Edit、FPS、同期状態、ローカルEngineとの往復時間を示す。「ユーザー」「セッション」の入口は下のドックにまとめる。個人画面の見出しをドラッグして移動し、右下をドラッグしてサイズを変えられる。位置とサイズはそのクライアントだけの表示状態。左のWORLD・PEOPLE欄と常設の操作説明は表示しない。

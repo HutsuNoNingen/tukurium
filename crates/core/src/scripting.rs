@@ -19,10 +19,20 @@ struct Cached {
 #[derive(Resource, Default)]
 pub(crate) struct ScriptRuntime {
     cache: HashMap<String, Cached>,
-    pub(crate) events: Vec<(Address, String)>,
+    pub(crate) events: Vec<(Address, String, Option<String>)>,
+    pub(crate) actors: HashMap<u64, String>,
+    capture_owners: HashMap<String, String>,
+    last_capture_at: HashMap<String, f64>,
+    pub(crate) camera_captures: Vec<CameraCapture>,
     pub(crate) dt: f64,
     pub(crate) statuses: Vec<ScriptStatus>,
     cursor: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CameraCapture {
+    pub target: Address,
+    pub requester: String,
 }
 
 pub(crate) struct FramePatch {
@@ -163,6 +173,8 @@ pub(crate) fn prepare_frame(world: &mut World) {
         .flat_map(|o| o.scripts.iter().map(|s| s.id.clone()))
         .collect();
     runtime.cache.retain(|id, _| alive.contains(id));
+    runtime.capture_owners.retain(|id, _| alive.contains(id));
+    runtime.last_capture_at.retain(|id, _| alive.contains(id));
     let started = Instant::now();
     let mut stored_bytes: usize = snapshot
         .objects
@@ -193,6 +205,7 @@ pub(crate) fn prepare_frame(world: &mut World) {
                 .get(&script.id)
                 .is_none_or(|c| c.source != script.source || c.revision != script.revision);
             if stale {
+                runtime.capture_owners.remove(&script.id);
                 let (program, error) = match Program::compile(&script.source) {
                     Ok(p) if p.schema == script.schema => (Some(p), None),
                     Ok(_) => (None, Some("Script schema does not match its source".into())),
@@ -210,11 +223,12 @@ pub(crate) fn prepare_frame(world: &mut World) {
             }
             let cached = runtime.cache.get_mut(&script.id).unwrap();
             if !script.enabled || cached.error.is_some() {
+                if !script.enabled { runtime.capture_owners.remove(&script.id); }
                 delivered.extend(
                     events
                         .iter()
                         .enumerate()
-                        .filter(|(_, (_, id))| id == &script.id)
+                        .filter(|(_, (_, id, _))| id == &script.id)
                         .map(|(index, _)| index),
                 );
                 continue;
@@ -232,7 +246,7 @@ pub(crate) fn prepare_frame(world: &mut World) {
                 events
                     .iter()
                     .enumerate()
-                    .filter(|(_, (address, id))| *address == object.address && id == &script.id)
+                    .filter(|(_, (address, id, _))| *address == object.address && id == &script.id)
                     .map(|(index, _)| (Event::Interact, Some(index))),
             );
             for (event, event_index) in callbacks {
@@ -290,6 +304,22 @@ pub(crate) fn prepare_frame(world: &mut World) {
                             break;
                         }
                         stored_bytes = proposed;
+                        if let Some(event_index) = event_index
+                            && let Some(requester) = &events[event_index].2
+                        {
+                            runtime.capture_owners.insert(script.id.clone(), requester.clone());
+                        }
+                        let capture_time = world.resource::<MediaClock>().0;
+                        if output.camera_capture
+                            && let Some(requester) = runtime.capture_owners.get(&script.id)
+                            && runtime.last_capture_at.get(&script.id).is_none_or(|last| capture_time - last >= 1.0)
+                        {
+                            runtime.camera_captures.push(CameraCapture {
+                                target: object.address.clone(),
+                                requester: requester.clone(),
+                            });
+                            runtime.last_capture_at.insert(script.id.clone(), capture_time);
+                        }
                         object.world_position = output.position;
                         object.world_rotation = output.rotation;
                         object.world_scale = output.scale;
@@ -336,7 +366,7 @@ pub(crate) fn prepare_frame(world: &mut World) {
     runtime.events = events
         .into_iter()
         .enumerate()
-        .filter(|(index, (_, id))| !delivered.contains(index) && alive.contains(id))
+        .filter(|(index, (_, id, _))| !delivered.contains(index) && alive.contains(id))
         .map(|(_, event)| event)
         .collect();
     let mut compacted: Vec<FieldWrite> = Vec::new();
@@ -554,5 +584,66 @@ mod tests {
             serde_json::json!(128)
         );
         assert!(model.world.resource::<ScriptRuntime>().events.is_empty());
+    }
+
+    #[test]
+    fn capture_camera_is_sent_only_to_the_interacting_client() {
+        let mut model = WorldModel::new();
+        model.set_media_time(100.0);
+        let target = model.snapshot().objects[0].address.clone();
+        let revision = model.snapshot().objects[0].object_revision.clone();
+        model.enqueue(WorldCommand::Structure { command: StructuralCommand {
+            command_id: "add-camera".into(),
+            operation: StructuralOperation::AddComponent {
+                target: target.clone(), type_id: "Camera".into(), expected_revision: revision,
+                values: serde_json::json!({"camera_enabled":true}),
+            },
+        }}).unwrap();
+        assert!(model.tick()[0].result.is_ok());
+        command(&mut model, ScriptAction::Attach {
+            source: "return {name='Shutter',on_interact=function(ctx) ctx:set_state('deadline',ctx.time+1) end,update=function(ctx) local deadline=ctx:get_state('deadline',0); if deadline>0 and ctx.time>=deadline then ctx:capture_camera(ctx.self); ctx:set_state('deadline',0) end end}".into(),
+        }).unwrap();
+        model.set_script_authority(true);
+        let ticket = model.enqueue_script_interaction_as(WorldCommand::Script { command: ScriptCommand {
+            command_id: "capture".into(), target: target.clone(), action: ScriptAction::Interact,
+        }}, "peer-1:epoch-1".into()).unwrap();
+        assert_eq!(model.tick()[0].ticket, ticket);
+        model.advance(Duration::ZERO);
+        assert!(model.take_camera_captures().is_empty());
+        model.set_media_time(100.5);
+        model.advance(Duration::from_millis(100));
+        assert!(model.take_camera_captures().is_empty());
+        model.set_media_time(101.1);
+        model.advance(Duration::from_millis(100));
+        assert_eq!(model.take_camera_captures(), vec![CameraCapture {
+            target: target.clone(), requester: "peer-1:epoch-1".into(),
+        }]);
+        assert!(model.take_camera_captures().is_empty());
+        model.enqueue_script_interaction_as(WorldCommand::Script { command: ScriptCommand {
+            command_id: "capture-again".into(), target: target.clone(), action: ScriptAction::Interact,
+        }}, "local-2".into()).unwrap();
+        assert!(model.tick()[0].result.is_ok());
+        model.advance(Duration::ZERO);
+        model.set_media_time(102.2);
+        model.advance(Duration::from_millis(100));
+        assert_eq!(model.take_camera_captures(), vec![CameraCapture {
+            target: target.clone(), requester: "local-2".into(),
+        }]);
+        let revision = model.snapshot().objects[0].fields.iter().find(|f| f.id == "camera_enabled").unwrap().revision.clone();
+        model.enqueue(WorldCommand::Edit { edit: kokoverse_protocol::Edit {
+            command_id: "disable-camera".into(),
+            target: crate::replication::REGISTRY.field_address(&target, "camera_enabled").unwrap(),
+            field_id: "camera_enabled".into(), expected_revision: revision, value: serde_json::json!(false),
+        }}).unwrap();
+        assert!(model.tick()[0].result.is_ok());
+        model.enqueue_script_interaction_as(WorldCommand::Script { command: ScriptCommand {
+            command_id: "capture-disabled".into(), target, action: ScriptAction::Interact,
+        }}, "local-1".into()).unwrap();
+        assert!(model.tick()[0].result.is_ok());
+        model.advance(Duration::ZERO);
+        model.set_media_time(103.4);
+        model.advance(Duration::from_millis(100));
+        assert!(model.take_camera_captures().is_empty());
+        assert!(model.script_statuses()[0].error.is_none());
     }
 }

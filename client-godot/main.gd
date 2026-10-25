@@ -1134,6 +1134,9 @@ func accept_message(message: Dictionary) -> void:
 		asset_importer.receive(body)
 		return
 	match body.get("kind"):
+		"camera_capture":
+			if body.get("target") is Dictionary:
+				camera_tool.capture_from_script(str(body.target.get("instance_id", "")))
 		"drive_frame":
 			apply_drive_frame(body.frame)
 		"script_statuses":

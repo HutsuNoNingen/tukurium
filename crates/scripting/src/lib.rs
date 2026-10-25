@@ -35,6 +35,7 @@ pub struct Output {
     pub drives: BTreeMap<String, Value>,
     pub field_writes: Vec<(TypedReference, Value)>,
     pub field_drives: Vec<(TypedReference, Value)>,
+    pub camera_capture: bool,
     commands: usize,
 }
 
@@ -386,6 +387,7 @@ impl Program {
                 drives: BTreeMap::new(),
                 field_writes: Vec::new(),
                 field_drives: Vec::new(),
+                camera_capture: false,
                 commands: 0,
             }));
             let handler = match event {
@@ -475,6 +477,9 @@ impl Program {
         if let Some(collider) = &object.collider {
             entity.set("Collider", lua.to_value(collider)?)?;
         }
+        if let Some(enabled) = object.camera {
+            entity.set("Camera", lua.to_value(&json!({"Enabled": enabled}))?)?;
+        }
         entity.set_readonly(true);
         let query_entity = entity.clone();
         ctx.set(
@@ -504,6 +509,24 @@ impl Program {
             )?,
         )?;
         ctx.set("self", entity)?;
+        let capture_output = output.clone();
+        let camera_id = object.address.instance_id.clone();
+        let camera_present = object.camera.is_some();
+        let camera_enabled = object.camera == Some(true);
+        ctx.set("capture_camera", lua.create_function(move |_, (_ctx, target): (Table, Table)| {
+            if local_drive { return Err(error("Capture Camera is not allowed in drive(ctx)")); }
+            if target.raw_get::<String>("id")? != camera_id {
+                return Err(error("Capture target must be this Camera"));
+            }
+            if !camera_present { return Err(error("Capture Camera requires a Camera component")); }
+            if !camera_enabled { return Ok(()); }
+            let mut out = capture_output.lock().unwrap();
+            out.commands += 1;
+            if out.commands > MAX_COMMANDS { return Err(error("Too many script writes")); }
+            if out.camera_capture { return Err(error("Capture Camera can run once per callback")); }
+            out.camera_capture = true;
+            Ok(())
+        })?)?;
         for name in [
             "set_position",
             "translate",

@@ -12,3 +12,9 @@
 既存の版1保存ワールドにはCamera・Mirror形状だけで機能が表現された物体がある。版1を読み込むときだけ対応する機能コンポーネントを補い、版2へ保存する。版2では形状と機能を分けて扱い、コンポーネントの削除が保存後に復活しないようにする。
 
 実装：[登録表](../crates/core/src/replication.rs)、[描画](../client-godot/mirror_renderer.gd)、[カメラ操作](../client-godot/camera_tool.gd)。確認：Rustの共有・復元テストと描画付きの [作成・インスペクタ統合テスト](../tests/creation-integration.mjs)。
+
+## Cameraの撮影は一時要求として渡す
+
+Cameraの`Enabled`と姿勢は共有データだが、シャッター操作は保存するフィールドではない。Scriptの`on_interact`で期限を状態に記録し、`update`で`ctx.time`と比較すれば、タイマーの意味をUGC側で組める。期限に達して`ctx:capture_camera(ctx.self)`を呼ぶと、ホストのScript SystemがCameraの有効状態・対象を検証し、最後に操作したクライアントへ一度だけ撮影要求を送る。Godotはその要求を受けて描画し、本人の写真フォルダーへ保存する。要求をComponentの値やDriveの毎フレーム出力にすると、途中参加で再撮影したり全員が同じ写真を保存したりするため、この経路を使い分ける。複数人が期限前に同じCameraを操作した場合は、後から操作した人へ撮影する。
+
+確認：[scripting.rs](../crates/core/src/scripting.rs) の宛先・無効化テストと、[creation-integration.mjs](../tests/creation-integration.mjs) の描画付き撮影テスト。操作方法は[インスペクタの操作](../docs/inspector-controls.md)。

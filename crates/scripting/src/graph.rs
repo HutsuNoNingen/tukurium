@@ -62,6 +62,10 @@ fn spec(kind: &str) -> Option<Spec> {
             inputs: &[("flow", "flow"), ("value", "any")],
             outputs: &[("next", "flow")],
         },
+        "capture_camera" => Spec {
+            inputs: &[("flow", "flow")],
+            outputs: &[("next", "flow")],
+        },
         "number" | "public_number" | "delta" | "time" | "world_time" => Spec {
             inputs: &[],
             outputs: &[("value", "number")],
@@ -286,6 +290,7 @@ impl Compiler<'_> {
         id: &str,
         output: &str,
         drive: bool,
+        capture_allowed: bool,
         stack: &mut HashSet<String>,
     ) -> Result<String, String> {
         let mut code = String::new();
@@ -300,13 +305,13 @@ impl Compiler<'_> {
                     let test = self.input(next, "test", &mut HashSet::new())?;
                     code.push_str(&format!(
                         "if {test} then\n{}else\n{}end\n",
-                        self.actions(next, "yes", drive, stack)?,
-                        self.actions(next, "no", drive, stack)?
+                        self.actions(next, "yes", drive, capture_allowed, stack)?,
+                        self.actions(next, "no", drive, capture_allowed, stack)?
                     ));
                 }
                 "sequence" => {
-                    code.push_str(&self.actions(next, "first", drive, stack)?);
-                    code.push_str(&self.actions(next, "second", drive, stack)?);
+                    code.push_str(&self.actions(next, "first", drive, capture_allowed, stack)?);
+                    code.push_str(&self.actions(next, "second", drive, capture_allowed, stack)?);
                 }
                 "write_field" | "drive_field" => {
                     if (node.kind == "drive_field") != drive {
@@ -320,7 +325,7 @@ impl Compiler<'_> {
                         "ctx:{}(ctx.self.{}.ref_{}, {value})\n",
                         node.kind, self.graph.name, next
                     ));
-                    code.push_str(&self.actions(next, "next", drive, stack)?);
+                    code.push_str(&self.actions(next, "next", drive, capture_allowed, stack)?);
                 }
                 "set_state" => {
                     if drive {
@@ -331,7 +336,12 @@ impl Compiler<'_> {
                         "ctx:set_state({}, {value})\n",
                         lua_string(state_key(node)?)
                     ));
-                    code.push_str(&self.actions(next, "next", drive, stack)?);
+                    code.push_str(&self.actions(next, "next", drive, capture_allowed, stack)?);
+                }
+                "capture_camera" => {
+                    if !capture_allowed { return Err("Capture Camera cannot run under On Drive".into()); }
+                    code.push_str("ctx:capture_camera(ctx.self)\n");
+                    code.push_str(&self.actions(next, "next", drive, capture_allowed, stack)?);
                 }
                 _ => return Err(format!("{} is not a flow node", node.kind)),
             }
@@ -493,7 +503,7 @@ pub fn compile(source: &str) -> Result<String, String> {
         ("on_drive", "drive", true),
     ] {
         if let Some(node) = graph.nodes.iter().find(|n| n.kind == kind) {
-            let actions = compiler.actions(&node.id, "flow", drive, &mut HashSet::new())?;
+            let actions = compiler.actions(&node.id, "flow", drive, !drive, &mut HashSet::new())?;
             code.push_str(&format!("{handler}=function(ctx,dt)\n{actions}end,"));
         }
     }
@@ -535,6 +545,75 @@ mod tests {
         assert!(program.schema.has_update);
         assert_eq!(program.schema.fields[0].id, "p_p");
         assert_eq!(program.schema.fields[0].default, json!(3));
+    }
+
+    #[test]
+    fn capture_camera_runs_in_shared_callbacks_only() {
+        let mut graph = json!({"name":"Shutter","nodes":[
+            {"id":"event","kind":"on_interact","x":0,"y":0},
+            {"id":"capture","kind":"capture_camera","x":100,"y":0}
+        ],"links":[
+            {"from":"event","out":"flow","to":"capture","input":"flow"}
+        ]});
+        assert!(Program::compile(&source(graph.clone())).unwrap().schema.has_interact);
+        graph["nodes"][0]["kind"] = json!("on_update");
+        assert!(Program::compile(&source(graph.clone())).unwrap().schema.has_update);
+        graph["nodes"][0]["kind"] = json!("on_drive");
+        assert!(Program::compile(&source(graph)).err().unwrap().contains("On Drive"));
+    }
+
+    #[test]
+    fn node_countdown_reaches_capture_only_after_deadline() {
+        let graph = json!({"name":"Shutter","nodes":[
+            {"id":"click","kind":"on_interact","x":0,"y":0},
+            {"id":"tick","kind":"on_update","x":0,"y":300},
+            {"id":"arm","kind":"set_state","x":300,"y":0,"value":"deadline"},
+            {"id":"due","kind":"set_state","x":900,"y":300,"value":"deadline"},
+            {"id":"capture","kind":"capture_camera","x":700,"y":300},
+            {"id":"branch","kind":"branch","x":500,"y":300},
+            {"id":"and","kind":"and","x":350,"y":430},
+            {"id":"later","kind":"greater","x":200,"y":500},
+            {"id":"armed","kind":"greater","x":200,"y":600},
+            {"id":"deadline","kind":"get_state","x":0,"y":550,"value":"deadline"},
+            {"id":"now","kind":"time","x":0,"y":450},
+            {"id":"add","kind":"add","x":150,"y":100},
+            {"id":"three","kind":"number","x":0,"y":100,"value":3},
+            {"id":"zero","kind":"number","x":0,"y":700,"value":0}
+        ],"links":[
+            {"from":"click","out":"flow","to":"arm","input":"flow"},
+            {"from":"now","out":"value","to":"add","input":"a"},
+            {"from":"three","out":"value","to":"add","input":"b"},
+            {"from":"add","out":"value","to":"arm","input":"value"},
+            {"from":"tick","out":"flow","to":"branch","input":"flow"},
+            {"from":"now","out":"value","to":"later","input":"a"},
+            {"from":"deadline","out":"value","to":"later","input":"b"},
+            {"from":"deadline","out":"value","to":"armed","input":"a"},
+            {"from":"zero","out":"value","to":"armed","input":"b"},
+            {"from":"later","out":"value","to":"and","input":"a"},
+            {"from":"armed","out":"value","to":"and","input":"b"},
+            {"from":"and","out":"value","to":"branch","input":"test"},
+            {"from":"branch","out":"yes","to":"capture","input":"flow"},
+            {"from":"capture","out":"next","to":"due","input":"flow"},
+            {"from":"zero","out":"value","to":"due","input":"value"}
+        ]});
+        let graph_source = source(graph);
+        let program = Program::compile(&graph_source).unwrap();
+        let mut component = ScriptComponent {
+            id: "1".into(), revision: "0".into(), enabled: true, source: graph_source,
+            schema: program.schema.clone(), parameters: parameters(&program.schema, &Default::default()).unwrap(),
+            state: Default::default(), clock: ScriptClock::default(),
+        };
+        let object: ObjectView = serde_json::from_value(json!({
+            "address":{"instance_id":"00000000-0000-0000-0000-000000000001","local_id":1},
+            "object_revision":"0","world_position":[0,0,0],"fields":[],"camera":true,"scripts":[component.clone()]
+        })).unwrap();
+        let armed = program.run_at(&object, &component, Event::Interact, 0.0, 0.0).unwrap();
+        assert_eq!(armed.state["deadline"], json!(3));
+        component.state = armed.state;
+        assert!(!program.run_at(&object, &component, Event::Update, 0.1, 2.0).unwrap().camera_capture);
+        let due = program.run_at(&object, &component, Event::Update, 0.1, 3.1).unwrap();
+        assert!(due.camera_capture);
+        assert_eq!(due.state["deadline"], json!(0));
     }
 
     #[test]

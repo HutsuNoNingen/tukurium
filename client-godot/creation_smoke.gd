@@ -238,6 +238,15 @@ func run() -> void:
 	if not await until(func(): return scene.objects.values().any(func(o): return o.visual.kind=="image" and str(o.fields[0].value).begins_with("Photo ")),"Camera did not share an image item"): quit(1); return
 	scene.camera_tool.park()
 	if not await until(func(): return not scene.camera_tool.active and Vector3(scene.objects[camera_id].world_position[0],scene.objects[camera_id].world_position[1],scene.objects[camera_id].world_position[2]).distance_to(camera_start)>0.2,"Drone pose did not commit"): quit(1); return
+	var shutter_source := "return {name='Shutter',on_interact=function(ctx) ctx:set_state('deadline',ctx.time+1) end,update=function(ctx) local deadline=ctx:get_state('deadline',0); if deadline>0 and ctx.time>=deadline then ctx:capture_camera(ctx.self); ctx:set_state('deadline',0) end end}"
+	scene.requests.request({"kind":"script","command":{"target":scene.address_of(scene.objects[camera_id]),"action":"attach","source":shutter_source}},Callable())
+	if not await until(func(): return scene.objects.get(camera_id,{}).get("scripts",[]).size()==1,"Camera script did not attach"): quit(1); return
+	scene.script_editor.interact(camera_id)
+	if not await until(func(): return scene.objects.get(camera_id,{}).get("scripts",[]).size()==1 and scene.objects[camera_id].scripts[0].state.get("deadline",0)>0,"Camera script did not start its timer"): quit(1); return
+	if scene.camera_tool.active: push_error("Camera captured before the scripted deadline"); quit(1); return
+	if not await until(func(): return scene.camera_tool.status.text.begins_with("保存: ") and scene.camera_tool.status.text.trim_prefix("保存: ")!=saved_photo,"Scripted camera did not save a new photo"): quit(1); return
+	if not FileAccess.file_exists(scene.camera_tool.status.text.trim_prefix("保存: ")): push_error("Scripted photo file is missing"); quit(1); return
+	scene.camera_tool.park()
 	scene.hud.open_creation()
 	if not await until(func(): return scene.world_panels.panels.size()==1,"Creation panel did not reopen for Mirror"): quit(1); return
 	surface=scene.world_panels.panels.values()[0]
