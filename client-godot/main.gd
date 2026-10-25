@@ -50,6 +50,7 @@ var retry_at := 0.0
 var initial_engine_deadline := 0
 var connected := false
 var editable := false
+var invalid_frame_noticed := false
 var current: Dictionary = {}
 var fields: Dictionary = {}
 var dirty: Dictionary = {}
@@ -814,6 +815,7 @@ func connect_engine() -> void:
 		initial_engine_deadline=Time.get_ticks_msec()+5000
 	received.clear()
 	outgoing.clear()
+	invalid_frame_noticed = false
 	tcp = StreamPeerTCP.new()
 	var error := tcp.connect_to_host("127.0.0.1", port)
 	if close_with_engine and error != OK:
@@ -1020,6 +1022,7 @@ func _process(delta: float) -> void:
 			var decoded: Variant = JSON.parse_string(received.slice(4, size + 4).get_string_from_utf8())
 			received = received.slice(size + 4)
 			if decoded is Dictionary: accept_message(decoded)
+			else: note_invalid_frame()
 	else:
 		if connected: disconnect_engine("Engine disconnected. Reconnecting…")
 		if Time.get_ticks_msec() >= retry_at: connect_engine()
@@ -1088,8 +1091,19 @@ func _process(delta: float) -> void:
 		get_viewport().get_texture().get_image().save_png(capture_path)
 		get_tree().quit()
 
+## A frame that is not a JSON object cannot be routed. Surface it once per
+## connection instead of dropping it silently, then keep going.
+func note_invalid_frame() -> void:
+	if invalid_frame_noticed: return
+	invalid_frame_noticed = true
+	feedback.text = "Received an unreadable message from the engine."
+
 func accept_message(message: Dictionary) -> void:
-	if message.get("protocol_version") != 3: return
+	if message.get("protocol_version") != 3:
+		var got: Variant = message.get("protocol_version")
+		received.clear()
+		disconnect_engine("Engine protocol mismatch (expected 3, got %s). Please update tukurium." % str(got))
+		return
 	var service_body: Dictionary = message.get("body",{})
 	if service_body.get("kind") == "engine_shutdown":
 		get_tree().quit()
