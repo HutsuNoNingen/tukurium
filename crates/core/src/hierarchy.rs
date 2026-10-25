@@ -142,7 +142,12 @@ pub(crate) fn propagate(world: &mut World) {
             };
             globals.insert(address.clone(), compose(base, *local));
         }
-        assert!(globals.len() > before, "validated Slot hierarchy");
+        if globals.len() == before {
+            // Parent missing or a cycle: the hierarchy was not validated.
+            // Leave unresolved entities at their previous transform instead
+            // of hanging or panicking (same exclusion policy as evaluate).
+            break;
+        }
     }
     for (address, global) in globals {
         let entity = nodes[&address].0;
@@ -397,6 +402,7 @@ pub(crate) fn evaluate(world: &mut World) -> Vec<kokoverse_protocol::EvaluatedTr
         .as_ref()
         .map(|g| g.view.preview.clone());
     while resolved.len() < nodes.len() {
+        let before = resolved.len();
         for (address, (_, parent, local)) in &nodes {
             if resolved.contains_key(address) {
                 continue;
@@ -428,10 +434,18 @@ pub(crate) fn evaluate(world: &mut World) -> Vec<kokoverse_protocol::EvaluatedTr
             }
             resolved.insert(address.clone(), global);
         }
+        if resolved.len() == before {
+            // Parent missing or a cycle: the hierarchy was not validated.
+            // Exclude the unresolved subtrees from the output instead of
+            // looping forever (same exclusion policy as propagate).
+            break;
+        }
     }
     let mut output = Vec::new();
     for (address, (entity, parent, local)) in nodes {
-        let global = resolved[&address];
+        let Some(&global) = resolved.get(&address) else {
+            continue;
+        };
         if parent.is_some() {
             world.entity_mut(entity).insert(EvaluatedGlobal(global));
         } else {
@@ -830,5 +844,70 @@ mod tests {
         assert_eq!(child_pose.local_position, [2.0, 0.0, 0.0]);
         assert!((child_pose.position[2] - 1.0).abs() < 1e-8);
         assert_eq!(model.snapshot(), before);
+    }
+
+    fn bare_world() -> World {
+        let mut world = World::new();
+        world.insert_resource(crate::collision::PreviewPositions(vec![]));
+        world.insert_resource(crate::grabbing::GrabState(None));
+        world
+    }
+
+    fn spawn_node(world: &mut World, id: &str, parent: Option<Address>) -> Entity {
+        world
+            .spawn((
+                Identity(Address {
+                    instance_id: id.into(),
+                    local_id: 0,
+                }),
+                Slot {
+                    name: id.into(),
+                    parent,
+                },
+                LocalTransform {
+                    translation: [1.0, 0.0, 0.0],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    scale: [1.0, 1.0, 1.0],
+                },
+                GlobalTransform::default(),
+                ObjectRoot {
+                    revision: 1,
+                    renderer: None,
+                    item_identity: None,
+                },
+                Revisions::default(),
+            ))
+            .id()
+    }
+
+    fn address(id: &str) -> Address {
+        Address {
+            instance_id: id.into(),
+            local_id: 0,
+        }
+    }
+
+    #[test]
+    fn broken_hierarchy_is_excluded_instead_of_hanging_or_panicking() {
+        // Parent that does not exist: the child is excluded, the healthy
+        // root still resolves, and neither entry point hangs or panics.
+        let mut world = bare_world();
+        let root = spawn_node(&mut world, "root", None);
+        spawn_node(&mut world, "orphan", Some(address("ghost")));
+        let output = evaluate(&mut world);
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].target, address("root"));
+        propagate(&mut world);
+        assert_eq!(
+            world.get::<GlobalTransform>(root).unwrap().translation,
+            [1.0, 0.0, 0.0]
+        );
+
+        // A parent cycle: nothing resolves, both entry points just return.
+        let mut world = bare_world();
+        spawn_node(&mut world, "a", Some(address("b")));
+        spawn_node(&mut world, "b", Some(address("a")));
+        assert!(evaluate(&mut world).is_empty());
+        propagate(&mut world);
     }
 }
