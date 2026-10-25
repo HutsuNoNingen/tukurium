@@ -1327,6 +1327,7 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 		selected_id = "" if objects.is_empty() else str(objects.keys()[0])
 		dirty.clear()
 	revision_label.text = "World revision " + snapshot.world_revision + " · ObjectRoot"
+	asset_status.refresh_badges()
 	update_selected()
 	rebuild_tree()
 	world_panels.sync()
