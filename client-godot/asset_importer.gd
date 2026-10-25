@@ -482,7 +482,24 @@ func attach_model(object_id: String) -> void:
 	elif not requested.has(id):
 		request_asset(id)
 
+## The material list is collected once per attached model instance and
+## cached on its root. Repeat calls with the same color do nothing, and a
+## color change only rewrites the cached materials instead of walking the
+## whole subtree again (Drive frames and snapshots call this every time).
 func tint_model(node: Node, color: Color) -> void:
+	if node.has_meta("tint_materials"):
+		if node.get_meta("tint_color") == color: return
+		for material in node.get_meta("tint_materials"):
+			if is_instance_valid(material):
+				material.albedo_color = material.get_meta("source_color",Color.WHITE)*color
+		node.set_meta("tint_color",color)
+		return
+	var materials: Array = []
+	_collect_tint_materials(node,color,materials)
+	node.set_meta("tint_materials",materials)
+	node.set_meta("tint_color",color)
+
+func _collect_tint_materials(node: Node, color: Color, materials: Array) -> void:
 	if node is MeshInstance3D and node.mesh != null:
 		for i in range(node.mesh.get_surface_count()):
 			var material: Material = node.get_surface_override_material(i)
@@ -491,8 +508,10 @@ func tint_model(node: Node, color: Color) -> void:
 				material = material.duplicate() if material is StandardMaterial3D else StandardMaterial3D.new()
 				node.set_surface_override_material(i,material)
 				material.set_meta("source_color",material.albedo_color)
-			if material is StandardMaterial3D: material.albedo_color = material.get_meta("source_color",Color.WHITE)*color
-	for child in node.get_children(): tint_model(child,color)
+			if material is StandardMaterial3D:
+				material.albedo_color = material.get_meta("source_color",Color.WHITE)*color
+				if not materials.has(material): materials.append(material)
+	for child in node.get_children(): _collect_tint_materials(child,color,materials)
 
 func attach_video(object_id: String) -> void:
 	var object: Dictionary = editor.objects[object_id]
