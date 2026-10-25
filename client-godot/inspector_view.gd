@@ -21,7 +21,7 @@ var scroll := ScrollContainer.new()
 var fields_box := VBoxContainer.new()
 var message := Label.new()
 var picker_ids: Array[String] = []
-var picker_signature := ""
+var picker_signature: Array = []
 var built := false
 var scroll_pending := -1.0
 var scroll_inflight := false
@@ -33,7 +33,7 @@ var close_when_ready := false
 var field_container: VBoxContainer
 var drive_labels: Dictionary = {}
 var drive_buttons: Dictionary = {}
-var field_signature := ""
+var field_signature: Array = []
 var requested_script := ""
 var pending_driver_owner := ""
 var pending_driver_script := ""
@@ -487,11 +487,16 @@ func refresh(object: Dictionary) -> void:
 	panel_state = object
 	filling = true
 	var entries: Array = []
+	# Rebuild key: each object's name-field revision. Rust bumps a field's
+	# revision on every write, so the key changes exactly when the listed
+	# (id, name) pairs do — without stringifying every object's name.
+	var picker_key: Array = []
 	for id in manager.app.objects:
-		entries.append([id, manager.field_data(id, "name").get("value", id)])
-	var signature := JSON.stringify(entries)
-	if signature != picker_signature:
-		picker_signature = signature
+		var name_field: Dictionary = manager.field_data(id, "name")
+		entries.append([id, name_field.get("value", id)])
+		picker_key.append([id, str(name_field.get("revision", ""))])
+	if picker_key != picker_signature:
+		picker_signature = picker_key
 		target_picker.clear()
 		picker_ids.clear()
 		target_picker.add_item("Choose object…")
@@ -501,7 +506,10 @@ func refresh(object: Dictionary) -> void:
 			picker_ids.append(entry[0])
 	var new_target: String = object.inspector.target.instance_id if object.inspector.get("target") != null else ""
 	var inspected: Dictionary = manager.app.objects.get(new_target, {})
-	var next_signature := JSON.stringify([inspected.get("fields", []).map(func(f): return [f.component_id,f.id,f.value_type]),inspected.get("scripts", []).map(func(s): return [s.id,s.schema.name,s.enabled])])
+	# Structure key compared as data (deep equality) instead of a JSON
+	# string; every leaf is a scalar, so this matches comparing the
+	# stringified form while skipping the serialization.
+	var next_signature: Array = [inspected.get("fields", []).map(func(f): return [f.component_id,f.id,f.value_type]),inspected.get("scripts", []).map(func(s): return [s.id,s.schema.name,s.enabled])]
 	if new_target != target_id or not built or (next_signature != field_signature and edits.is_empty()):
 		for field in edits:
 			# A target switch ends the old lease; never redirect a draft to the new target.
