@@ -22,6 +22,48 @@ import (
 
 const maxFrame = 1024 * 1024
 
+type outbound struct {
+	Type     string          `json:"type"`
+	To       *string         `json:"to"`
+	Body     json.RawMessage `json:"body"`
+	Sequence string          `json:"sequence"`
+}
+
+// offerLatest coalesces poses: a stale queued pose is dropped so the newest
+// one wins, and the offer never blocks past cancellation (the consumer may
+// already have exited after a failure).
+func offerLatest(ctx context.Context, latest chan outbound, command outbound) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	default:
+	}
+	select {
+	case <-latest:
+	default:
+	}
+	select {
+	case latest <- command:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+const (
+	retryMinDelay = 2 * time.Second
+	retryMaxDelay = 60 * time.Second
+)
+
+// nextRetryDelay doubles the wait after consecutive failures (capped) and
+// resets it once a connection survived long enough to look healthy.
+func nextRetryDelay(current, runDuration time.Duration) time.Duration {
+	if runDuration >= time.Minute {
+		return retryMinDelay
+	}
+	return min(current*2, retryMaxDelay)
+}
+
 // Keep combined pose, full transform preview and laser below the datagram budget.
 // Reliable messages retain the JSON format; older uncompressed poses can be read.
 func encodeLatest(data []byte) (string, error) {
@@ -143,12 +185,6 @@ func run(engine, address, session string, peer *string, insecure bool) error {
 			}
 		}
 	}()
-	type outbound struct {
-		Type     string          `json:"type"`
-		To       *string         `json:"to"`
-		Body     json.RawMessage `json:"body"`
-		Sequence string          `json:"sequence"`
-	}
 	reliable := make(chan outbound, 64)
 	latest := make(chan outbound, 1)
 	// Loss-tolerant poses never wait behind reliable SendTo acknowledgement.
@@ -230,11 +266,9 @@ func run(engine, address, session string, peer *string, insecure bool) error {
 					return
 				}
 			case "latest":
-				select {
-				case <-latest:
-				default:
+				if !offerLatest(ctx, latest, command) {
+					return
 				}
-				latest <- command
 			}
 		}
 	}()
@@ -258,10 +292,13 @@ func main() {
 	peer := flag.String("peer", "host", "unique participant name")
 	insecure := flag.Bool("insecure-development", false, "allow localhost development certificate")
 	flag.Parse()
+	delay := retryMinDelay
 	for {
+		started := time.Now()
 		if err := run(*engine, *address, *session, peer, *insecure); err != nil {
-			fmt.Fprintln(os.Stderr, "Disconnected; retrying in 2s:", err)
+			fmt.Fprintln(os.Stderr, "Disconnected; retrying in", delay, ":", err)
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(delay)
+		delay = nextRetryDelay(delay, time.Since(started))
 	}
 }
