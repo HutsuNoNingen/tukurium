@@ -79,9 +79,9 @@ function Start-TestClient {
     Assert-Test ($probe.WaitForExit(8000) -and $probe.ExitCode -eq 0) 'Engine has no console'
     $info = Get-Content -LiteralPath $probeFile
     $console = [IntPtr]([long]$info[0])
-    Assert-Test ($console -ne [IntPtr]::Zero -and $info[1] -eq "Kokoverse Engine ($profile)") 'Wrong Engine console'
+    Assert-Test ($console -ne [IntPtr]::Zero -and $info[1] -eq "tukurium Engine ($profile)") 'Wrong Engine console'
     Assert-Test ([KokoverseWindowTest]::IsWindowVisible($console)) 'Engine console is hidden'
-    Assert-Test ((Get-Content -LiteralPath ($probeFile+'.screen.txt') -Raw).Contains('Kokoverse')) 'Engine logs are missing from the console'
+    Assert-Test ((Get-Content -LiteralPath ($probeFile+'.screen.txt') -Raw).Contains('tukurium')) 'Engine logs are missing from the console'
     return @{state=$state;engine=$engine;gui=$gui;console=$console}
 }
 function Read-TestFrame {

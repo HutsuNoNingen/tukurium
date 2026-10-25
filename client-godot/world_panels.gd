@@ -151,7 +151,7 @@ func open_window(target_id: String = "") -> String:
 	var id := "desktop-%s-%s" % [Time.get_ticks_usec(), randi()]
 	var window := Window.new()
 	window.hide()
-	window.title = "Kokoverse · Inspector"
+	window.title = "tukurium · Inspector"
 	window.force_native = true
 	window.borderless = false
 	window.unresizable = false

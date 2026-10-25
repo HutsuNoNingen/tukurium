@@ -1,4 +1,4 @@
-Kokoverse Workshop - Windows x64 prototype
+tukurium - Windows x64 prototype
 
 【起動】
 ZIPを右クリックして「すべて展開」してください。ZIPの中から直接起動しないでください。
@@ -35,7 +35,7 @@ Windows 10/11（64bit）と、OpenGL 3.3対応のグラフィックス環境が�
 
 .run/online/<profile>/worlds/: ホストのワールド
 .run/online/<profile>/assets/: モデル・動画などのキャッシュ
-本人情報: WindowsのLOCALAPPDATA内 Kokoverse/servers/ 以下（暗号化）
+本人情報: WindowsのLOCALAPPDATA内 Kokoverse/servers/ 以下（暗号化。既存データを引き継ぐため保存先の名前は維持）
 接続用パスワード: 不要。以前の保存済み資格情報も使いません。
 
 サーバーには個人ライブラリの保存版と素材が残ります。

@@ -51,7 +51,7 @@ Driveは、接続された計算結果から対象の値を各端末で求める
 
 「誰が計算するか」と「共有変更をどう確定・整合させるか」は別の責務。静的解析だけから、競合やホスト移譲の全ケースを保証することはできない。
 
-## 現在のKokoverseとの差
+## 現在のtukuriumとの差
 
 現時点のLuau UGCは、`WorldModel::advance`が`script_authority`を確認し、ホストのみが約20Hzで`script_schedule`を実行する。Engine側は`set_script_authority(self.host)`を設定する。ゲストはコードとパラメータを保持するが、UGCの計算結果はホストから受け取る。
 

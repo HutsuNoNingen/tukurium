@@ -80,7 +80,7 @@ function Get-FreeLocalPort {
 
 try {
     try { $locked = $launchMutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
-    if (-not $locked) { Write-Host 'Kokoverse is already starting. The window will open shortly.'; return }
+    if (-not $locked) { Write-Host 'tukurium is already starting. The window will open shortly.'; return }
 
     # Repeated Start restores the window, even while the remote service is temporarily offline.
     if (Test-Path -LiteralPath $recordsPath) {
@@ -101,7 +101,7 @@ try {
                         $processes += $frontend
                         Save-ClientState
                         if (-not $Headless) { Show-KokoverseWindow $window }
-                        Write-Host "Kokoverse is already running ($Profile). Restored the existing window."
+                        Write-Host "tukurium is already running ($Profile). Restored the existing window."
                         return
                     }
                     # Recover windows hidden by an older launcher; the Engine and world stay alive.
@@ -109,7 +109,7 @@ try {
                 }
                 Save-ClientState
                 if (-not $Headless) { Start-Frontend }
-                Write-Host "Reopened Kokoverse ($Profile) using the existing session."
+                Write-Host "Reopened tukurium ($Profile) using the existing session."
                 return
             }
             foreach ($frontend in $frontends) { Stop-KokoverseProcess $frontend }
@@ -185,7 +185,7 @@ try {
     $profilePath = Join-Path $env:LOCALAPPDATA "$profileDirectory/profile.dat"
     $engineArgs = @('--server',$Server,'--port',"$uiPort",'--transport-port',"$transportPort",'--profile',$profilePath,'--data-dir',$clientRoot,'--asset-dir',(Join-Path $clientRoot 'assets'),'--adapter',(Join-Path $adapterDir 'kokosync-adapter.exe'))
     if (-not $Headless) {
-        $engineArgs += @('--console','--console-title',"Kokoverse Engine ($Profile)",'--log-file',(Join-Path $clientRoot 'engine-error.log'))
+        $engineArgs += @('--console','--console-title',"tukurium Engine ($Profile)",'--log-file',(Join-Path $clientRoot 'engine-error.log'))
     }
     $engine = Start-LocalProcess (Join-Path $binaryDir 'kokoverse-engine.exe') $engineArgs (Join-Path $clientRoot 'engine') (-not $Headless) (-not $Headless)
     $newClients += $engine
@@ -199,7 +199,7 @@ try {
     }
     if (-not $ready) { Client-Failure 'The Engine did not start listening' (Join-Path $clientRoot 'engine') }
     if (-not $Headless) { Start-Frontend }
-    Write-Host "Kokoverse started ($Profile, $Server)."
+    Write-Host "tukurium started ($Profile, $Server)."
     Write-Host "Logs: $clientRoot"
 } catch {
     # Roll back only clients created by this invocation. An existing host remains untouched.

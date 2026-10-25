@@ -17,7 +17,7 @@ function Write-Startup([string]$Message) {
     Write-Host $Message
     Add-Content -LiteralPath (Join-Path $runDirectory 'startup.log') -Value ((Get-Date -Format 's') + ' ' + $Message) -Encoding UTF8
 }
-Write-Startup '[1/4] Preparing Kokoverse...'
+Write-Startup '[1/4] Preparing tukurium...'
 $recordPath = Join-Path $runDirectory 'processes.json'
 if (Test-Path -LiteralPath $recordPath) {
     $records = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
@@ -25,7 +25,7 @@ if (Test-Path -LiteralPath $recordPath) {
         $process = Get-Process -Id $_.id -ErrorAction SilentlyContinue
         $process -and $process.Path -eq $_.path -and $process.StartTime.ToUniversalTime().Ticks.ToString() -eq $_.startTicks
     })
-    if ($alive.Count -gt 0) { throw 'Kokoverse is already running from this folder. Use Stop.bat first.' }
+    if ($alive.Count -gt 0) { throw 'tukurium is already running from this folder. Use Stop.bat first.' }
     Remove-Item -LiteralPath $recordPath
 }
 
@@ -74,7 +74,7 @@ $portLockHeld = $false
 try {
     Write-Startup '[3/4] Starting the engine and network adapter...'
     try { $portLockHeld = $portLock.WaitOne(10000) } catch [Threading.AbandonedMutexException] { $portLockHeld = $true }
-    if (-not $portLockHeld) { throw 'Another Kokoverse instance is starting. Please retry in a few seconds.' }
+    if (-not $portLockHeld) { throw 'Another tukurium instance is starting. Please retry in a few seconds.' }
     $reservationA = $null
     $reservationB = $null
     try {
@@ -135,7 +135,7 @@ try {
     }
     @{ui_port=$BasePort;transport_port=$transportPort;role=$role;peer=$peer;session=$settings.session;autosave=$true} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runDirectory 'connection.json') -Encoding UTF8
     ConvertTo-Json -InputObject @($started.ToArray()) | Set-Content -LiteralPath $recordPath -Encoding UTF8
-    Write-Startup "Kokoverse started as $role. Relay: $($settings.relay), room: kokoverse/$($settings.session)"
+    Write-Startup "tukurium started as $role. Relay: $($settings.relay), room: kokoverse/$($settings.session)"
     Write-Host 'The host saves the world automatically. Use Stop.bat to save and exit. The host must stay connected while others edit.'
 } catch {
     foreach ($record in $started) { Stop-Process -Id $record.id -ErrorAction SilentlyContinue }

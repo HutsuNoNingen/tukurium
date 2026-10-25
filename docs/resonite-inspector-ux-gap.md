@@ -1,6 +1,6 @@
-# ResoniteのインスペクタとKokoverseのUX差分
+# ResoniteのインスペクタとtukuriumのUX差分
 
-調査日：2026-10-23。Kokoverseは `bd2c7fd` と現在の作業ツリーを確認した。
+調査日：2026-10-23。tukuriumは `bd2c7fd` と現在の作業ツリーを確認した。
 
 実装後の追記：この差分をもとに、Component表示、Driveの可視化、共有階層、型付き参照とLuaの`field_ref`、デスクトップ専用レイアウトの外部ウィンドウを追加した。以下の表は調査時点の比較を残している。現在の使い方と制限は[インスペクタの操作](inspector-controls.md)を参照。
 
@@ -10,7 +10,7 @@
 
 ## 現在との差
 
-| 操作・表示 | Resoniteで確認した内容 | 現在のKokoverse | 必要な変更 |
+| 操作・表示 | Resoniteで確認した内容 | 現在のtukurium | 必要な変更 |
 |---|---|---|---|
 | 対象を探す | 左にSlot階層、右に選択対象のプロパティとComponent。表示階層のRootと選択対象を別々に保持 | 上部のフラットなオブジェクト選択欄。`InspectorView`に対象参照が一つある | 左右ペイン、Rootと選択の分離。実際の親子構造はRust側にも必要 |
 | 選択して編集する | 階層の選択がワールド上の選択に結び付く。参照を持った状態から別のインスペクタも開ける | 対象の表示用ギズモは出るが、操作対象にするには`Select / Gizmo`を押す。`Ctrl+I`は現在の選択、`I`は2D表示切替 | 注視・クリック・階層選択から編集までの導線を統一 |
@@ -30,7 +30,7 @@ Resoniteの階層、Componentの移動・複製、参照から別の画面を開
 
 Resoniteでは回転フィールドの状態から制御元を開ける。フィールド参照を持ち出して別の機能へ渡す入口もある。今回の静的解析では、`MemberEditor.GetFieldColor`がDrivenとLinkedを色分けし、`InspectorMemberActions`が制御元を開く操作と解除操作を作ることを確認した。[Linkageの公式説明](https://wiki.resonite.com/Drive)とも一致する。
 
-Kokoverseでまず用意したい表示は、たとえば「Rotation · Local Drive」「制御元：Rotator」「共有の保存値」「現在の評価値」。制御元を押すと、そのスクリプトの編集画面を開く。解除については現在の値を保存するのか、元の共有値に戻すのかを決めてから実装する。見た目だけで操作を追加すると、値が跳ぶ理由が分からなくなる。
+tukuriumでまず用意したい表示は、たとえば「Rotation · Local Drive」「制御元：Rotator」「共有の保存値」「現在の評価値」。制御元を押すと、そのスクリプトの編集画面を開く。解除については現在の値を保存するのか、元の共有値に戻すのかを決めてから実装する。見た目だけで操作を追加すると、値が跳ぶ理由が分からなくなる。
 
 ## 左右ペインだけでは親子編集は成立しない
 
@@ -50,7 +50,7 @@ Resoniteの操作から取り入れたいのは、この参照の受け渡し。
 
 ## 実装する順番と完了条件
 
-以下はKokoverseへの提案。工数の大小は既存コードとの依存関係による相対評価で、日数の見積もりではない。
+以下はtukuriumへの提案。工数の大小は既存コードとの依存関係による相対評価で、日数の見積もりではない。
 
 | 順番 | 範囲 | 大きさ | 完了を判断する操作 |
 |---|---|---|---|
@@ -73,10 +73,10 @@ Resoniteはインストール済みの**2026.9.18.82**を対象にした。`Froo
 | 左右の幅と独立したスクロール | Resonite `InspectorPanel.Setup` |
 | Componentヘッダー、型別フィールド、参照と値の受け渡し | Resonite `WorkerInspector`、`SyncMemberEditorBuilder` |
 | Driveの色、制御元を開く、解除、リセットとUndo | Resonite `MemberEditor`、`InspectorMemberActions` |
-| 現在の共有画面と参照先 | Kokoverse [`inspector_view.gd`](../client-godot/inspector_view.gd)、[`world_panels.gd`](../client-godot/world_panels.gd)、[`panels.rs`](../crates/protocol/src/panels.rs) |
-| Component登録と親子構造の現状 | Kokoverse [`replication.rs`](../crates/core/src/replication.rs)、[`components.rs`](../crates/core/src/components.rs) |
-| Driveの表示、共同編集 | Kokoverse [`main.gd`](../client-godot/main.gd)の`apply_drive_frame`、[`shared_script_view.gd`](../client-godot/shared_script_view.gd)、[`script_editor.gd`](../client-godot/script_editor.gd) |
+| 現在の共有画面と参照先 | tukurium [`inspector_view.gd`](../client-godot/inspector_view.gd)、[`world_panels.gd`](../client-godot/world_panels.gd)、[`panels.rs`](../crates/protocol/src/panels.rs) |
+| Component登録と親子構造の現状 | tukurium [`replication.rs`](../crates/core/src/replication.rs)、[`components.rs`](../crates/core/src/components.rs) |
+| Driveの表示、共同編集 | tukurium [`main.gd`](../client-godot/main.gd)の`apply_drive_frame`、[`shared_script_view.gd`](../client-godot/shared_script_view.gd)、[`script_editor.gd`](../client-godot/script_editor.gd) |
 
-Kokoverseの既存レンダリング結果も確認した。共有フィールド画面は`.run/panels-90216e21-fbeb-44c9-ba80-84745b9cca03/world-panels.png`、共同編集画面は`.run/script-docs-7952457e-0268-446f-b558-15377d8a54bf/shared-script.png`。前者はLua共同編集の追加前の画像なので、現在の状態はソースと合わせて判断した。
+tukuriumの既存レンダリング結果も確認した。共有フィールド画面は`.run/panels-90216e21-fbeb-44c9-ba80-84745b9cca03/world-panels.png`、共同編集画面は`.run/script-docs-7952457e-0268-446f-b558-15377d8a54bf/shared-script.png`。前者はLua共同編集の追加前の画像なので、現在の状態はソースと合わせて判断した。
 
 今回は実装と既存画像の比較であり、Resoniteを起動して操作時間やクリック数を測った調査ではない。VRでの操作感、遅延時の入力競合、日本語IME、パネルを多数開いた性能は未測定。汎用フィールド検索や数値のドラッグ操作など、今回根拠を確認していない機能は差分として断定していない。

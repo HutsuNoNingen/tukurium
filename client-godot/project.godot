@@ -1,7 +1,7 @@
 config_version=5
 
 [application]
-config/name="Kokoverse Workshop"
+config/name="tukurium"
 run/main_scene="res://main.tscn"
 
 [display]

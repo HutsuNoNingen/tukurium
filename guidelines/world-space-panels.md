@@ -109,5 +109,5 @@ node tests/reference-integration.mjs --rendered
 | 多数のパネル | 描画更新にはUPDATE_WHEN_VISIBLEを使う。距離別の解像度や全パネルの描画予算は未整備 |
 
 参考：[Resonite WikiのCanvas](https://wiki.resonite.com/Canvas) はサイズ、Collider、レーザー通過、裏面描画などを扱う。
-これは設計を比較する資料であり、Kokoverseに同じ機能が実装済みという意味ではない。
+これは設計を比較する資料であり、tukuriumに同じ機能が実装済みという意味ではない。
 外部資料の確認日：2026-10-24。

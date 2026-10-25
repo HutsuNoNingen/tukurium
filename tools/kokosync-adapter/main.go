@@ -254,7 +254,7 @@ func (r *byteReader) Read(p []byte) (int, error) {
 func main() {
 	engine := flag.String("engine", "127.0.0.1:47001", "local Rust engine")
 	address := flag.String("address", "127.0.0.1:48001", "KokoSync QUIC address or wss:// relay URL")
-	session := flag.String("session", "demo", "Kokoverse session")
+	session := flag.String("session", "demo", "tukurium session")
 	peer := flag.String("peer", "host", "unique participant name")
 	insecure := flag.Bool("insecure-development", false, "allow localhost development certificate")
 	flag.Parse()

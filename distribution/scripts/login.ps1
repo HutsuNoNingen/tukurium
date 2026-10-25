@@ -3,7 +3,7 @@ function New-RelayLoginForm([string]$Username = 'demo') {
     Add-Type -AssemblyName System.Drawing
     [Windows.Forms.Application]::EnableVisualStyles()
     $form = New-Object Windows.Forms.Form
-    $form.Text = 'Kokoverse - Sign in'
+    $form.Text = 'tukurium - Sign in'
     $form.ClientSize = New-Object Drawing.Size(420,245)
     $form.StartPosition = 'CenterScreen'
     $form.FormBorderStyle = 'FixedDialog'
@@ -70,7 +70,7 @@ function Get-PlayerName([string]$InitialName = '') {
     Add-Type -AssemblyName System.Drawing
     [Windows.Forms.Application]::EnableVisualStyles()
     $form = New-Object Windows.Forms.Form
-    $form.Text = 'Kokoverse'
+    $form.Text = 'tukurium'
     $form.ClientSize = New-Object Drawing.Size(380,155)
     $form.StartPosition = 'CenterScreen'
     $form.FormBorderStyle = 'FixedDialog'

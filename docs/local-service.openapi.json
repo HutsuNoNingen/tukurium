@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Kokoverse local service",
+    "title": "tukurium local service",
     "version": "0.1.0",
     "description": "HN-only prototype. Matching trimmed HNs share an account. Calls use the automatically issued bearer session token. Licensing is deferred: signed-in users may save, acquire, modify, share and republish known items. Stored historical license flags do not restrict these operations."
   },

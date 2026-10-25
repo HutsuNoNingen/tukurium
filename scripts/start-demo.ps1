@@ -30,7 +30,7 @@ try {
             }
         }
         ConvertTo-Json -InputObject @($started.ToArray()) | Set-Content .run/processes.json
-        Write-Host "Kokoverse demo started: $Session"
+        Write-Host "tukurium demo started: $Session"
         Write-Host 'Stop: ./scripts/stop-demo.ps1'
     } catch {
         foreach ($record in $started) { Stop-Process -Id $record.id -ErrorAction SilentlyContinue }

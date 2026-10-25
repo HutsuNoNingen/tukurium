@@ -89,7 +89,7 @@ try {
         }
     }
     if ($existingTag.Count -eq 0) {
-        & git tag -a $Tag -m "Kokoverse tester $Tag"
+        & git tag -a $Tag -m "tukurium tester $Tag"
         if ($LASTEXITCODE -ne 0) { throw 'Could not create Git tag.' }
     }
     if ($PushTag) {

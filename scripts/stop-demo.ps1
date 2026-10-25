@@ -47,7 +47,7 @@ if (Test-Path $recordPath) {
                 if (-not $response.ok) { throw $response.message }
                 if ($response.saved) { Write-Host "World saved (revision $($response.world_revision))." }
             } catch {
-                throw "Kokoverse was left running because the world could not be saved: $_"
+                throw "tukurium was left running because the world could not be saved: $_"
             } finally { $client.Close() }
         }
     }
@@ -58,5 +58,5 @@ if (Test-Path $recordPath) {
         }
     }
     Remove-Item -LiteralPath $recordPath
-    Write-Host 'Kokoverse demo stopped.'
+    Write-Host 'tukurium demo stopped.'
 }

@@ -146,7 +146,7 @@ proc init_locale {} {
 
 proc init_tk {} {
   package require Tk 8.6
-  tk appname "kokoverse-demo-supervisor"
+  tk appname "tukurium-demo-supervisor"
   puts "appname \"[tk appname]\""
   # Make sure the event loop stops when we're done
   bind . <Destroy> { set ::stop_event_loop {ok} }

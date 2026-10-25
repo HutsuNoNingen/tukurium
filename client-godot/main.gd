@@ -132,7 +132,7 @@ func _ready() -> void:
 	if FileAccess.file_exists("res://version.txt"):
 		var packaged_version := FileAccess.get_file_as_string("res://version.txt").strip_edges()
 		if not packaged_version.is_empty(): app_version = packaged_version
-	DisplayServer.window_set_title("Kokoverse Workshop · " + app_version)
+	DisplayServer.window_set_title("tukurium · " + app_version)
 	# Space belongs to gameplay/text entry, not BaseButton's default UI accept.
 	for event in InputMap.action_get_events("ui_accept"):
 		if event is InputEventKey and (event.keycode == KEY_SPACE or event.physical_keycode == KEY_SPACE):
@@ -294,8 +294,7 @@ func build_ui() -> void:
 	header.get_parent().offset_right = -24
 	var row := HBoxContainer.new()
 	header.add_child(row)
-	row.add_child(label("kokoverse", 25))
-	row.add_child(label("  /  Workshop", 17, Color("9cb5c2")))
+	row.add_child(label("tukurium", 25))
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(spacer)
@@ -1190,7 +1189,7 @@ func accept_message(message: Dictionary) -> void:
 			social_panels.set_messages(body.get("chat",[]))
 			script_templates = body.get("script_templates", [])
 			script_statuses = body.get("script_statuses", [])
-			DisplayServer.window_set_title("Kokoverse Workshop · " + app_version + " — " + str(body.role).capitalize())
+			DisplayServer.window_set_title("tukurium · " + app_version + " — " + str(body.role).capitalize())
 			status_label.text = ("Host" if body.role == "host" else "Guest") + (" · Connected" if editable else " · Waiting for host")
 			apply_snapshot(body.snapshot)
 			apply_drive_frame(body.get("drive_frame", {}))

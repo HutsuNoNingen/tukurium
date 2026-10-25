@@ -1,14 +1,14 @@
 **KokoSyncはPC間のデータパイプとして使う**
 
-更新日：2026-10-22。Kokoverse独自のメッセージをKokoSyncで配送する。Tonariumとのデータ互換性は設計目標に含めず、そのメッセージ型、保存形式、認証プロキシ、暗号化エンベロープは持ち込まない。ECS、ObjectRoot、フィールドの意味、編集の承認はKokoverse Engineが管理する。
+更新日：2026-10-22。tukurium独自のメッセージをKokoSyncで配送する。Tonariumとのデータ互換性は設計目標に含めず、そのメッセージ型、保存形式、認証プロキシ、暗号化エンベロープは持ち込まない。ECS、ObjectRoot、フィールドの意味、編集の承認はtukurium Engineが管理する。
 
 参照コミットは `5a171af078d3cf85cc3364c9358e1b993f4f9835`。同じコミットのGo SDKを使うアダプターを実装し、ローカル中継を経由した2つのEngineの編集・姿勢同期を検証した。本書は将来の機能も含む接続方針。現時点の配送・再接続と制限は [runtime.md](runtime.md) を参照。姿勢にはlatestを使用し、Blobはまだ使っていない。
 
 **エンジンは通信ライブラリの外にワールドモデルを持つ**
 
 ```text
-Godot ⇄ ローカルIPC ⇄ Kokoverse Engine
-                           ⇅ Kokoverse独自のメッセージ
+Godot ⇄ ローカルIPC ⇄ tukurium Engine
+                           ⇅ tukurium独自のメッセージ
                      KokoSync Adapter
                            ⇅
                      KokoSync中継
@@ -22,7 +22,7 @@ Adapterは接続、送受信、相手情報、通信能力、配送エラーを�
 
 **アプリのメッセージ種別ごとに配送を選ぶ**
 
-| Kokoverseのメッセージ | KokoSyncの候補API | Engineの処理 |
+| tukuriumのメッセージ | KokoSyncの候補API | Engineの処理 |
 |---|---|---|
 | EditCommand | 権威側peerへの `sendTo` | 型・権限・revisionを検証して採否を決める |
 | WorldCommit | 権威側から `message` | worldRevision順に確定変更を適用する |
@@ -34,9 +34,9 @@ Adapterは接続、送受信、相手情報、通信能力、配送エラーを�
 
 `latest`は途中の値が失われても次の値で補える位置・姿勢に使う。生成、削除、部品追加、最後に確定した配置はWorldCommitへ載せる。PoseSampleだけでワールドの構造や永続状態を作らない。
 
-KokoSyncのルーム連番とKokoverseのworldRevisionは別物とする。KokoSync上には配送・管理用の別メッセージも流れ得るため、ワールドの確定変更にはEngineが独立してrevisionを振る。KokoSyncの配送順序や履歴を、アプリ側の整合性規則と同一視しない。
+KokoSyncのルーム連番とtukuriumのworldRevisionは別物とする。KokoSync上には配送・管理用の別メッセージも流れ得るため、ワールドの確定変更にはEngineが独立してrevisionを振る。KokoSyncの配送順序や履歴を、アプリ側の整合性規則と同一視しない。
 
-**メッセージの中身はKokoverseだけで定義する**
+**メッセージの中身はtukuriumだけで定義する**
 
 共通エンベロープの候補は `protocolVersion`、`sessionId`、`authorityEpoch`、`kind`、`payload`。EditCommandには `commandId`、対象の `(instanceId, localId)`、`fieldId`、`expectedFieldRevision`、型付きの値を入れる。WorldCommitには `worldRevision`、元のcommandId、確定した変更の配列を入れる。
 
@@ -46,9 +46,9 @@ ECSの内部Entity番号、GodotのNodePath、メモリアドレスは送らな�
 
 **KokoSyncのルームとゲームの権威側を分ける**
 
-KokoSync中継はデータを配送するサービスであり、ゲームのホストではない。KokoverseのホストEngineが正本を持ち、ゲストからの編集要求を順序付ける。初版の共有状態を変更するFluxもホストで実行する。
+KokoSync中継はデータを配送するサービスであり、ゲームのホストではない。tukuriumのホストEngineが正本を持ち、ゲストからの編集要求を順序付ける。初版の共有状態を変更するFluxもホストで実行する。
 
-ルーム名はKokoverse専用の接頭辞とsessionIdから作る。ルーム参加時に権威側の接続とauthorityEpochを確定し、その接続以外からのWorldCommitやWorldSnapshotを採用しない。メッセージ本文の「自分はホスト」という宣言だけでは判定しない。KokoSyncのpeer名は表示・接続識別子であり、ユーザー認証の代用にはしない。
+ルーム名はtukurium専用の接頭辞とsessionIdから作る。ルーム参加時に権威側の接続とauthorityEpochを確定し、その接続以外からのWorldCommitやWorldSnapshotを採用しない。メッセージ本文の「自分はホスト」という宣言だけでは判定しない。KokoSyncのpeer名は表示・接続識別子であり、ユーザー認証の代用にはしない。
 
 ホストが切断した場合、初版は編集を停止して切断を表示する。自動で別のpeerをホストに昇格させない。ホスト移譲や再開時のepoch変更は、その機能を追加するときに扱う。
 
@@ -58,7 +58,7 @@ KokoSync中継はデータを配送するサービスであり、ゲームのホ
 
 スナップショットを検証・反映した後、R以下の変更は重複として捨て、R+1以降を連続した順番で適用する。revisionの欠落、メモリ上限超過、転送失敗では、部分的なワールドを正本として使わず、取り直す。
 
-KokoSyncの `state` や `checkpoint/catchup` は初版では使わない。KokoSyncの共有状態とEngineのECSを、別々に書き換えられる正本にしないためである。後から履歴配送を利用する場合も、Kokoverseの確定変更とスナップショットの対応を定義してから導入する。
+KokoSyncの `state` や `checkpoint/catchup` は初版では使わない。KokoSyncの共有状態とEngineのECSを、別々に書き換えられる正本にしないためである。後から履歴配送を利用する場合も、tukuriumの確定変更とスナップショットの対応を定義してから導入する。
 
 保存ファイルはEngineが作る。中継のメモリ状態やチェックポイントを、サーバー再起動後も残る保存先とは扱わない。
 
@@ -74,7 +74,7 @@ Go SDK経由の経路は現状では中継になる。ブラウザ間の直結�
 
 **接続試作で確認すること**
 
-最初は独立したKokoverse用ルームへ2つのAdapterを接続し、小さなEditCommandとWorldCommit、PoseSampleを往復させる。続けて、実際の箱の色変更、同時編集の拒否、途中参加のスナップショット、切断後の取り直しまで確認する。
+最初は独立したtukurium用ルームへ2つのAdapterを接続し、小さなEditCommandとWorldCommit、PoseSampleを往復させる。続けて、実際の箱の色変更、同時編集の拒否、途中参加のスナップショット、切断後の取り直しまで確認する。
 
 配送エラーを成功扱いしないこと、SDKの受信確認だけで編集UIを確定しないこと、古い接続世代の姿勢や変更を採用しないことを検証する。大きなスナップショットの転送中にもGodotの入力・描画を継続できることを確認する。
 

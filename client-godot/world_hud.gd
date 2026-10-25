@@ -81,7 +81,7 @@ func setup(owner) -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation",12)
 	bar.add_child(row)
-	row.add_child(text("◇  kokoverse",21))
+	row.add_child(text("◇  tukurium",21))
 	row.add_child(VSeparator.new())
 	var edit_switch := HBoxContainer.new()
 	edit_switch.add_theme_constant_override("separation",2)

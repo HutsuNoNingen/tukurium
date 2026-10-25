@@ -1,6 +1,6 @@
 # Windows配布版は作業ツリーからビルドする
 
-対象は、KokoverseのWindows x64版をビルド・配布する開発者。
+対象は、tukuriumのWindows x64版をビルド・配布する開発者。
 テスター向けのタグ付き差分配信は [テスター向け差分更新](tester-updates.md) を参照する。
 PowerShellを使い、リポジトリのルートで実行する。通常の配布には **`scripts/package.ps1`** を使う。
 このスクリプトは、現在の作業ツリーから実行ファイル・Godotクライアント・起動スクリプトをまとめる。

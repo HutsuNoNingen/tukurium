@@ -796,7 +796,7 @@ func choose_world() -> void:
 	dialog.use_native_dialog=true
 	dialog.access=FileDialog.ACCESS_FILESYSTEM
 	dialog.file_mode=FileDialog.FILE_MODE_OPEN_FILE
-	dialog.filters=PackedStringArray(["*.json ; Saved Kokoverse world"])
+	dialog.filters=PackedStringArray(["*.json ; Saved tukurium world"])
 	app.add_child(dialog)
 	dialog.file_selected.connect(func(path): load_world=path; world_choice.text="開始ワールド: "+path.get_file(); dialog.queue_free())
 	dialog.canceled.connect(dialog.queue_free)

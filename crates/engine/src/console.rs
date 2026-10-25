@@ -55,7 +55,7 @@ pub fn initialize(args: &[String]) -> Result<ShutdownGuard, std::io::Error> {
         let title = args
             .windows(2)
             .find(|w| w[0] == "--console-title")
-            .map_or("Kokoverse Engine", |w| w[1].as_str());
+            .map_or("tukurium Engine", |w| w[1].as_str());
         let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
         // SAFETY: static callback and a NUL-terminated title live for each call.
         unsafe {

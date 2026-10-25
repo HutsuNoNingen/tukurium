@@ -1,6 +1,8 @@
-# Kokoverse prototype
+# tukurium
 
 Rust / bevy_ecs のEngineとGodotの表示クライアントを別プロセスで動かす、共同編集の最初のプロトタイプ。各Engine間はGoアダプターを経由してKokoSyncで接続する。Tonariumとのデータ互換性は持たせない。
+
+画面と案内に表示する名前は`tukurium`。既存のワールド、本人情報、テスター向け更新との接続を保つため、実行ファイル名、Rust crate名、`%LOCALAPPDATA%/Kokoverse/`、通信キー、配布版の識別子`Kokoverse-Windows-x64-`、R2バケット名は現時点で維持する。これらは保存・通信・更新に使う内部識別子で、表示名とは別に扱う。
 
 現在は**箱や画像を生成・複製・削除し、名前・位置・回転・スケール・色・Colliderを共有編集できる**。ホストEngineのECS Scheduleが編集を検証・適用し、確定した差分を配信する。Tonariumで使われているお絵描きアバターも表示し、名前・位置・向きを同期する。画面はGodot、ワールドの正本はRustにある。
 

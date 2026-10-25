@@ -110,7 +110,7 @@ FPSではマウスで見回し、WASDで歩く。右ボタンを押すとRustが
 
 Rustはレーザーの始点・先端・対象・保持状態も生成する。Godotは照準と線を描画し、保持中のレーザーは相手にも配信する。Resoniteのデコンパイルで確認した入力経路、保持点、距離操作、レーザー表示との違いは [調査メモ](resonite-interaction.md) に記録した。回転・拡縮・複数保持・ポータル越しの操作は未実装。
 
-参考として、2026-10-22にインストール済みLumoraVRの `Lumora.dll` / `LumoraCore.dll` を静的に確認した。`GodotKeyboardDriver` が機器入力を受け取り、Coreの `PhysicalLocomotion` が入力を移動方向とジャンプ要求に変換し、`CharacterController` が `ICharacterControllerHook` へ処理を委譲していた。Kokoverseでは入力と制御を分ける考え方を参考にし、今回の床・重力計算はRustのSystemに実装した。
+参考として、2026-10-22にインストール済みLumoraVRの `Lumora.dll` / `LumoraCore.dll` を静的に確認した。`GodotKeyboardDriver` が機器入力を受け取り、Coreの `PhysicalLocomotion` が入力を移動方向とジャンプ要求に変換し、`CharacterController` が `ICharacterControllerHook` へ処理を委譲していた。tukuriumでは入力と制御を分ける考え方を参考にし、今回の床・重力計算はRustのSystemに実装した。
 
 ## 移動ギズモと画像
 

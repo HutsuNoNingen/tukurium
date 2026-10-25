@@ -1379,7 +1379,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
     let adapter_path = arg("--adapter", ".tools/kokosync-adapter.exe");
     eprintln!(
-        "Kokoverse {} | UI 127.0.0.1:{} | adapter 127.0.0.1:{}",
+        "tukurium {} | UI 127.0.0.1:{} | adapter 127.0.0.1:{}",
         role,
         ui_port,
         transport_port

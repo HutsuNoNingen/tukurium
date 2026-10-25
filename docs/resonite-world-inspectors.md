@@ -1,6 +1,6 @@
 # インスペクタを複数の共有ワールドパネルにする
 
-調査日：2026-10-23。Resoniteのインスペクタは、ワールド内のSlotにUI、表示対象への参照、掴む機能を付けて構成している。Kokoverseでも、パネルを独立した共有オブジェクトにすると「箱用と画像用のインスペクタを並べ、同じ画面を一緒に操作する」体験を作れる。
+調査日：2026-10-23。Resoniteのインスペクタは、ワールド内のSlotにUI、表示対象への参照、掴む機能を付けて構成している。tukuriumでも、パネルを独立した共有オブジェクトにすると「箱用と画像用のインスペクタを並べ、同じ画面を一緒に操作する」体験を作れる。
 
 本書は調査結果と実装案を記録する。同日、この調査に基づく共有ワールドパネルを実装した。以下の調査・提案は設計時の記録で、実装済みの範囲は末尾に記す。
 
@@ -41,7 +41,7 @@
 
 `TextField` は、すでに誰かが編集中なら新たにフォーカスを取らない。ただし、このチェックだけで厳密な同時編集ロックが保証されるとは判断しない。遅延がある状態での同時クリックは、実機での追加検証が必要。
 
-文字入力中は `FocusManager.BeforeInputUpdate` がキーボード入力をブロックする。Kokoverseでも、ワールド内の入力欄へ文字を打っている間は移動・ジャンプに入力を渡さず、チェックボックスにフォーカスがあるだけならSpaceでジャンプできる区別を維持する必要がある。
+文字入力中は `FocusManager.BeforeInputUpdate` がキーボード入力をブロックする。tukuriumでも、ワールド内の入力欄へ文字を打っている間は移動・ジャンプに入力を渡さず、チェックボックスにフォーカスがあるだけならSpaceでジャンプできる区別を維持する必要がある。
 
 数値などの反映は `PrimitiveMemberEditor` の設定による。通常はパースできた値を入力中に反映し、終了時にも反映する。`NoContinuousParsing` の指定やURI型などには終了時の反映を使う。入力開始時には表示値の自動更新を外すので、編集中の文字が外部更新で直ちに置き換わるのを避けられる。チェックボックスは `BooleanMemberEditor` から対象フィールドへ直接書き込む。
 
@@ -51,7 +51,7 @@
 
 Canvasにはレーザー・物理タッチの受け付け、裏側からの操作拒否、レーザーを通すかどうかの設定がある。[Canvasの公式説明](https://wiki.resonite.com/Component%3ACanvas)でも確認できる。ただし、このバージョンの標準 `InspectorPanel` は `AcceptPhysicalTouch` を無効にしており、Canvas全体の能力と標準インスペクタの設定は異なる。
 
-## Kokoverseでは共有データをRustに、画面生成と入力をGodotに置く
+## tukuriumでは共有データをRustに、画面生成と入力をGodotに置く
 
 以下は今回の調査に基づく実装案であり、Resonite内部の再現仕様ではない。現在のホストによる編集検証とrevisionを引き続き使う。
 
@@ -100,9 +100,9 @@ Godotは `Control` を `SubViewport` に描き、テクスチャを3Dの板に�
 - 主な確認箇所：`SceneInspector.OnChanges`、`InspectorPanel.Setup`、`RadiantUI_Panel.SetupPanel`、`DevTool.CreateInspector`、`InspectorHelper.OpenInspectorForTarget`、`WorkerInspector.BuildInspectorUI`、`PrimitiveMemberEditor`、`FocusManager`、`TextEditor`、`UIX.Text`、`UIX.ScrollRect`、`UIX.Canvas.ProcessTouchEvent`。
 - 補助資料：[Scene Inspector](https://wiki.resonite.com/Scene_Inspector/en)、[Canvas](https://wiki.resonite.com/Component%3ACanvas)、[Godot SubViewport](https://docs.godotengine.org/en/stable/classes/class_subviewport.html)。閲覧日は調査日と同じ。
 
-同期型・参照・生成経路を調べた静的解析であり、通信パケットの観測や複数人での実機検証は行っていない。Resoniteの同時編集競合、権限による操作差、保存・退出時の全経路、多数のパネルの性能は未確認。Kokoverseの実装タスクでは、これらを自分たちの仕様として明示し、2クライアント以上で検証する。
+同期型・参照・生成経路を調べた静的解析であり、通信パケットの観測や複数人での実機検証は行っていない。Resoniteの同時編集競合、権限による操作差、保存・退出時の全経路、多数のパネルの性能は未確認。tukuriumの実装タスクでは、これらを自分たちの仕様として明示し、2クライアント以上で検証する。
 
-## Kokoverseに実装した範囲
+## tukuriumに実装した範囲
 
 `WorldPanel` と `InspectorView` を別のRust ECS Componentにし、生成・複製・削除、対象変更、通常のTransform、ピン留め、スクロールを同期・保存する。パネルは最大16枚、既存の128物体上限にも数える。初期表示は720×960、物理サイズ1.2×1.6m。FPSの把持処理で移動・回転・拡縮でき、Colliderは既定で非solid。ピン留めはホストが参加者の姿勢から更新し、追従先がいなくなったら最後の位置に残す。
 

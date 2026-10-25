@@ -50,7 +50,7 @@ try {
         }
     }
     if (-not $profile) { throw 'No free instance profile was found.' }
-    Write-Host "Starting a new Kokoverse instance ($profile)."
+    Write-Host "Starting a new tukurium instance ($profile)."
     $launcher = if ($online) { 'start-online.ps1' } else { 'start-local.ps1' }
     & (Join-Path $PSScriptRoot $launcher) -Profile $profile -Headless:$Headless
 } finally {

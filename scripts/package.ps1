@@ -96,7 +96,7 @@ try {
     }
     Copy-Licenses (Split-Path -Parent (Split-Path -Parent $goTool)) 'Go-runtime'
     @'
-Kokoverse embeds the Rust crates and Go modules enumerated in build-info.json.
+tukurium embeds the Rust crates and Go modules enumerated in build-info.json.
 Their upstream license files are included in this directory when supplied.
 Godot 4.7.2 and its third-party notices are included in Godot-*.txt/AUTHORS.md.
 The KokoSync protocol and SDK are from:

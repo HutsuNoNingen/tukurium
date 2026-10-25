@@ -65,5 +65,5 @@ func _draw() -> void:
 		centered_text(ICONS[index],position+Vector2(0,-4),29,Color("8ce7db") if enabled else Color("69808c"))
 		centered_text(LABELS[index],position+Vector2(0,23),15,Color("edf5f8") if enabled else Color("69808c"))
 	draw_circle(center,INNER-5,Color("101b25"))
-	centered_text("kokoverse",center+Vector2(0,-8),17,Color("90ddd4"))
+	centered_text("tukurium",center+Vector2(0,-8),17,Color("90ddd4"))
 	centered_text(target_name.left(15),center+Vector2(0,15),12,Color("b1c1ca"))

@@ -1,5 +1,5 @@
 [Unit]
-Description=Kokoverse account, session and asset API
+Description=tukurium account, session and asset API
 After=network.target
 
 [Service]

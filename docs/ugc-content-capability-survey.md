@@ -1,6 +1,6 @@
 # UGCで作れるコンテンツと必要な部品の調査
 
-調査日：2026-10-24。対象は「Unityのエディター内でGameObject・Component・アセットを組み合わせるように、Kokoverseのワールド内で作品を作る」方向性。UnityやResoniteとのファイル互換、C# API互換、全Componentの再現を意味しない。
+調査日：2026-10-24。対象は「Unityのエディター内でGameObject・Component・アセットを組み合わせるように、tukuriumのワールド内で作品を作る」方向性。UnityやResoniteとのファイル互換、C# API互換、全Componentの再現を意味しない。
 
 この調査からの実装順は[UGCパーツを増やす計画](ugc-parts-plan.md)に分けて記載する。
 
@@ -35,9 +35,9 @@ Resoniteの手元にある **2026.9.18.82** の `FrooxEngine.dll` は、既存�
 
 ## 作れるコンテンツから見た比較
 
-「Kokoverse」は2026-10-24時点の実装状態。`一部`は作品として完成できるという意味ではない。
+「tukurium」は2026-10-24時点の実装状態。`一部`は作品として完成できるという意味ではない。
 
-| コンテンツ例 | 主な部品・アセット | Unity / Resoniteでの組み立て | Kokoverse | 主な不足 |
+| コンテンツ例 | 主な部品・アセット | Unity / Resoniteでの組み立て | tukurium | 主な不足 |
 |---|---|---|---|---|
 | 展示室・看板・動画館 | 階層、モデル、画像、動画、文字、材質、照明 | 物体を配置し、素材や表示Componentを割り当てる | 一部 | 作品内の文字、材質編集、ライト、複数部品を一作品として保存 |
 | 色や動きを変えられるランタン | メッシュ、材質、ライト、スイッチ、スクリプト、効果音 | 入力イベントから状態を変え、表示へ結ぶ | 一部 | ライト、音、複数部品への共有書き込み、作品境界 |
@@ -49,7 +49,7 @@ Resoniteの手元にある **2026.9.18.82** の `FrooxEngine.dll` は、既存�
 | カメラ映像・演出のある空間 | カメラ、ライト、環境設定、アニメーション、エフェクト | 視点や照明と動きを組み合わせる | 一部 | ローカルプレイヤー視点と動画はあるが、作者が置くカメラ・ライト・環境設定はない |
 | アバターの衣装・装備 | リグ、スキニング、アニメーション、アタッチ点、素材 | アバターに部品を取り付け、動作と一緒に保存する | 未実装 | 任意アバターの取り込み・装備・ボーン参照・作品単位の保存 |
 
-Unity側の一般的なComponent / Prefabの構成は[公式マニュアル](https://docs.unity3d.com/ja/current/Manual/key-concepts.html)と[Prefabの用途](https://docs.unity3d.com/ja/current/Manual/prefabs-introduction.html)に基づく。Resonite側のUIの具体的な接続は[UIXチュートリアル](https://wiki.resonite.com/UIX_Tutorial)、物理は[Collider](https://wiki.resonite.com/Collider)と[カテゴリ](https://wiki.resonite.com/Category%3AComponents%3APhysics)を参照。Kokoverseの状態は[ランタイム](runtime.md)、[操作](inspector-controls.md)、[UGCスクリプト](ugc-scripting.md)、[作品の境界](item-boundaries-and-rights.md)および `crates/protocol/src/lib.rs` の `ObjectView` / `Visual` と照合した。
+Unity側の一般的なComponent / Prefabの構成は[公式マニュアル](https://docs.unity3d.com/ja/current/Manual/key-concepts.html)と[Prefabの用途](https://docs.unity3d.com/ja/current/Manual/prefabs-introduction.html)に基づく。Resonite側のUIの具体的な接続は[UIXチュートリアル](https://wiki.resonite.com/UIX_Tutorial)、物理は[Collider](https://wiki.resonite.com/Collider)と[カテゴリ](https://wiki.resonite.com/Category%3AComponents%3APhysics)を参照。tukuriumの状態は[ランタイム](runtime.md)、[操作](inspector-controls.md)、[UGCスクリプト](ugc-scripting.md)、[作品の境界](item-boundaries-and-rights.md)および `crates/protocol/src/lib.rs` の `ObjectView` / `Visual` と照合した。
 
 ## 部品とアセットの棚卸し
 
@@ -98,5 +98,5 @@ Unity側の一般的なComponent / Prefabの構成は[公式マニュアル](htt
 
 - Unity製品・Packageの全機能一覧や、任意のAsset Store製品との互換性は調べていない。
 - Resoniteの全Componentを動作確認していない。Wikiの列挙と手元の一部型の静的確認を使った。
-- Resoniteの複数人同時操作時の遅延・競合、Kokoverseでの多数UI・大量セルの性能は測定していない。
+- Resoniteの複数人同時操作時の遅延・競合、tukuriumでの多数UI・大量セルの性能は測定していない。
 - ライセンスや所有者による操作制限は現在保留中であり、この調査の実装前提に含めない。

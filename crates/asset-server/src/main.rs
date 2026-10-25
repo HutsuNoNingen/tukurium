@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .map_err(|e| e.1)?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    println!("Kokoverse service http://{}", listener.local_addr()?);
+    println!("tukurium service http://{}", listener.local_addr()?);
     axum::serve(listener, server.router())
         .with_graceful_shutdown(async {
             #[cfg(unix)]
