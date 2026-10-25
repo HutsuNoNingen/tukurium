@@ -108,6 +108,73 @@ fn all(db: &Connection, kind: &str) -> Result<Vec<Value>> {
     rows.map(|r| serde_json::from_str(&r?).map_err(|_| bad("Invalid record")))
         .collect()
 }
+fn all_with_ids(db: &Connection, kind: &str) -> Result<Vec<(String, Value)>> {
+    let mut s = db.prepare("SELECT id,value FROM records WHERE kind=? ORDER BY id")?;
+    let rows = s.query_map([kind], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+    })?;
+    rows.map(|r| {
+        let (id, v) = r?;
+        Ok((
+            id,
+            serde_json::from_str(&v).map_err(|_| bad("Invalid record"))?,
+        ))
+    })
+    .collect()
+}
+
+const DAY: u64 = 86400;
+
+/// Remove records whose usefulness has ended so the catalogue does not grow
+/// forever: expired tickets and placements, ended or long-stale sessions,
+/// idempotency results older than a day, and token rows unused for 30 days.
+/// Rows written before timestamps existed are stamped on their first sweep
+/// and only become eligible one full grace period later.
+fn sweep_expired_at(db: &Connection, now: u64) -> Result<usize> {
+    let mut removed = 0usize;
+    let mut delete = |kind: &str, id: &str| -> Result<()> {
+        db.execute(
+            "DELETE FROM records WHERE kind=? AND id=?",
+            params![kind, id],
+        )?;
+        removed += 1;
+        Ok(())
+    };
+    for kind in ["tickets", "placements"] {
+        for (id, v) in all_with_ids(db, kind)? {
+            if v["expires_at"].as_u64().unwrap_or(0) <= now {
+                delete(kind, &id)?;
+            }
+        }
+    }
+    for (id, v) in all_with_ids(db, "sessions")? {
+        let stale = v["heartbeat"].as_u64().unwrap_or(0).saturating_add(DAY) <= now;
+        if v["state"] == "ended" || stale {
+            delete("sessions", &id)?;
+        }
+    }
+    for (id, mut v) in all_with_ids(db, "requests")? {
+        match v["created_at"].as_u64() {
+            Some(t) if t.saturating_add(DAY) <= now => delete("requests", &id)?,
+            Some(_) => {}
+            None => {
+                v["created_at"] = json!(now);
+                set(db, "requests", &id, &v)?;
+            }
+        }
+    }
+    for (id, mut v) in all_with_ids(db, "users")? {
+        match v["last_seen"].as_u64() {
+            Some(t) if t.saturating_add(30 * DAY) <= now => delete("users", &id)?,
+            Some(_) => {}
+            None => {
+                v["last_seen"] = json!(now);
+                set(db, "users", &id, &v)?;
+            }
+        }
+    }
+    Ok(removed)
+}
 fn user(db: &Connection, headers: &HeaderMap) -> Result<Value> {
     let token = headers
         .get("authorization")
@@ -254,13 +321,23 @@ impl Server {
             return Err(bad("This database was created by a newer server"));
         }
         db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; CREATE TABLE IF NOT EXISTS records(kind TEXT NOT NULL,id TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(kind,id)); PRAGMA user_version=1;")?;
-        Ok(Self {
+        let server = Self {
             db: Arc::new(Mutex::new(db)),
             root,
             relay,
             quota,
             transfers: Arc::new(tokio::sync::Semaphore::new(2)),
-        })
+        };
+        match server.sweep_expired() {
+            Ok(n) if n > 0 => eprintln!("Catalog sweep removed {n} expired records"),
+            Ok(_) => {}
+            Err(e) => eprintln!("Catalog sweep at startup failed: {}", e.1),
+        }
+        Ok(server)
+    }
+    pub fn sweep_expired(&self) -> Result<usize> {
+        let db = self.db.lock().unwrap();
+        sweep_expired_at(&db, now())
     }
     pub fn router(self) -> Router {
         Router::new()
@@ -304,7 +381,9 @@ async fn register(
         secret()
     };
     let key = hash(token.as_bytes());
-    set(&tx, "users", &key, &result)?;
+    let mut stored = result.clone();
+    stored["last_seen"] = json!(now());
+    set(&tx, "users", &key, &stored)?;
     tx.commit()?;
     result["token"] = json!(token);
     Ok(Json(result))
@@ -531,7 +610,7 @@ async fn rpc(
             &tx,
             "requests",
             &key,
-            &json!({"fingerprint":fingerprint,"result":result}),
+            &json!({"fingerprint":fingerprint,"result":result,"created_at":now()}),
         )?;
     }
     tx.commit()?;
@@ -1027,6 +1106,102 @@ mod hn_tests {
             assert_eq!(get(&db, "versions", "v1").unwrap().unwrap(), original);
             assert!(same_user(&db, "legacy-b", "legacy-a").unwrap());
             assert!(!same_user(&db, "stranger", "legacy-a").unwrap());
+        }
+        let root = s.root.clone();
+        drop(s);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod sweep_tests {
+    use super::*;
+
+    fn server() -> Server {
+        Server::open(
+            std::env::temp_dir().join(format!("kokoverse-sweep-{}", Uuid::new_v4())),
+            "127.0.0.1:48001".into(),
+            1024,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn sweep_removes_only_expired_records_and_stamps_legacy_rows() {
+        let s = server();
+        let now = 100_000_000u64;
+        {
+            let db = s.db.lock().unwrap();
+            set(&db, "tickets", "t-old", &json!({"expires_at":now-1})).unwrap();
+            set(&db, "tickets", "t-new", &json!({"expires_at":now+100})).unwrap();
+            set(&db, "placements", "p-old", &json!({"expires_at":now-1})).unwrap();
+            set(&db, "placements", "p-new", &json!({"expires_at":now+60})).unwrap();
+            set(
+                &db,
+                "sessions",
+                "s-ended",
+                &json!({"state":"ended","heartbeat":now}),
+            )
+            .unwrap();
+            set(
+                &db,
+                "sessions",
+                "s-stale",
+                &json!({"state":"ready","heartbeat":now-DAY-1}),
+            )
+            .unwrap();
+            set(
+                &db,
+                "sessions",
+                "s-live",
+                &json!({"state":"ready","heartbeat":now}),
+            )
+            .unwrap();
+            set(
+                &db,
+                "requests",
+                "r-old",
+                &json!({"fingerprint":"f","result":{},"created_at":now-DAY-1}),
+            )
+            .unwrap();
+            set(&db, "requests", "r-legacy", &json!({"fingerprint":"f","result":{}})).unwrap();
+            set(&db, "users", "u-old", &json!({"last_seen":now-30*DAY-1})).unwrap();
+            set(&db, "users", "u-legacy", &json!({"id":"x","name":"Legacy"})).unwrap();
+
+            assert_eq!(sweep_expired_at(&db, now).unwrap(), 6);
+            for (kind, id) in [
+                ("tickets", "t-new"),
+                ("placements", "p-new"),
+                ("sessions", "s-live"),
+                ("requests", "r-legacy"),
+                ("users", "u-legacy"),
+            ] {
+                assert!(get(&db, kind, id).unwrap().is_some(), "{kind}/{id} kept");
+            }
+            for (kind, id) in [
+                ("tickets", "t-old"),
+                ("placements", "p-old"),
+                ("sessions", "s-ended"),
+                ("sessions", "s-stale"),
+                ("requests", "r-old"),
+                ("users", "u-old"),
+            ] {
+                assert!(get(&db, kind, id).unwrap().is_none(), "{kind}/{id} removed");
+            }
+            // Legacy rows are stamped, then age out one grace period later.
+            assert_eq!(
+                get(&db, "requests", "r-legacy").unwrap().unwrap()["created_at"],
+                json!(now)
+            );
+            assert_eq!(
+                get(&db, "users", "u-legacy").unwrap().unwrap()["last_seen"],
+                json!(now)
+            );
+            // One day later the short-lived rows kept above have expired too;
+            // only the stamped user row (30-day grace) survives.
+            assert_eq!(sweep_expired_at(&db, now + DAY + 1).unwrap(), 4);
+            assert!(get(&db, "requests", "r-legacy").unwrap().is_none());
+            assert!(get(&db, "users", "u-legacy").unwrap().is_some());
         }
         let root = s.root.clone();
         drop(s);
