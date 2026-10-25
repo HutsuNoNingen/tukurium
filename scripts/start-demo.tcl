@@ -5,31 +5,58 @@
 # Script configuration
 ##############################
 
-array set ::option_types { -Headless switch -Session arg -WorldFile arg }
-array set ::options { -Headless 0 -WorldFile "" }
+array set ::option_types {
+  -Headless switch
+  -Local switch -Online switch
+  -Session arg -WorldFile arg
+  -Profile arg
+}
+array set ::options {
+  -Headless 0
+  -Local 0 -Online 0
+  -WorldFile ""
+  -Profile "default"
+}
 
 # These are the executable program files we need.
 array set ::exe_paths {
-  adapter ./.tools/kokosync-adapter
-  engine ./target/debug/kokoverse-engine
-  relay ./.tools/kokosync-relay
+  adapter {./.tools/kokosync-adapter}
+  asset-server {./target/debug/kokoverse-asset-server}
+  engine {./target/debug/kokoverse-engine}
+  relay {./.tools/kokosync-relay}
+}
+array set ::exe_path_generators {
+  godot {exec which godot}
 }
 
 # These are the processes to run.
-set ::service_names [list relay host host-adapter guest guest-adapter]
-set ::service_names_not_headless [list host-gui guest-gui]
+array set ::service_modes {
+  demo {relay host-engine host-adapter host-gui guest-engine guest-adapter guest-gui}
+  demo-headless {relay host-engine host-adapter guest-engine guest-adapter}
+  local {relay local-asset-server local-engine local-gui}
+  local-headless {relay local-asset-server local-engine local-adapter}
+  online {relay online-asset-server client-engine client-adapter client-gui}
+}
+set ::service_names [list]
+
 array set ::service_specs {
-  relay {list $::exe_paths(relay) --http "127.0.0.1:48000" --quic "127.0.0.1:48001"}
-  host {
-    set result [list $::exe_paths(engine) --session $::options(-Session) --port 47000 --transport-port 47001]
+  relay {list relay --http "127.0.0.1:48000" --quic "127.0.0.1:48001"}
+  local-asset-server {list asset-server --listen 127.0.0.1:8787 --data-dir .run/local/server --relay 127.0.0.1:48001}
+
+  host-engine {
+    set result [list engine --session $::options(-Session) --port 47000 --transport-port 47001]
     if {$::options(-WorldFile) ne {}} { lappend result --load $::options(-WorldFile) }
     list {*}$result
   }
-  guest {list $::exe_paths(engine) --role guest --session $::options(-Session) --port 47010 --transport-port 47011}
-  host-adapter {list $::exe_paths(adapter) -session $::options(-Session) --engine 127.0.0.1:47001 --peer host --insecure-development}
-  guest-adapter {list $::exe_paths(adapter) -session $::options(-Session) --engine 127.0.0.1:47011 --peer guest --insecure-development}
-  host-gui {list $::exe_paths(godot) --path client-godot -- --port=47000 --session=$::options(-Session)}
-  guest-gui {list $::exe_paths(godot) --path client-godot -- --port=47010 --session=$::options(-Session)}
+  host-adapter {list adapter -session $::options(-Session) --engine 127.0.0.1:47001 --peer host --insecure-development}
+  host-gui {list godot --path client-godot -- --port=47000 --session=$::options(-Session)}
+
+  guest-engine {list engine --role guest --session $::options(-Session) --port 47010 --transport-port 47011}
+  guest-adapter {list adapter -session $::options(-Session) --engine 127.0.0.1:47011 --peer guest --insecure-development}
+  guest-gui {list godot --path client-godot -- --port=47010 --session=$::options(-Session)}
+
+  local-engine {list engine --server http://127.0.0.1:8787 --port 47000 --transport-port 47001 --profile .run/Kokoverse/profiles/$::options(-Profile)/profile.dat --data-dir .run/local/$::options(-Profile) --asset-dir .run/local/$::options(-Profile)/assets --adapter [EXE $::exe_paths(adapter)] --session $::options(-Session) --console --console-title "tukurium Engine ($::options(-Profile))"}
+  local-gui {list godot --path client-godot -- --port=47000 --session=lobby --close-with-engine --lof-file}
 }
 array set ::service_args {}
 
@@ -46,6 +73,7 @@ proc set_locale_en {} {
     err-session-id-invalid "Session must be 1-80 letters, numbers, underscores or hyphens."
     err-need-args-1 "\"%0\" takes one argument"
     err-exe-not-found "\"%0\" not found. Did you build the project first? Did you make sure that you are running this script from the project root?"
+    err-service-not-found "Service \"%0\" not found. Please specify it in the ::exe_paths array, or write code for the ::exe_path_generators array if the path is to be computed at runtime."
 
     found-executable "Found executable \"%0\" at \"%1\""
   }
@@ -87,26 +115,36 @@ proc main args {
   # Validate session ID
   if {![regexp -- {^[A-Za-z0-9_-]{1,80}$} $::options(-Session)]} { error [L err-session-id-invalid] }
 
-  # If this isn't a headless server, add some more things
-  if {!$::options(-Headless)} {
-    lappend ::service_names {*}$::service_names_not_headless
-
-    # TODO: Windows-compatible version of this?
-    set ::exe_paths(godot) [exec which godot]
+  # Select a mode
+  if {$::options(-Local)} {
+    set mode local
+    if {$::options(-Headless)} { set mode local-headless }
+  } elseif {$::options(-Online)} {
+    # TODO!
+    set mode online
+  } else {
+    set mode demo
+    if {$::options(-Headless)} { set mode demo-headless }
   }
 
-  # Ensure everything exists
-  foreach key [array names ::exe_paths] {
-    set path [EXE $::exe_paths($key)]
+  set ::service_names $::service_modes($mode)
+
+  # Process arguments for services
+  # Also ensure everything exists
+  foreach service_name $::service_names {
+    set prog_args [lassign [eval $::service_specs($service_name)] prog_cmd]
+    if {![info exists ::exe_paths($prog_cmd)]} {
+      if {![info exists ::exe_path_generators($prog_cmd)]} {
+        error [L err-service-not-found $prog_cmd]
+      }
+      set ::exe_paths($prog_cmd) [eval $::exe_path_generators($prog_cmd)]
+    }
+    set path [EXE $::exe_paths($prog_cmd)]
     if {![file exists $path]} {
       error [L err-exe-not-found $path]
     }
-    puts [L found-executable $key $path]
-  }
-
-  # Process arguments for services
-  foreach service_name $::service_names {
-    set ::service_args($service_name) [eval $::service_specs($service_name)]
+    puts [L found-executable $prog_cmd $path]
+    set ::service_args($service_name) [list $::exe_paths($prog_cmd) {*}$prog_args]
     puts "Arguments for service \"$service_name\": $::service_args($service_name)"
   }
 
@@ -224,6 +262,7 @@ proc on_service_readable {service_name} {
       # TODO: Consider respawning! --GM
       set ::stop_event_loop [list closed $service_name]
       puts "ERROR: Unexpected EOF for service \"$service_name\""
+      fileevent $process readable {}
     } else {
       set svc .tabs.$service_name
       $svc.text insert end $data
