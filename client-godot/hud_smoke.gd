@@ -55,6 +55,19 @@ func run() -> void:
 	if scene.edit_mode or scene.hud.dock_buttons.inspector.visible: push_error("Startup did not use Play mode"); quit(1); return
 	if not scene.social_panels.left.visible or not scene.social_panels.right.visible: push_error("Session side panels are missing"); quit(1); return
 	if not await until(func(): return scene.social_panels.count_label.text=="1人","Participant list did not receive presence"): quit(1); return
+	var initial_window_size := root.size
+	var initial_canvas_size: Vector2=scene.hud.root.size
+	var initial_bar_height: float=scene.hud.root.get_node("TopBar").size.y
+	var initial_chat_width: float=scene.social_panels.right.size.x
+	root.size=initial_window_size+Vector2i(256,128)
+	await process_frame
+	await process_frame
+	if scene.hud.root.size.x<initial_canvas_size.x+250.0 or scene.hud.root.size.y<initial_canvas_size.y+120.0: push_error("Resizing the client enlarged UI instead of its canvas"); quit(1); return
+	if absf(scene.hud.root.get_node("TopBar").size.y-initial_bar_height)>1.0 or absf(scene.social_panels.right.size.x-initial_chat_width)>1.0: push_error("Top bar or chat panel scaled with the window"); quit(1); return
+	if absf(scene.social_panels.right.get_global_rect().end.x-float(root.size.x)+16.0)>2.0: push_error("Chat panel did not follow the new right edge"); quit(1); return
+	root.size=initial_window_size
+	await process_frame
+	await process_frame
 	for top_button in scene.hud.root.get_node("TopBar").find_children("*", "Button", true, false):
 		if top_button.text in ["ユーザー","セッション"]: push_error("Old top bar entry remains"); quit(1); return
 	click(root.size*0.5)
