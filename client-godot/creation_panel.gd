@@ -9,6 +9,7 @@ var selected := 0
 var create_button: Button
 var slot_button: Button
 var text_button: Button
+var camera_button: Button
 var status: Label
 var busy := false
 
@@ -98,6 +99,12 @@ func build_ui() -> void:
 	status=label("",18)
 	status.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	footer.add_child(status)
+	camera_button=Button.new()
+	camera_button.text="◉ Camera を作成"
+	camera_button.custom_minimum_size=Vector2(190,48)
+	camera_button.focus_mode=Control.FOCUS_NONE
+	camera_button.pressed.connect(spawn_camera)
+	footer.add_child(camera_button)
 	var presets := VBoxContainer.new()
 	presets.add_theme_constant_override("separation",4)
 	footer.add_child(presets)
@@ -168,6 +175,7 @@ func refresh(object: Dictionary) -> void:
 	for card in cards: card.disabled=not app.editable
 	slot_button.disabled=busy or not app.editable
 	text_button.disabled=busy or not app.editable
+	camera_button.disabled=busy or not app.editable
 	create_button.disabled=busy or not app.editable
 
 func finish_all() -> void:
@@ -202,22 +210,29 @@ func spawn_slot(with_text: bool) -> void:
 		else: status.text=result.get("message","作成できませんでした"))
 
 func spawn_selected(index: int = -1) -> void:
+	var chosen: int=selected if index<0 else index
+	spawn_shape(PRIMITIVES.SHAPES[chosen],PRIMITIVES.NAMES[chosen])
+
+func spawn_camera() -> void:
+	spawn_shape("camera","Camera")
+
+func spawn_shape(shape: String, name_text: String) -> void:
 	if busy or not app.editable: return
 	busy=true
 	create_button.disabled=true
 	slot_button.disabled=true
 	text_button.disabled=true
+	camera_button.disabled=true
 	status.text="作成中…"
-	var chosen: int=selected if index<0 else index
-	var shape: String=PRIMITIVES.SHAPES[chosen]
-	var name_text: String=PRIMITIVES.NAMES[chosen]
 	var position: Vector3=app.camera.global_position-app.camera.global_basis.z*4.0+app.camera.global_basis.x*2.2
-	position.y=app.player_position.y+(0.03 if shape=="grid" else 0.75)
-	manager.command({"kind":"structure","command":{"action":"import_asset","name":name_text,"position":[position.x,position.y,position.z],"rotation":[0,0,0,1],"visual":{"kind":"primitive","shape":shape}}},func(result):
+	position.y=app.player_position.y+(0.03 if shape=="grid" else (1.6 if shape=="camera" else 0.75))
+	var orientation: Quaternion=app.camera.global_basis.get_rotation_quaternion() if shape=="camera" else Quaternion.IDENTITY
+	manager.command({"kind":"structure","command":{"action":"import_asset","name":name_text,"position":[position.x,position.y,position.z],"rotation":[orientation.x,orientation.y,orientation.z,orientation.w],"visual":{"kind":"primitive","shape":shape}}},func(result):
 		busy=false
 		create_button.disabled=not app.editable
 		slot_button.disabled=not app.editable
 		text_button.disabled=not app.editable
+		camera_button.disabled=not app.editable
 		if result.ok:
 			app.select_object(result.selected.instance_id)
 			manager.close_panel(panel_id)

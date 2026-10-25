@@ -181,7 +181,7 @@ func build_dock() -> void:
 	dock=HBoxContainer.new()
 	dock.add_theme_constant_override("separation",10)
 	holder.add_child(dock)
-	for item in [["sessions","⌂","セッション"],["library","▦","インベントリ"],["workshop","✦","ワークショップ"],["inspector","▣","インスペクタ"],["settings","⚙","設定"]]:
+	for item in [["sessions","⌂","セッション"],["library","▦","インベントリ"],["workshop","✦","ワークショップ"],["camera","◉","カメラ"],["inspector","▣","インスペクタ"],["settings","⚙","設定"]]:
 		var key: String=item[0]
 		var tile := Button.new()
 		tile.text=item[1]+"\n"+item[2]
@@ -246,6 +246,8 @@ func set_dock_open(open: bool, animate: bool = true) -> void:
 func open_dock(key: String) -> void:
 	if key=="inspector":
 		if app.edit_mode: app.world_panels.toggle_dock_inspector(app.selected_id)
+	elif key=="camera":
+		app.camera_tool.open(app.selected_id)
 	elif key=="settings":
 		toggle_menu()
 	elif workspace != null and workspace.enabled:

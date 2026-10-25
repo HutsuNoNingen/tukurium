@@ -13,7 +13,9 @@ const WORLD_HUD = preload("res://world_hud.gd")
 const SOCIAL_PANELS = preload("res://social_panels.gd")
 const PRIMITIVE_MESH = preload("res://primitive_mesh.gd")
 const RENDER_HIERARCHY = preload("res://render_hierarchy.gd")
+const CAMERA_TOOL = preload("res://camera_tool.gd")
 var render_hierarchy = RENDER_HIERARCHY.new()
+var camera_tool = CAMERA_TOOL.new()
 var hud = WORLD_HUD.new()
 var social_panels = SOCIAL_PANELS.new()
 var requests = REQUEST_BROKER.new()
@@ -164,6 +166,8 @@ func _ready() -> void:
 	social_panels.setup(self)
 	add_child(hud)
 	hud.setup(self)
+	add_child(camera_tool)
+	camera_tool.setup(self)
 	set_view_mode(1, false)
 	connect_engine()
 
@@ -821,6 +825,7 @@ func disconnect_engine(message: String) -> void:
 	asset_importer.disconnected()
 	cancel_hand_grab()
 	set_remote_previews([])
+	camera_tool.close_without_commit()
 	if gizmo.dragging: gizmo.cancel_drag()
 	if gizmo_preview_active: restore_gizmo_visual()
 	tcp.disconnect_from_host()
@@ -1306,6 +1311,7 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 			render_nodes.erase(id)
 	for source in image_textures.keys():
 		if not used_images.has(source): image_textures.erase(source)
+	camera_tool.world_updated()
 	if not objects.has(selected_id):
 		selected_id = "" if objects.is_empty() else str(objects.keys()[0])
 		dirty.clear()
@@ -1338,6 +1344,21 @@ func create_render_node(object: Dictionary) -> MeshInstance3D:
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	node.material_override = mat
+	if object.visual.get("kind") == "primitive" and object.visual.shape == "camera":
+		var lens := MeshInstance3D.new()
+		lens.name = "Lens"
+		var cylinder := CylinderMesh.new()
+		cylinder.top_radius = 0.22
+		cylinder.bottom_radius = 0.22
+		cylinder.height = 0.18
+		lens.mesh = cylinder
+		lens.rotation.x = PI * 0.5
+		lens.position.z = -0.51
+		var lens_material := StandardMaterial3D.new()
+		lens_material.albedo_color = Color("14222f")
+		lens_material.metallic = 0.35
+		lens.material_override = lens_material
+		node.add_child(lens)
 	var body := StaticBody3D.new()
 	body.set_meta("object_id", object.address.instance_id)
 	var collision := CollisionShape3D.new()
@@ -1429,6 +1450,7 @@ func set_view_mode(mode: int, capture: bool = true) -> void:
 	view_mode.release_focus()
 
 func gameplay_keyboard_blocked() -> bool:
+	if camera_tool.active: return true
 	if hud.blocking(): return true
 	if world_panels.has_window_focus(): return true
 	if service_panel.enabled and service_panel.shade.visible: return true
@@ -1468,6 +1490,9 @@ func refresh_fields() -> void:
 	filling = false
 
 func _input(event: InputEvent) -> void:
+	if camera_tool.handle_input(event):
+		get_viewport().set_input_as_handled()
+		return
 	if hud.handle_input(event):
 		get_viewport().set_input_as_handled()
 		return
@@ -1544,6 +1569,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not hit.is_empty() and hit.collider.has_meta("object_id"):
 			var hit_id := str(hit.collider.get_meta("object_id"))
 			select_object(hit_id)
+			if event.double_click and objects.has(hit_id) and objects[hit_id].get("visual",{}).get("shape","") == "camera":
+				camera_tool.open(hit_id)
+				get_viewport().set_input_as_handled()
+				return
 			script_editor.interact(hit_id)
 	if event is InputEventKey and event.keycode == KEY_F and event.pressed: focus_selected()
 	if event is InputEventKey and event.keycode == KEY_SPACE and event.pressed and not event.echo: try_jump()

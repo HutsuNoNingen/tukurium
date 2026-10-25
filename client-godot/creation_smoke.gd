@@ -131,6 +131,60 @@ func run() -> void:
 			push_error("Wrong procedural mesh: expected "+PRIMITIVES.SHAPES[index]+", got "+str(object.visual)+", pending="+str(scene.pending)); quit(1); return
 		if not scene.first_person or scene.view_mode.selected!=1: push_error("Creation switched away from FPS"); quit(1); return
 		if not scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_CAPTURED: push_error("Creating an object released FPS mouse capture"); quit(1); return
+	scene.hud.open_creation()
+	if not await until(func(): return scene.world_panels.panels.size()==1,"Creation panel did not reopen for Camera"): quit(1); return
+	surface=scene.world_panels.panels.values()[0]
+	panel=surface.content
+	await click_control(scene,surface,panel.camera_button)
+	if not await until(func(): return scene.current.get("visual",{}).get("shape","")=="camera" and scene.world_panels.panels.is_empty(),"Camera preset was not created"): quit(1); return
+	var camera_id: String=scene.selected_id
+	if scene.objects[camera_id].visual.shape!="camera" or not scene.render_nodes[camera_id].has_node("Lens"):
+		push_error("Camera item is missing its shared body or lens"); quit(1); return
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--photo-dir="): scene.camera_tool.photo_directory=arg.trim_prefix("--photo-dir=")
+	scene.release_cursor()
+	scene.hud.set_dock_open(true,false)
+	await process_frame
+	await process_frame
+	click(scene.hud.dock_buttons.camera.get_global_rect().get_center())
+	if not scene.camera_tool.active or scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE:
+		push_error("Camera viewfinder did not release FPS input: active="+str(scene.camera_tool.active)+" fps="+str(scene.fps_active)+" mouse="+str(Input.mouse_mode)+" dock="+str(scene.hud.dock_holder.visible)); quit(1); return
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--screenshot="):
+			await RenderingServer.frame_post_draw
+			root.get_texture().get_image().save_png(arg.trim_prefix("--screenshot=").replace(".png","-camera.png"))
+	var camera_start: Vector3=scene.camera_tool.position
+	var player_start: Vector3=scene.player_target_position
+	var fly := InputEventKey.new()
+	fly.physical_keycode=KEY_W; fly.pressed=true
+	root.push_input(fly,true)
+	await create_timer(0.25).timeout
+	fly=fly.duplicate(); fly.pressed=false
+	root.push_input(fly,true)
+	if scene.camera_tool.position.distance_to(camera_start)<0.2 or scene.player_target_position.distance_to(player_start)>0.1:
+		push_error("Drone movement did not stay separate from the player"); quit(1); return
+	var view_center: Vector2=scene.camera_tool.view.get_global_rect().get_center()
+	var turn := InputEventMouseButton.new()
+	turn.button_index=MOUSE_BUTTON_RIGHT; turn.position=view_center; turn.pressed=true
+	root.push_input(turn,true)
+	var drone_yaw_before: float=scene.camera_tool.yaw
+	var drag := InputEventMouseMotion.new()
+	drag.position=view_center; drag.relative=Vector2(20,-8)
+	root.push_input(drag,true)
+	turn=turn.duplicate(); turn.pressed=false
+	root.push_input(turn,true)
+	if scene.camera_tool.looking or is_equal_approx(scene.camera_tool.yaw,drone_yaw_before):
+		push_error("Drone right-drag did not rotate the camera"); quit(1); return
+	if not await until(func(): return scene.remote_previews.has(camera_id),"Drone live preview did not reach the client"): quit(1); return
+	click(scene.camera_tool.shutter_button.get_global_rect().get_center())
+	if not await until(func(): return scene.camera_tool.captured_image!=null and not scene.camera_tool.captured_image.is_empty(),"Camera shutter did not capture the world"): quit(1); return
+	click(scene.camera_tool.save_button.get_global_rect().get_center())
+	var saved_photo: String=scene.camera_tool.status.text.trim_prefix("保存: ")
+	if not FileAccess.file_exists(saved_photo): push_error("Camera did not save a local photo: "+scene.camera_tool.status.text); quit(1); return
+	click(scene.camera_tool.share_button.get_global_rect().get_center())
+	if not await until(func(): return scene.objects.values().any(func(o): return o.visual.kind=="image" and str(o.fields[0].value).begins_with("Photo ")),"Camera did not share an image item"): quit(1); return
+	scene.camera_tool.park()
+	if not await until(func(): return not scene.camera_tool.active and Vector3(scene.objects[camera_id].world_position[0],scene.objects[camera_id].world_position[1],scene.objects[camera_id].world_position[2]).distance_to(camera_start)>0.2,"Drone pose did not commit"): quit(1); return
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--screenshot="):
 			await RenderingServer.frame_post_draw
@@ -210,7 +264,7 @@ func run() -> void:
 	escape.keycode=KEY_ESCAPE; escape.pressed=true
 	root.push_input(escape,true)
 	if not scene.world_panels.panels.has(id) or Input.mouse_mode!=Input.MOUSE_MODE_VISIBLE: push_error("Esc deleted world panel or captured cursor"); quit(1); return
-	print("CREATION SMOKE PASS: eight shapes, empty and text Slot presets, inspector component editing and text child, close after success")
+	print("CREATION SMOKE PASS: nine shapes, drone preview and pose, local and shared photos, empty and text Slot presets, inspector component editing and text child")
 	scene.queue_free()
 	await process_frame
 	await process_frame

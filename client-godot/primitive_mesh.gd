@@ -29,6 +29,10 @@ static func create(shape: String) -> PrimitiveMesh:
 			var mesh := QuadMesh.new()
 			mesh.size=Vector2(1.5,1.5)
 			return mesh
+		"camera":
+			var mesh := BoxMesh.new()
+			mesh.size=Vector3(0.8,0.5,0.9)
+			return mesh
 		_:
 			var mesh := BoxMesh.new()
 			mesh.size=Vector3.ONE*1.5
