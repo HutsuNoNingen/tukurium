@@ -21,7 +21,7 @@ var manager
 var tree := SlotTree.new()
 var root_label := Label.new()
 var filling := false
-var signature := ""
+var signature: Array = []
 var tree_state: Dictionary = {}
 var child_button: Button
 var child_text_button: Button
@@ -99,10 +99,15 @@ func move_object(id: String, parent_id: Variant) -> void:
 
 func refresh() -> void:
 	tree_state = inspector.panel_state.inspector.get("tree",{"root":null,"collapsed":[]})
-	var entries: Array = []
+	# Rebuild key as data: (id, parent instance, name-field revision) per
+	# object. Rust bumps a field's revision on every write, so the key
+	# changes exactly when the displayed hierarchy or names do — without
+	# stringifying every object. Only the small tree_state stays a string.
+	var entries_key: Array = []
 	for id in manager.app.objects:
-		entries.append([id,manager.app.objects[id].get("parent"),manager.field_data(id,"name").get("value",id)])
-	var next := JSON.stringify([entries,tree_state,inspector.target_id])
+		var parent: Variant = manager.app.objects[id].get("parent")
+		entries_key.append([id, parent.instance_id if parent is Dictionary else "", str(manager.field_data(id, "name").get("revision", ""))])
+	var next: Array = [entries_key, JSON.stringify(tree_state), inspector.target_id]
 	if next == signature: return
 	signature = next
 	filling = true
