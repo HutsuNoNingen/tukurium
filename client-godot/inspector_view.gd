@@ -27,6 +27,9 @@ var scroll_pending := -1.0
 var scroll_inflight := false
 var scroll_due := 0
 var remote_fields: Dictionary = {}
+var drive_render_signature: Array = []
+var sessions_signature: Array = []
+var driven_values_signature: Dictionary = {}
 var target_change_pending := false
 var pending_target: Variant = null
 var close_when_ready := false
@@ -218,6 +221,9 @@ func build_fields() -> void:
 	controls.clear()
 	drive_labels.clear()
 	drive_buttons.clear()
+	drive_render_signature.clear()
+	sessions_signature.clear()
+	driven_values_signature.clear()
 	reference_chips.clear()
 	reference_values.clear()
 	for child in component_actions.get_children():
@@ -466,17 +472,40 @@ func apply_dropped_value(field: String, value: Variant) -> void:
 	changed(field,controls[field][0],true)
 
 func refresh_drives() -> void:
+	# Compose what each field's drive UI should show and write only
+	# the controls whose rendered state actually changed. The label
+	# text depends on the driver's enabled flag and the field's shared
+	# base value, both of which change on edits — not per frame — so
+	# steady-state ticks now do no control writes at all.
+	var previous: Dictionary = {}
+	for entry in drive_render_signature: previous[entry[0]] = entry
+	var rendered: Array = []
 	for field in drive_labels:
 		var driver: Dictionary = manager.field_driver(target_id, field)
-		drive_labels[field].visible = not driver.is_empty()
-		drive_buttons[field].visible = not driver.is_empty()
-		if driver.is_empty(): continue
+		if driver.is_empty():
+			rendered.append([field, false, "", ""])
+			continue
 		var data: Dictionary = manager.field_data(target_id, field)
-		drive_labels[field].text = "Local Drive · " + ("running" if driver.enabled else "paused") + "\nShared base: " + value_text(data.value, data.value_type)
-		drive_buttons[field].text = "Open " + driver.schema.name + " →"
-		if edits.has(field):
+		rendered.append([field, true,
+			"Local Drive · " + ("running" if driver.enabled else "paused") + "\nShared base: " + value_text(data.value, data.value_type),
+			"Open " + driver.schema.name + " →"])
+	for entry in rendered:
+		var field: String = entry[0]
+		var prev: Array = previous.get(field, [])
+		if entry == prev: continue
+		drive_labels[field].visible = entry[1]
+		drive_buttons[field].visible = entry[1]
+		if not entry[1]: continue
+		drive_labels[field].text = entry[2]
+		drive_buttons[field].text = entry[3]
+		# A newly driven field's shared draft is meaningless; release
+		# it. (Previously this ran every frame; after the first frame
+		# the flags were already in this state, so gating on the
+		# transition preserves the outcome.)
+		if (prev.is_empty() or not prev[1]) and edits.has(field):
 			edits[field].dirty = false
 			edits[field].release = true
+	drive_render_signature = rendered
 
 func playback(action: String) -> void:
 	var field: Dictionary = manager.field_data(target_id, "playback")
@@ -644,10 +673,17 @@ func edit_result(result: Dictionary, field: String) -> void:
 func tick() -> void:
 	script_view.tick()
 	refresh_drives()
+	# Driven values reach the input fields only when the target's
+	# driven values actually changed; a running Drive changes them
+	# per frame (fill as before), a paused or absent one leaves the
+	# fields — and the user's caret — alone.
 	if not drive_labels.is_empty():
-		filling = true
-		fill_values()
-		filling = false
+		var driven: Dictionary = manager.app.driven_objects.get(target_id, {})
+		if driven != driven_values_signature:
+			driven_values_signature = driven.duplicate(true)
+			filling = true
+			fill_values()
+			filling = false
 	if not manager.app.editable: return
 	var now := Time.get_ticks_msec()
 	if scroll_pending >= 0 and not scroll_inflight and now >= scroll_due:
@@ -723,6 +759,30 @@ func disconnected() -> void:
 	refresh_sessions()
 
 func refresh_sessions() -> void:
+	# Gate on the session-derived state this function renders: for
+	# each field, whether it is read-only and the remote draft (if
+	# any) down to its text/caret/selection. When none of that
+	# changed since the last run, every control write below would
+	# repeat the current state — including re-setting the remote
+	# draft's text and caret every frame — so skip the run.
+	var signature: Array = []
+	for field in controls:
+		var remote: Dictionary = {}
+		for session in manager.sessions:
+			var context: Variant = session.get("context")
+			var same_context: bool = context == null if desktop else context != null and context.source.instance_id == panel_id
+			if session.target.instance_id == target_id and session.field_id == field and (session.client_id != input_client_id or not same_context):
+				remote = session
+		var readonly: bool = not manager.app.editable or not remote.is_empty() or not manager.field_driver(target_id, field).is_empty()
+		var display_name := ""
+		if not remote.is_empty():
+			var owner: String = str(remote.owner)
+			display_name = str(manager.app.participant_names.get("local" if owner.begins_with("local-") else owner, "Another user"))
+		var draft: Dictionary = remote.get("draft", {})
+		signature.append([field, readonly, str(remote.get("owner", "")), display_name,
+			str(draft.get("text", "")), int(draft.get("caret", 0)), draft.get("selection", []), str(draft.get("part", ""))])
+	if signature == sessions_signature: return
+	sessions_signature = signature
 	var previously_remote := not remote_fields.is_empty()
 	remote_fields.clear()
 	for field in controls:
