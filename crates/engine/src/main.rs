@@ -10,6 +10,7 @@ mod management;
 mod media_clock;
 mod persistence;
 mod previews;
+mod state_rules;
 use kokoverse_core::{WorldModel, replication::REGISTRY};
 use kokoverse_protocol::{
     AvatarPose, GrabView, InteractionRay, ObjectPreview, ParticipantView, PlayerInput,
@@ -628,7 +629,7 @@ impl Engine {
                 let envelope = self.envelope(body);
                 self.send(client, envelope);
             } else if let Some((peer, epoch)) = capture.requester.split_once(':')
-                && self.remote_epochs.get(peer).is_some_and(|current| current == epoch)
+                && state_rules::epoch_matches(&self.remote_epochs, peer, epoch)
             {
                 self.network(Some(peer), body);
             }
@@ -664,7 +665,7 @@ impl Engine {
                     json!({"kind":"result", "command_id":command_id, "ok":false, "message":message, "snapshot":REGISTRY.encode_world(&self.model.snapshot())})
                 }
             };
-            if self.order.len() >= 4096
+            if state_rules::outcome_cache_full(self.order.len())
                 && let Some(old) = self.order.pop_front()
             {
                 self.outcomes.remove(&old);
@@ -751,7 +752,13 @@ impl Engine {
             return;
         }
         if envelope.body["kind"] == "chat_send" {
-            if !self.synced || (self.service.is_some() && !self.managed_verified) || envelope.authority_epoch != self.epoch {
+            if !state_rules::accepts_local(
+                self.synced,
+                self.service.is_some(),
+                self.managed_verified,
+                &envelope.authority_epoch,
+                &self.epoch,
+            ) {
                 self.reply(Origin::Local(id),json!({"kind":"chat_error","message":"Join the session before sending chat"}));
             } else if let Some(text) = envelope.body["text"].as_str() {
                 if self.host {
@@ -874,7 +881,13 @@ impl Engine {
             .or_else(|| envelope.body["command"]["command_id"].as_str())
             .unwrap_or("")
             .to_owned();
-        if !self.synced || (self.service.is_some() && !self.managed_verified) || envelope.authority_epoch != self.epoch {
+        if !state_rules::accepts_local(
+                self.synced,
+                self.service.is_some(),
+                self.managed_verified,
+                &envelope.authority_epoch,
+                &self.epoch,
+            ) {
             let e = self.envelope(json!({"kind":"result", "command_id":requested_id, "ok":false, "message":"Reconnect to the current host before editing"}));
             self.send(id, e);
             return;
@@ -944,10 +957,7 @@ impl Engine {
                 }
                 if let (Some(peer), Some(epoch)) =
                     (value["peer"].as_str(), value["publisher_epoch"].as_str())
-                    && self
-                        .remote_epochs
-                        .get(peer)
-                        .is_some_and(|current| current == epoch)
+                    && state_rules::epoch_matches(&self.remote_epochs, peer, epoch)
                 {
                     self.remote_epochs.remove(peer);
                     let id = format!("{peer}:{epoch}");
@@ -994,11 +1004,7 @@ impl Engine {
                 else {
                     return;
                 };
-                if !self
-                    .remote_epochs
-                    .get(peer)
-                    .is_some_and(|current| current == epoch)
-                {
+                if !state_rules::epoch_matches(&self.remote_epochs, peer, epoch) {
                     return;
                 }
                 let Ok(e) = serde_json::from_value::<Envelope>(value["body"].clone()) else {
@@ -1112,9 +1118,9 @@ impl Engine {
                             json!({"kind":"edit_sessions","sessions":self.edit_sessions.views()}),
                         );
                     } else if e.body["kind"] == "chat_send" && e.authority_epoch == self.epoch {
-                        if let (Some(current_epoch),Some(publisher_epoch),Some(text)) =
-                            (self.remote_epochs.get(peer),value["publisher_epoch"].as_str(),e.body["text"].as_str())
-                            && current_epoch == publisher_epoch {
+                        if let (Some(publisher_epoch),Some(text)) =
+                            (value["publisher_epoch"].as_str(),e.body["text"].as_str())
+                            && state_rules::epoch_matches(&self.remote_epochs, peer, publisher_epoch) {
                                 self.submit_chat(&format!("{peer}:{publisher_epoch}"),text,Origin::Peer(peer.into()));
                         }
                     } else if e.body["kind"] == "edit_session" && e.authority_epoch == self.epoch {
@@ -1453,14 +1459,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             _ = retry.tick() => {
                 engine.expire_assets();
                 engine.clock.expire();
-                if engine.pending.values().any(|(_, time, _)| time.elapsed() > Duration::from_secs(10)) {
+                if state_rules::any_pending_expired(engine.pending.values().map(|(_, time, _)| time.elapsed())) {
                     engine.pending.clear();
                     engine.deferred_results.clear();
                     engine.synced = false;
                     engine.status("Edit result unknown. Resynchronizing; check current values before retrying.");
                 }
                 if !engine.host && !engine.synced && engine.adapter.is_some() {engine.request_snapshot();}
-                let stale:Vec<_> = engine.remote_seen.iter().filter(|(_,time)| time.elapsed()>Duration::from_secs(5)).map(|(id,_)| id.clone()).collect();
+                let stale:Vec<_> = engine.remote_seen.iter().filter(|(_,time)| state_rules::peer_stale(time.elapsed())).map(|(id,_)| id.clone()).collect();
                 for id in stale { engine.remote_seen.remove(&id); engine.model.remove_participant(&id); engine.chat_last_sent.remove(&id); engine.remote_rays.remove(&id); engine.rays_dirty=true; }
                 // Placement tokens expire server-side after 60s; remembering them
                 // longer only needs a margin for clock skew, so the set stays bounded.
