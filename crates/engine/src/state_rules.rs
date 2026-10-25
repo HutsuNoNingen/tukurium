@@ -48,9 +48,16 @@ pub fn pending_expired(waited: Duration) -> bool {
     waited > PENDING_TIMEOUT
 }
 
-/// True when any pending request in the set has expired.
-pub fn any_pending_expired(mut waits: impl Iterator<Item = Duration>) -> bool {
-    waits.any(pending_expired)
+/// Keys of the pending requests that have waited past the timeout.
+/// Expiry is per request: one lost result must not fail unrelated
+/// edits that are still waiting normally.
+pub fn expired_pending(
+    waits: impl Iterator<Item = (String, Duration)>,
+) -> Vec<String> {
+    waits
+        .filter(|(_, waited)| pending_expired(*waited))
+        .map(|(key, _)| key)
+        .collect()
 }
 
 /// True when a remote participant has not been seen within the window.
@@ -104,13 +111,17 @@ mod tests {
         assert!(!pending_expired(Duration::from_secs(9)));
         assert!(!pending_expired(PENDING_TIMEOUT)); // exactly at the limit: still waiting
         assert!(pending_expired(PENDING_TIMEOUT + Duration::from_millis(1)));
-        assert!(!any_pending_expired(
-            [Duration::from_secs(1), Duration::from_secs(3)].into_iter()
-        ));
-        assert!(any_pending_expired(
-            [Duration::from_secs(1), Duration::from_secs(30)].into_iter()
-        ));
-        assert!(!any_pending_expired(std::iter::empty()));
+        // Expiry selects only the timed-out requests, never the whole set.
+        let waits = [
+            ("fresh".to_string(), Duration::from_secs(1)),
+            ("lost".to_string(), Duration::from_secs(30)),
+            ("also-fresh".to_string(), PENDING_TIMEOUT),
+        ];
+        assert_eq!(
+            expired_pending(waits.into_iter()),
+            vec!["lost".to_string()]
+        );
+        assert!(expired_pending(std::iter::empty()).is_empty());
     }
 
     #[test]

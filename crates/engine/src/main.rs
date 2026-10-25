@@ -21,7 +21,7 @@ use kokoverse_protocol::{
 };
 use serde_json::{Value, json};
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     time::Duration,
 };
 use tokio::{
@@ -122,8 +122,8 @@ struct Engine {
     clients: HashMap<u64, mpsc::Sender<Value>>,
     pending: HashMap<String, (u64, std::time::Instant, String)>,
     deferred_results: HashMap<String, Value>,
-    tickets: HashMap<u64, (String, String, Origin)>,
-    inflight: HashSet<String>,
+    tickets: HashMap<u64, (String, String, Vec<Origin>)>,
+    inflight: HashMap<String, u64>,
     peer: String,
     input_owner: Option<(u64, std::time::Instant)>,
     last_tick: std::time::Instant,
@@ -559,7 +559,16 @@ impl Engine {
             self.reply(origin, result);
             return;
         }
-        if self.inflight.contains(&key) {
+        if let Some(&ticket) = self.inflight.get(&key) {
+            // Redelivery of a command that is still being processed
+            // (reliable-delivery resend, adapter reconnect): remember
+            // this origin as well so the result reaches every sender
+            // instead of the resender waiting for a timeout.
+            if let Some((_, _, origins)) = self.tickets.get_mut(&ticket)
+                && !origins.contains(&origin)
+            {
+                origins.push(origin);
+            }
             return;
         }
         self.edit_sessions
@@ -592,8 +601,8 @@ impl Engine {
         };
         match queued {
             Ok(ticket) => {
-                self.inflight.insert(key.clone());
-                self.tickets.insert(ticket, (key, command_id, origin));
+                self.inflight.insert(key.clone(), ticket);
+                self.tickets.insert(ticket, (key, command_id, vec![origin]));
             }
             Err(message) => self.reply(
                 origin,
@@ -650,7 +659,7 @@ impl Engine {
                 }
                 continue;
             }
-            let Some((key, command_id, origin)) = self.tickets.remove(&outcome.ticket) else {
+            let Some((key, command_id, origins)) = self.tickets.remove(&outcome.ticket) else {
                 continue;
             };
             self.inflight.remove(&key);
@@ -676,7 +685,9 @@ impl Engine {
                 object.remove("snapshot");
             }
             self.outcomes.insert(key, cached);
-            replies.push((origin, result));
+            for origin in origins {
+                replies.push((origin, result.clone()));
+            }
         }
         if changed {
             self.publish_state();
@@ -1379,7 +1390,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         pending: HashMap::new(),
         deferred_results: HashMap::new(),
         tickets: HashMap::new(),
-        inflight: HashSet::new(),
+        inflight: HashMap::new(),
         peer: arg("--peer", if host { "host" } else { "guest" }),
         input_owner: None,
         last_tick: std::time::Instant::now(),
@@ -1459,11 +1470,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             _ = retry.tick() => {
                 engine.expire_assets();
                 engine.clock.expire();
-                if state_rules::any_pending_expired(engine.pending.values().map(|(_, time, _)| time.elapsed())) {
-                    engine.pending.clear();
-                    engine.deferred_results.clear();
-                    engine.synced = false;
-                    engine.status("Edit result unknown. Resynchronizing; check current values before retrying.");
+                // Expire only the requests whose results were lost:
+                // each affected client gets an explicit failure for its
+                // own edit, and unrelated pending edits keep waiting.
+                // The world itself is still in sync (commits keep
+                // flowing), so this no longer forces a full resync.
+                // A result that arrives late is ignored because its
+                // pending entry is gone.
+                for command in state_rules::expired_pending(engine.pending.iter().map(|(command, (_, time, _))| (command.clone(), time.elapsed()))) {
+                    let Some((id, _, requested_id)) = engine.pending.remove(&command) else { continue };
+                    engine.deferred_results.remove(&command);
+                    engine.reply(Origin::Local(id), json!({"kind":"result","command_id":requested_id,"ok":false,"message":"Edit result timed out; check current values before retrying."}));
+                    engine.status("An edit result timed out and was failed; other edits are unaffected.");
                 }
                 if !engine.host && !engine.synced && engine.adapter.is_some() {engine.request_snapshot();}
                 let stale:Vec<_> = engine.remote_seen.iter().filter(|(_,time)| state_rules::peer_stale(time.elapsed())).map(|(id,_)| id.clone()).collect();
