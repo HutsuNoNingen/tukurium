@@ -1,4 +1,4 @@
-import {spawn} from 'node:child_process';
+import {spawn,execFileSync} from 'node:child_process';
 import {createConnection} from 'node:net';
 import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
@@ -46,10 +46,11 @@ try {
   assert.ok(merged.document.text.includes('-- Network Alice')&&merged.document.text.includes('-- Network Bob'));
   assert.equal(host.client.latest().snapshot.objects[0].scripts[0].source,script.source,'Drafts must not execute before Apply');
   console.log('PASS: host/guest concurrent inserts converge without changing executable code');
-  const godot=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(process.argv.includes('--rendered')?['--rendering-method','gl_compatibility']:['--headless']),'--path','client-godot','--script','res://shared_script_smoke.gd','--',`--port=${guest.port}`,`--session=${session}`,...(process.argv.includes('--rendered')?[`--screenshot=${resolve(work,'shared-script.png')}`]:[])]);
+  execFileSync(process.execPath,[resolve(root,'scripts/publish-workshop-examples.mjs'),'--prepare'],{cwd:root});
+  const godot=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(process.argv.includes('--rendered')?['--rendering-method','gl_compatibility']:['--headless']),'--path','client-godot','--script','res://shared_script_smoke.gd','--',`--port=${host.port}`,`--session=${session}`,`--graph-fixture=${resolve(root,'.run/workshop-examples/graphs.json')}`,...(process.argv.includes('--rendered')?[`--screenshot=${resolve(work,'shared-script.png')}`]:[])]);
   await until(()=>godot.exitCode!==null,'Shared script UI timed out',60000);
   assert.equal(godot.exitCode,0,godot.logs);assert.doesNotMatch(godot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(godot.logs,/SHARED SCRIPT SMOKE PASS/);
-  console.log('PASS: world-panel code editing, two simultaneous editors/cursors, queued typing, Apply and invalid draft isolation');
+  console.log('PASS: host world-panel drafts, Field reference binding, and workshop graph number edit');
   if(process.argv.includes('--rendered'))console.log(`SCREENSHOT=${resolve(work,'shared-script.png')}`);
 }catch(error){for(const child of children)if(child.logs)console.error(child.logs.slice(-5000));throw error;}
 finally{for(const socket of sockets)socket.destroy();for(const child of children)if(child.exitCode===null)child.kill();}

@@ -154,6 +154,42 @@ func run() -> void:
 	await fps_click(scene,panel,a.editor.apply_button)
 	if not await until(func(): return a.editor.pending_id.is_empty() and not a.editor.source_dirty,"Bound shared graph did not reapply: " + a.editor.feedback.text): quit(1); return
 	if scene.objects[target].scripts[0].parameters.ref_paint.get("field_id") != "color": push_error("Shared graph Apply lost Field binding"); quit(1); return
+	a.editor.graph.add_node("number")
+	var number_input: LineEdit = a.editor.graph.canvas.get_node("n3").find_children("*","LineEdit",true,false)[0]
+	number_input.text = "2"
+	number_input.text_changed.emit("2")
+	await fps_click(scene,panel,a.editor.apply_button)
+	if not await until(func(): return a.editor.pending_id.is_empty() and not a.editor.source_dirty,"Graph with number and Field binding did not apply"): quit(1); return
+	number_input = a.editor.graph.canvas.get_node("n3").find_children("*","LineEdit",true,false)[0]
+	number_input.text = "3"
+	number_input.text_changed.emit("3")
+	await fps_click(scene,panel,a.editor.apply_button)
+	if not await until(func(): return a.editor.pending_id.is_empty() and not a.editor.source_dirty,"Changing an existing graph number to 3 failed: " + a.editor.feedback.text): quit(1); return
+	if scene.objects[target].scripts[0].parameters.ref_paint.get("field_id") != "color": push_error("Changing a graph number lost ref_paint"); quit(1); return
+	# Repeat the actual workshop graph: change its period node from 2 to 3.
+	var fixture_path := ""
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--graph-fixture="): fixture_path = arg.trim_prefix("--graph-fixture=")
+	var examples = JSON.parse_string(FileAccess.get_file_as_string(fixture_path))
+	if not examples is Array or examples.size() < 4: push_error("Workshop graph fixture missing"); quit(1); return
+	var blink_source: String = a.editor.graph.PREFIX + JSON.stringify(examples[3])
+	var attached := {}
+	scene.world_panels.command({"kind":"script","command":{"target":scene.address_of(scene.objects[target]),"action":"attach","source":blink_source}},func(result): attached.merge(result))
+	if not await until(func(): return attached.has("ok") and scene.objects[target].scripts.size() == 2,"Workshop graph was not attached"): quit(1); return
+	if not attached.ok: push_error("Workshop graph attach failed: " + str(attached.get("message",""))); quit(1); return
+	a.editor.select_script(1)
+	if not await until(func(): return a.editor.is_graph() and a.editor.current_script().get("schema",{}).get("name") == "BlinkBeacon" and a.editor.parameter_controls.has("ref_paint"),"Workshop graph did not open"): quit(1); return
+	a.editor.parameter_controls.ref_paint.received.call({"reference":reference})
+	if not await until(func(): return a.editor.pending_id.is_empty() and a.editor.current_script().parameters.get("ref_paint") is Dictionary,"Workshop graph reference was not bound"): quit(1); return
+	var period: LineEdit = a.editor.graph.canvas.get_node("two").find_children("*","LineEdit",true,false)[0]
+	period.text = "3"
+	period.text_changed.emit("3")
+	await fps_click(scene,panel,a.editor.apply_button)
+	if not await until(func(): return a.editor.pending_id.is_empty() and not a.editor.source_dirty,"Workshop period change failed: " + a.editor.feedback.text): quit(1); return
+	var saved_graph = JSON.parse_string(a.editor.current_script().source.substr(a.editor.graph.PREFIX.length()))
+	var saved_period: Array = saved_graph.nodes.filter(func(item): return item.id == "two")
+	if a.editor.current_script().parameters.ref_paint.get("field_id") != "color" or saved_period.size() != 1 or float(saved_period[0].value) != 3.0:
+		push_error("Workshop period or Field reference changed unexpectedly"); quit(1); return
 	scene.release_cursor()
 	await process_frame
 	var graph_point: Vector2 = a.editor.graph.canvas.get_global_rect().position + Vector2(120,55)

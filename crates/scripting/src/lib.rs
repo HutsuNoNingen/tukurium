@@ -727,6 +727,12 @@ mod tests {
         );
     }
     #[test]
+    fn floating_point_field_address_is_not_a_typed_reference() {
+        let reference = json!({"kind":"field","target":{"instance_id":"818f16fc-94fc-49a7-8d5d-eed2f01a1ca9","local_id":2.0},"field_id":"color"});
+        assert!(serde_json::from_value::<kokoverse_protocol::TypedReference>(reference).is_err());
+        assert!(serde_json::from_str::<kokoverse_protocol::TypedReference>(r#"{"kind":"field","target":{"instance_id":"818f16fc-94fc-49a7-8d5d-eed2f01a1ca9","local_id":2.0},"field_id":"color"}"#).is_err());
+    }
+    #[test]
     fn sandbox_rejects_ambient_io_and_protected_infinite_loops() {
         for key in ["os", "io", "loadstring", "pcall", "coroutine", "getfenv"] {
             assert!(Program::compile(&format!("assert({key} == nil); {CLICK_COLOR}")).is_ok());

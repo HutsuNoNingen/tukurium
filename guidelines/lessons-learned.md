@@ -3,14 +3,14 @@
 確認日：2026-10-24。以下は再現・修正を確認した記録。
 現在の操作規則は [3Dパネルの実装指針](world-space-panels.md) を参照する。
 
-## ノードグラフのField参照はドロップ時に形を確認する
+## ノードグラフのField参照は送信前に整数のAddressへ戻す
 
-`field_ref`欄が参照の`kind`だけでドロップを受け取ると、`target.local_id`が文字列などの不完全な参照も編集要求へ入る。RustはScriptのパラメータを拒否し、画面には`Invalid script parameter: ref_paint`のように欄名だけが残る。GraphのApplyでは既存の参照を引き継ぐため、欄の見た目と送信する値を合わせて確認する必要がある。
+Godotが共有SnapshotのJSONを読むと、Rustでは整数の`Address.local_id`が`2.0`のような浮動小数点になる。ノードグラフで数字だけを変えてもApplyは既存の`ref_paint`を再送するため、ホスト直結ではRustの`u32`への復元が失敗し、`Invalid script parameter: ref_paint`になる。ゲスト経由ではGoアダプターがJSONを再構築して`2.0`を`2`へ直していたため、同じUIテストが通り、ホスト側だけの不具合を隠していた。
 
-受け取り時に対象Slot・Component・Fieldが表示中のワールドにあることを確認し、送信前にも参照の形を検査する。不正な値は送らず、`Clear`または再ドロップを案内する。狭い共有3Dパネルでは参照欄をラベルの下に置き、操作と現在の結び先を見えるようにする。最終的な値の検証はRust側に残す。
+クライアントは`field_ref`の形を検査し、送信時に`local_id`を整数へ正規化する。受け取り時には対象Slot・Component・Fieldが表示中のワールドにあることも確認する。不正な値は送らず、`Clear`または再ドロップを案内する。狭い共有3Dパネルでは参照欄をラベルの下に置き、操作と現在の結び先を見えるようにする。最終的な値の検証はRust側に残す。
 
-- 再現・確認：`local_id`が文字列のField参照を拒否し、有効なColor参照を3Dパネルへ渡してから`ref_paint`付きグラフを再適用する。[script-documents-integration.mjs](../tests/script-documents-integration.mjs) と [ugc-integration.mjs](../tests/ugc-integration.mjs) の `--rendered` を使う。
-- コード：[script_editor.gd](../client-godot/script_editor.gd)、[shared_script_smoke.gd](../client-godot/shared_script_smoke.gd)。確認日：2026-10-25。
+- 再現・確認：`local_id`が文字列のField参照を拒否し、有効なColor参照を3Dパネルへ渡してから、ホスト直結で`ref_paint`付きグラフの数字を`2`から`3`へ変更する。Rustで`2.0`の参照を拒否することも確認する。[script-documents-integration.mjs](../tests/script-documents-integration.mjs) と [ugc-integration.mjs](../tests/ugc-integration.mjs) の `--rendered` を使う。
+- コード：[script_editor.gd](../client-godot/script_editor.gd)、[shared_script_smoke.gd](../client-godot/shared_script_smoke.gd)、[lib.rs](../crates/scripting/src/lib.rs)。確認日：2026-10-25。
 
 ## クライアントのウィンドウを広げると2D UIまで拡大する
 

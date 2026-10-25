@@ -384,6 +384,8 @@ func update_component(apply_code: bool, run: bool) -> void:
 			queued_parameters.erase(field.id)
 			feedback.text = "Invalid field reference for %s was discarded. Apply again, then rebind the field." % field.id
 			return
+		if field.value_type == "field_ref" and values.has(field.id) and values[field.id] != null:
+			values[field.id] = canonical_field_reference(values[field.id])
 	queued_parameters.clear()
 	send_action({"action":"update", "script_id":component.id,
 		"expected_revision":base_revision if changed_source else component.revision,
@@ -394,7 +396,7 @@ func queue_parameter(id: String, value: Variant) -> void:
 	if value is Dictionary and not valid_field_reference(value):
 		feedback.text = "Invalid field reference for %s. Drag a field from an inspector or Clear this binding." % id
 		return
-	queued_parameters[id] = value
+	queued_parameters[id] = canonical_field_reference(value) if value is Dictionary else value
 	flush_at = Time.get_ticks_msec() + 180
 
 func valid_field_reference(value: Variant) -> bool:
@@ -404,7 +406,12 @@ func valid_field_reference(value: Variant) -> bool:
 	var owner: Variant = address.get("instance_id")
 	var local_id: Variant = address.get("local_id")
 	var field_id: Variant = value.get("field_id")
-	return owner is String and owner.length() == 36 and (local_id is int or local_id is float) and float(local_id) == float(int(local_id)) and int(local_id) > 0 and field_id is String and not field_id.is_empty() and field_id.length() <= 80
+	return owner is String and owner.length() == 36 and (local_id is int or local_id is float) and float(local_id) == float(int(local_id)) and int(local_id) > 0 and int(local_id) <= 4294967295 and field_id is String and not field_id.is_empty() and field_id.length() <= 80
+
+func canonical_field_reference(value: Dictionary) -> Dictionary:
+	var reference := value.duplicate(true)
+	reference.target.local_id = int(reference.target.local_id)
+	return reference
 
 func available_field_reference(value: Variant) -> bool:
 	if not valid_field_reference(value): return false
