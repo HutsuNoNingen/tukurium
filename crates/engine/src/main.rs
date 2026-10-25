@@ -1440,7 +1440,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     eprintln!("World autosave failed: {error}");
                     engine.status(&format!("World autosave failed: {error}"));
                 }
-                if engine.host { persistence.schedule(engine.model.snapshot()); }
+                if engine.host {
+                    persistence.schedule_with(engine.model.world_revision(), || {
+                        engine.model.snapshot()
+                    });
+                }
             },
             _ = simulation.tick() => engine.tick(),
             _ = poses.tick() => engine.send_pose(),

@@ -77,12 +77,16 @@ fn write_checkpoint(path: &Path, snapshot: &Snapshot) -> Result<(), String> {
     if bytes.len() > MAX_FRAME {
         return Err("Saved world exceeds size limit".into());
     }
-    // Never replace a good backup with a corrupt primary recovered at startup.
-    if let Ok(previous) = read_snapshot(path) {
-        atomic_write(
-            &backup_path(path),
-            &serde_json::to_vec(&REGISTRY.encode_world(&previous)).map_err(|e| e.to_string())?,
-        )?;
+    // Keep the previous primary as the backup, copying its bytes as-is
+    // instead of decoding, fully validating and re-encoding it on every
+    // save; the full restore validation runs at load time. Never replace a
+    // good backup with a primary that does not even parse (e.g. a torn
+    // write recovered at startup).
+    if let Ok(previous) = fs::read(path)
+        && previous.len() <= MAX_FRAME
+        && serde_json::from_slice::<ReplicatedWorld>(&previous).is_ok()
+    {
+        atomic_write(&backup_path(path), &previous)?;
     }
     atomic_write(path, &bytes)
 }
@@ -117,13 +121,21 @@ impl Persistence {
     }
 
     pub fn schedule(&mut self, snapshot: Snapshot) {
-        if self.pending.is_some() || self.saved_revision.as_ref() == Some(&snapshot.world_revision)
-        {
+        let revision = snapshot.world_revision.clone();
+        self.schedule_with(&revision, move || snapshot);
+    }
+
+    /// Schedule a save for `revision`, building the snapshot only when a
+    /// write will actually happen. Callers compare revisions first so an
+    /// unchanged world does not pay for a full snapshot clone every tick.
+    pub fn schedule_with(&mut self, revision: &str, snapshot: impl FnOnce() -> Snapshot) {
+        if self.pending.is_some() || self.saved_revision.as_deref() == Some(revision) {
             return;
         }
         let Some(path) = self.path.clone() else {
             return;
         };
+        let snapshot = snapshot();
         self.pending = Some(tokio::task::spawn_blocking(move || {
             write_checkpoint(&path, &snapshot)?;
             Ok(snapshot.world_revision)
@@ -207,6 +219,34 @@ mod tests {
         persistence.flush(updated).await.unwrap();
         assert_eq!(read_snapshot(&path).unwrap().world_revision, "1");
         assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 2);
+    }
+
+    #[tokio::test]
+    async fn schedule_with_skips_snapshot_build_when_unchanged() {
+        let directory = Directory::new();
+        let path = directory.world();
+        let mut persistence = Persistence::new(Some(path.clone()));
+        let initial = WorldModel::new().snapshot();
+        assert!(persistence.flush(initial.clone()).await.unwrap());
+        // Same revision as already saved: the provider must not run at all.
+        persistence.schedule_with(&initial.world_revision, || {
+            panic!("snapshot built for an unchanged world")
+        });
+        persistence.poll().await.unwrap();
+        // A new revision does build and save.
+        let mut updated = initial.clone();
+        updated.world_revision = "1".into();
+        let provided = updated.clone();
+        persistence.schedule_with("1", move || provided);
+        while persistence
+            .pending
+            .as_ref()
+            .is_some_and(|p| !p.is_finished())
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        persistence.poll().await.unwrap();
+        assert_eq!(read_snapshot(&path).unwrap().world_revision, "1");
     }
 
     #[test]
