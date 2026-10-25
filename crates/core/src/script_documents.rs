@@ -26,14 +26,14 @@ pub struct Request {
     #[serde(default)]
     pub name: String,
 }
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, PartialEq)]
 pub struct Cursor {
     pub client_id: String,
     pub name: String,
     pub anchor: usize,
     pub head: usize,
 }
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, PartialEq)]
 pub struct View {
     pub target: Address,
     pub script_id: String,
@@ -115,6 +115,21 @@ impl Document {
         }
         ids
     }
+    /// The visible text only. `handle` needs the text (or its length)
+    /// for its consistency checks several times per request; building
+    /// the full `View` there would also rebuild the id list and the
+    /// cursor position map each time. The full view is built exactly
+    /// once per request, for the reply.
+    fn text(&self) -> String {
+        let mut text = String::new();
+        for id in self.ordered() {
+            let atom = &self.atoms[&id];
+            if !atom.deleted {
+                text.push(atom.value);
+            }
+        }
+        text
+    }
     fn view(&self) -> View {
         let mut text = String::new();
         let mut ids = Vec::new();
@@ -189,7 +204,7 @@ impl ScriptDocuments {
             )
         });
         if doc.applied_source != script.source {
-            if doc.view().text == doc.applied_source {
+            if doc.text() == doc.applied_source {
                 *doc = Document::new(
                     input.target.clone(),
                     input.script_id.clone(),
@@ -200,7 +215,7 @@ impl ScriptDocuments {
         }
         if input.action == "open"
             && doc.cursors.is_empty()
-            && doc.view().text == script.source
+            && doc.text() == script.source
             && !doc.seen.is_empty()
         {
             *doc = Document::new(
@@ -244,7 +259,7 @@ impl ScriptDocuments {
                     if delete.iter().any(|id| !doc.atoms.contains_key(id)) {
                         return Err("Unknown deleted character".into());
                     }
-                    let visible = doc.view().text.len();
+                    let visible = doc.text().len();
                     let removed: usize = delete
                         .iter()
                         .filter_map(|id| doc.atoms.get(id))
@@ -449,6 +464,34 @@ mod tests {
             .view;
         assert_eq!(later.cursors.len(), 1);
         assert!(later.text.starts_with("日本return"));
+    }
+
+    #[test]
+    fn cursor_reports_resolve_to_visible_offsets_and_repeat_views_are_equal() {
+        let (mut docs, world, mut request) = setup();
+        let now = Instant::now();
+        let initial = docs.handle("a", request.clone(), &world, now).unwrap().view;
+        request.action = "cursor".into();
+        request.generation = initial.generation.clone();
+        request.request_id = "cursor-1".into();
+        // Anchor/head on the third character resolve to the offset
+        // just after it (positions count visible characters).
+        request.anchor = initial.ids[2].clone();
+        request.head = initial.ids[2].clone();
+        let moved = docs.handle("a", request.clone(), &world, now).unwrap().view;
+        assert_eq!(moved.text, initial.text);
+        assert_eq!(moved.revision, initial.revision);
+        let cursor = moved
+            .cursors
+            .iter()
+            .find(|c| c.client_id == "a/panel")
+            .expect("the reporter's cursor is in the view");
+        assert_eq!((cursor.anchor, cursor.head), (3, 3));
+        // Repeating the identical cursor report yields an identical
+        // view; the engine relies on this equality to skip rebroadcast.
+        request.request_id = "cursor-2".into();
+        let repeated = docs.handle("a", request, &world, now).unwrap().view;
+        assert!(repeated == moved);
     }
 
     #[test]
