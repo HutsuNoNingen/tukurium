@@ -45,9 +45,13 @@ func setup(controller, id: String) -> void:
 	add_child(body)
 
 func refresh(object: Dictionary) -> void:
-	viewport.size = Vector2i(int(object.panel.size[0]), int(object.panel.size[1]))
-	# Preserve square pixels on the world surface; the desktop window has its own layout.
-	mesh.size = Vector2(1.6 * float(viewport.size.x) / float(viewport.size.y), 1.6)
+	var size := Vector2i(int(object.panel.size[0]), int(object.panel.size[1]))
+	# Assigning the same size still reallocates the render target, so only
+	# resize when the shared panel size actually changed (as in mirror_renderer).
+	if viewport.size != size:
+		viewport.size = size
+		# Preserve square pixels on the world surface; the desktop window has its own layout.
+		mesh.size = Vector2(1.6 * float(size.x) / float(size.y), 1.6)
 	content.refresh(object)
 
 func canvas_point(global_point: Vector3) -> Vector2:
