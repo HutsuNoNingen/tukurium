@@ -61,7 +61,9 @@ func build_oekaki_avatar() -> void:
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 	material.alpha_scissor_threshold = 0.5
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# The GLB already has coincident Front/Back sheets with opposite winding.
+	# Rendering both sides of each sheet makes the two faces fight for depth.
+	material.cull_mode = BaseMaterial3D.CULL_BACK
 	for node in model.find_children("*", "MeshInstance3D", true, false):
 		node.material_override = material
 	# Tonarium's GLB has one clip per animated part; play those independent tracks together.
