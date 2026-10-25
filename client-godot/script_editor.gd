@@ -598,7 +598,10 @@ func refresh() -> void:
 			config_signature = component.id + component.revision
 			base_revision = component.revision
 			code.text = component.source
-			if is_graph(): graph.load_source(component.source)
+			if is_graph():
+				graph.target_id = target
+				graph.script_id = selected
+				graph.load_source(component.source)
 			build_parameters(component)
 		elif component.revision != base_revision:
 			feedback.text = "Shared code changed while this draft was open. Reload before retrying."

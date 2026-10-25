@@ -51,6 +51,6 @@ try {
   await until(()=>godot.exitCode!==null,'Shared script UI timed out',60000);
   assert.equal(godot.exitCode,0,godot.logs);assert.doesNotMatch(godot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(godot.logs,/SHARED SCRIPT SMOKE PASS/);
   console.log('PASS: host world-panel drafts, Field reference binding, and workshop graph number edit');
-  if(process.argv.includes('--rendered'))console.log(`SCREENSHOT=${resolve(work,'shared-script.png')}`);
+  if(process.argv.includes('--rendered'))console.log(`SCREENSHOT=${resolve(work,'shared-script.png')} TYPES=${resolve(work,'graph-types.png')}`);
 }catch(error){for(const child of children)if(child.logs)console.error(child.logs.slice(-5000));throw error;}
 finally{for(const socket of sockets)socket.destroy();for(const child of children)if(child.exitCode===null)child.kill();}

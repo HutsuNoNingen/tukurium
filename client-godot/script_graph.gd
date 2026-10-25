@@ -2,6 +2,7 @@ extends VBoxContainer
 ## Visual source editor. The graph JSON is stored in ScriptComponent.source.
 signal changed
 const PREFIX := "@tukurium-graph-v1\n"
+const PORT_HELP := "Port colors and labels show types · Right-click empty space to add nodes."
 const TYPES := {
 	"on_update":[[], [["flow","flow"]]], "on_interact":[[], [["flow","flow"]]], "on_drive":[[], [["flow","flow"]]],
 	"branch":[[["flow","flow"],["test","bool"]],[["yes","flow"],["no","flow"]]],
@@ -33,7 +34,8 @@ const TYPES := {
 	"join":[[["a","string"],["b","string"]],[["value","string"]]],
 	"rotation_y":[[["degrees","number"],["base","any"]],[["value","any"]]]
 }
-const COLORS := {"flow":Color("f0b86b"),"number":Color("7bd8cb"),"bool":Color("b5a6ff"),"string":Color("e7aeb6"),"vec3":Color("9cc7fa"),"color":Color("f0d891"),"any":Color("cbd5dc")}
+const COLORS := {"flow":Color("f0b86b"),"number":Color("7bd8cb"),"bool":Color("b5a6ff"),"string":Color("e7aeb6"),"vec3":Color("9cc7fa"),"color":Color("f0d891"),"rotation":Color("a4b8ff"),"any":Color("cbd5dc")}
+const TYPE_NAMES := {"flow":"FLOW","number":"NUMBER","bool":"BOOL","string":"TEXT","vec3":"VECTOR 3","color":"COLOR","rotation":"ROTATION","any":"ANY"}
 const PORT_IDS := {"flow":0,"number":1,"bool":2,"string":3,"vec3":4,"color":5,"any":6}
 var data := {"name":"Graph1","nodes":[],"links":[]}
 var canvas: GraphEdit
@@ -75,7 +77,7 @@ func _ready() -> void:
 	add.pressed.connect(func(): add_node(TYPES.keys()[palette.selected]))
 	tools.add_child(add)
 	message = Label.new()
-	message.text = "Right-click empty space to add a node. Drag ports to connect; Delete removes selected nodes."
+	message.text = PORT_HELP
 	message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(message)
 	graph_area = Control.new()
@@ -180,6 +182,99 @@ func source() -> String:
 func touch() -> void:
 	if not loading: changed.emit()
 
+func bound_field_type(node_id: String) -> String:
+	if app == null or target_id.is_empty() or script_id.is_empty(): return "any"
+	for component in app.objects.get(target_id, {}).get("scripts", []):
+		if str(component.id) != script_id: continue
+		var reference: Variant = component.get("parameters", {}).get("ref_" + node_id)
+		if not reference is Dictionary or reference.get("kind") != "field" or not reference.get("target") is Dictionary: return "any"
+		var address: Dictionary = reference.target
+		for field in app.objects.get(str(address.get("instance_id", "")), {}).get("fields", []):
+			if str(field.id) != str(reference.get("field_id", "")) or int(field.component_id) != int(address.get("local_id", -1)): continue
+			var value_type := str(field.value_type)
+			if value_type == "quat": return "rotation"
+			return value_type if COLORS.has(value_type) else "any"
+	return "any"
+
+func linked_port_type(item: Dictionary, input_name: String, seen: Dictionary) -> String:
+	for link in data.links:
+		if link.to != item.id or link.input != input_name: continue
+		var source_item := find_item(str(link.from))
+		if source_item.is_empty() or not TYPES.has(str(source_item.kind)): return "any"
+		for output in TYPES[source_item.kind][1]:
+			if output[0] == link.out:
+				return shown_port_type(source_item, "out", str(output[0]), str(output[1]), seen)
+	return "any"
+
+func shown_port_type(item: Dictionary, side: String, port_name: String, declared_type: String, seen: Dictionary = {}) -> String:
+	if declared_type != "any": return declared_type
+	var key := "%s/%s/%s" % [item.id, side, port_name]
+	if seen.has(key): return "any"
+	var visited := seen.duplicate()
+	visited[key] = true
+	if item.kind == "read_field" and side == "out": return bound_field_type(str(item.id))
+	if item.kind in ["write_field", "drive_field"] and side == "in" and port_name == "value": return bound_field_type(str(item.id))
+	if item.kind == "rotation_y" and (side == "out" or port_name == "base"): return "rotation"
+	if item.kind == "select":
+		if side == "out" and port_name == "value":
+			var yes := linked_port_type(item, "yes", visited)
+			var no := linked_port_type(item, "no", visited)
+			if yes == no or no == "any": return yes
+			return no if yes == "any" else "any"
+		if side == "in" and port_name in ["yes", "no"]:
+			var own := linked_port_type(item, port_name, visited)
+			return own if own != "any" else linked_port_type(item, "no" if port_name == "yes" else "yes", visited)
+	if side == "in": return linked_port_type(item, port_name, visited)
+	if item.kind == "display" and side == "out": return linked_port_type(item, "value", visited)
+	return "any"
+
+func connection_input_type(item: Dictionary, port_name: String, declared_type: String) -> String:
+	if declared_type != "any": return declared_type
+	if item.kind == "select" and port_name in ["yes", "no"]:
+		return linked_port_type(item, "no" if port_name == "yes" else "yes", {})
+	if item.kind in ["write_field", "drive_field", "rotation_y"]:
+		return shown_port_type(item, "in", port_name, declared_type)
+	return "any"
+
+func update_caption(caption: Control, name: String, value_type: String) -> void:
+	var kind := caption.get_child(1) as Label
+	kind.text = TYPE_NAMES.get(value_type, "ANY")
+	kind.add_theme_color_override("font_color", COLORS.get(value_type, COLORS.any))
+	caption.tooltip_text = "%s · %s" % [name.capitalize(), kind.text.capitalize()]
+
+func port_caption(name: String, value_type: String, output: bool) -> Control:
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 0)
+	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var title := Label.new()
+	title.text = "Run" if name == "flow" else name.capitalize()
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT if output else HORIZONTAL_ALIGNMENT_LEFT
+	title.add_theme_font_size_override("font_size", 14)
+	title.add_theme_color_override("font_color", Color("e2edf2"))
+	stack.add_child(title)
+	var kind := Label.new()
+	kind.horizontal_alignment = title.horizontal_alignment
+	kind.add_theme_font_size_override("font_size", 12)
+	stack.add_child(kind)
+	update_caption(stack, name, value_type)
+	return stack
+
+func refresh_port_visuals() -> void:
+	for item in data.nodes:
+		if not TYPES.has(str(item.kind)): continue
+		var node := canvas.get_node_or_null(str(item.id)) as GraphNode
+		if node == null: continue
+		var captions: Array = node.get_meta("port_captions", [])
+		var inputs: Array = TYPES[item.kind][0]
+		var outputs: Array = TYPES[item.kind][1]
+		for i in captions.size():
+			var input_type: String = shown_port_type(item, "in", str(inputs[i][0]), str(inputs[i][1])) if i < inputs.size() else "any"
+			var output_type: String = shown_port_type(item, "out", str(outputs[i][0]), str(outputs[i][1])) if i < outputs.size() else "any"
+			if i < inputs.size(): update_caption(captions[i][0], str(inputs[i][0]), input_type)
+			if i < outputs.size(): update_caption(captions[i][1], str(outputs[i][0]), output_type)
+			node.set_slot(i,i < inputs.size(), PORT_IDS[inputs[i][1]] if i < inputs.size() else 0, COLORS[input_type] if i < inputs.size() else Color.WHITE,
+				i < outputs.size(), PORT_IDS[outputs[i][1]] if i < outputs.size() else 0, COLORS[output_type] if i < outputs.size() else Color.WHITE)
+
 func add_node(kind: String, at_position: Vector2 = Vector2.INF) -> void:
 	capture_layout()
 	if data.nodes.size() >= 64:
@@ -227,19 +322,21 @@ func redraw() -> void:
 		canvas.add_child(node)
 		var inputs: Array = TYPES[item.kind][0]
 		var outputs: Array = TYPES[item.kind][1]
+		var captions: Array = []
 		for i in maxi(inputs.size(),outputs.size()):
 			var row := HBoxContainer.new()
-			row.custom_minimum_size = Vector2(170,30)
-			var left := Label.new()
-			left.text = str(inputs[i][0]) if i < inputs.size() else ""
-			left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.custom_minimum_size = Vector2(170,42)
+			var input_type: String = shown_port_type(item, "in", str(inputs[i][0]), str(inputs[i][1])) if i < inputs.size() else "any"
+			var output_type: String = shown_port_type(item, "out", str(outputs[i][0]), str(outputs[i][1])) if i < outputs.size() else "any"
+			var left := port_caption(str(inputs[i][0]), input_type, false) if i < inputs.size() else Control.new()
+			var right := port_caption(str(outputs[i][0]), output_type, true) if i < outputs.size() else Control.new()
 			row.add_child(left)
-			var right := Label.new()
-			right.text = str(outputs[i][0]) if i < outputs.size() else ""
-			row.add_child(right)
+			if i < outputs.size(): row.add_child(right)
+			captions.append([left,right])
 			node.add_child(row)
-			node.set_slot(i,i < inputs.size(), PORT_IDS[inputs[i][1]] if i < inputs.size() else 0, COLORS[inputs[i][1]] if i < inputs.size() else Color.WHITE,
-				i < outputs.size(), PORT_IDS[outputs[i][1]] if i < outputs.size() else 0, COLORS[outputs[i][1]] if i < outputs.size() else Color.WHITE)
+			node.set_slot(i,i < inputs.size(), PORT_IDS[inputs[i][1]] if i < inputs.size() else 0, COLORS[input_type] if i < inputs.size() else Color.WHITE,
+				i < outputs.size(), PORT_IDS[outputs[i][1]] if i < outputs.size() else 0, COLORS[output_type] if i < outputs.size() else Color.WHITE)
+		node.set_meta("port_captions", captions)
 		if item.kind in ["number","public_number","string","get_state","set_state","vec3","color"]:
 			var input := LineEdit.new()
 			input.custom_minimum_size.x = 170
@@ -293,7 +390,11 @@ func connect_ports(from: StringName, out_port: int, to: StringName, in_port: int
 	if a.is_empty() or b.is_empty(): return
 	var out_def: Array = TYPES[a.kind][1][out_port]
 	var in_def: Array = TYPES[b.kind][0][in_port]
-	if out_def[1] != in_def[1] and out_def[1] != "any" and in_def[1] != "any": return
+	var output_type := shown_port_type(a, "out", str(out_def[0]), str(out_def[1]))
+	var input_type := connection_input_type(b, str(in_def[0]), str(in_def[1]))
+	if output_type != input_type and output_type != "any" and input_type != "any":
+		message.text = "%s cannot connect to %s. Choose a matching port." % [TYPE_NAMES.get(output_type, "ANY"), TYPE_NAMES.get(input_type, "ANY")]
+		return
 	var removed: Array = data.links.filter(func(link): return link.to == str(to) and link.input == in_def[0])
 	for link in removed:
 		var old := find_item(str(link.from))
@@ -302,6 +403,8 @@ func connect_ports(from: StringName, out_port: int, to: StringName, in_port: int
 	var link := {"from":str(from),"out":out_def[0],"to":str(to),"input":in_def[0]}
 	data.links.append(link)
 	canvas.connect_node(from,out_port,to,in_port)
+	refresh_port_visuals()
+	message.text = PORT_HELP
 	touch()
 
 func disconnect_ports(from: StringName, out_port: int, to: StringName, in_port: int) -> void:
@@ -312,6 +415,7 @@ func disconnect_ports(from: StringName, out_port: int, to: StringName, in_port: 
 	var in_name = TYPES[b.kind][0][in_port][0]
 	data.links = data.links.filter(func(link): return not (link.from == str(from) and link.out == out_name and link.to == str(to) and link.input == in_name))
 	canvas.disconnect_node(from,out_port,to,in_port)
+	refresh_port_visuals()
 	touch()
 
 func delete_nodes(names: Array[StringName]) -> void:

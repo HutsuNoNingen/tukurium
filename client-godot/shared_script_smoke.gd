@@ -181,6 +181,11 @@ func run() -> void:
 	if not await until(func(): return a.editor.is_graph() and a.editor.current_script().get("schema",{}).get("name") == "BlinkBeacon" and a.editor.parameter_controls.has("ref_paint"),"Workshop graph did not open"): quit(1); return
 	a.editor.parameter_controls.ref_paint.received.call({"reference":reference})
 	if not await until(func(): return a.editor.pending_id.is_empty() and a.editor.current_script().parameters.get("ref_paint") is Dictionary,"Workshop graph reference was not bound"): quit(1); return
+	var select_node: GraphNode = a.editor.graph.canvas.get_node("choice")
+	if not select_node.find_children("*","Label",true,false).any(func(label): return label.text == "COLOR"):
+		push_error("Select did not show the connected Color type"); quit(1); return
+	if not a.editor.graph.canvas.get_node("paint").find_children("*","Label",true,false).any(func(label): return label.text == "COLOR"):
+		push_error("Drive Field did not show its bound Color type"); quit(1); return
 	var period: LineEdit = a.editor.graph.canvas.get_node("two").find_children("*","LineEdit",true,false)[0]
 	period.text = "3"
 	period.text_changed.emit("3")
@@ -190,6 +195,13 @@ func run() -> void:
 	var saved_period: Array = saved_graph.nodes.filter(func(item): return item.id == "two")
 	if a.editor.current_script().parameters.ref_paint.get("field_id") != "color" or saved_period.size() != 1 or float(saved_period[0].value) != 3.0:
 		push_error("Workshop period or Field reference changed unexpectedly"); quit(1); return
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--screenshot="):
+			var graph_canvas: GraphEdit = a.editor.graph.canvas
+			graph_canvas.zoom = 0.8
+			graph_canvas.scroll_offset = Vector2(200,220)
+			await process_frame
+			panel.viewport.get_texture().get_image().save_png(arg.trim_prefix("--screenshot=").get_base_dir().path_join("graph-types.png"))
 	scene.release_cursor()
 	await process_frame
 	var graph_point: Vector2 = a.editor.graph.canvas.get_global_rect().position + Vector2(120,55)

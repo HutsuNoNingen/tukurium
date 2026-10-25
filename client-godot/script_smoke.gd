@@ -139,11 +139,19 @@ func run() -> void:
 	editor.graph.connect_ports(&"n2",0,&"n3",0)
 	editor.graph.connect_ports(&"n4",0,&"n3",1)
 	editor.graph.connect_ports(&"n4",0,&"n5",0)
+	if editor.graph.canvas.get_node("n5").find_children("*","Label",true,false).filter(func(label): return label.text == "NUMBER").size() != 2:
+		push_error("Display input/output did not adopt the connected Number type"); quit(1); return
+	editor.graph.connect_ports(&"n6",0,&"n5",0)
+	if editor.graph.canvas.get_node("n5").find_children("*","Label",true,false).filter(func(label): return label.text == "BOOL").size() != 2:
+		push_error("Replacing a wildcard input did not update its type"); quit(1); return
+	editor.graph.connect_ports(&"n4",0,&"n5",0)
 	editor.graph.tick_preview()
 	if not editor.graph.display_labels.n5.text.contains("1"):
 		push_error("Display did not show the connected value"); quit(1); return
 	editor.graph.add_node("get_state")
 	editor.graph.connect_ports(&"n7",0,&"n5",0)
+	if editor.graph.canvas.get_node("n5").find_children("*","Label",true,false).filter(func(label): return label.text == "ANY").size() != 2:
+		push_error("Display ports did not return to Any after rewiring"); quit(1); return
 	editor.apply_button.pressed.emit()
 	if not await check_until(func(): return editor.pending_id.is_empty() and scene.objects[id].scripts[2].source.contains("set_state"), "Node graph did not save"): quit(1); return
 	editor.click_button.pressed.emit()
@@ -159,6 +167,17 @@ func run() -> void:
 	var color_reference := {"kind":"field","target":scene.field_address(id,"color"),"field_id":"color"}
 	editor.parameter_controls.ref_n8.received.call({"kind":"kokoverse_reference","reference":color_reference})
 	if not await check_until(func(): return editor.pending_id.is_empty() and scene.objects[id].scripts[2].parameters.get("ref_n8") is Dictionary and scene.objects[id].scripts[2].parameters.ref_n8.get("field_id") == "color", "Field reference did not save"): quit(1); return
+	var paint_node: GraphNode = editor.graph.canvas.get_node("n8")
+	if not paint_node.find_children("*","Label",true,false).any(func(label): return label.text == "COLOR"):
+		push_error("Bound Field input does not show its Color type"); quit(1); return
+	var number_node: GraphNode = editor.graph.canvas.get_node("n4")
+	if not number_node.find_children("*","Label",true,false).any(func(label): return label.text == "NUMBER"):
+		push_error("Number output does not show its type"); quit(1); return
+	var links_before: int = editor.graph.data.links.size()
+	editor.graph.connect_ports(&"n4",0,&"n8",1)
+	if editor.graph.data.links.size() != links_before or not editor.graph.message.text.contains("NUMBER cannot connect to COLOR"):
+		push_error("Mismatched Number-to-Color link was accepted"); quit(1); return
+	editor.graph.message.text = editor.graph.PORT_HELP
 	editor.graph.canvas.get_node("n8").position_offset += Vector2(20,0)
 	editor.graph.canvas.end_node_move.emit()
 	editor.apply_button.pressed.emit()
