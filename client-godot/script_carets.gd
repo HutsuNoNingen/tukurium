@@ -1,8 +1,25 @@
 extends Control
 var view
+var drawn_signature := ""
+var signature_known := false
 
 func _process(_delta: float) -> void:
+	if not is_visible_in_tree(): return
+	var signature := _draw_signature()
+	if signature_known and signature == drawn_signature: return
+	signature_known = true
+	drawn_signature = signature
 	queue_redraw()
+
+# Everything _draw() reads: remote carets, the text they index into, and the
+# editor geometry that maps offsets to pixels. Redraw only when one changes.
+func _draw_signature() -> String:
+	if view == null or view.document.is_empty(): return ""
+	var code = view.editor.code
+	var parts: Array = [str(view.client_id), str(code.text.hash()), str(code.scroll_vertical), str(code.scroll_horizontal), str(code.size)]
+	for cursor in view.document.get("cursors", []):
+		parts.append("%s|%d|%s" % [str(cursor.client_id), int(cursor.head), str(cursor.name)])
+	return "\n".join(parts)
 
 func _draw() -> void:
 	if view == null or view.document.is_empty(): return
