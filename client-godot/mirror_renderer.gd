@@ -15,7 +15,7 @@ func set_surface(node: MeshInstance3D, reflective: bool, shape: String) -> void:
 	var material: StandardMaterial3D = node.material_override
 	material.albedo_texture = null
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED if reflective else BaseMaterial3D.SHADING_MODE_PER_PIXEL
-	material.cull_mode = BaseMaterial3D.CULL_BACK if reflective else (BaseMaterial3D.CULL_DISABLED if shape == "quad" else BaseMaterial3D.CULL_BACK)
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED if reflective or shape == "quad" else BaseMaterial3D.CULL_BACK
 	material.uv1_scale = Vector3(-1,1,1) if reflective else Vector3.ONE
 	material.uv1_offset = Vector3(1,0,0) if reflective else Vector3.ZERO
 	node.layers = MIRROR_LAYER if reflective else 1
@@ -50,7 +50,7 @@ func tick() -> void:
 		var node: MeshInstance3D = entries[id].node
 		if not is_instance_valid(node) or not node.is_visible_in_tree(): continue
 		var normal: Vector3 = node.global_basis.z.normalized()
-		var distance: float = normal.dot(viewer.global_position - node.global_position)
+		var distance: float = absf(normal.dot(viewer.global_position - node.global_position))
 		if distance > 0.05 and distance < 4000.0 and not viewer.is_position_behind(node.global_position):
 			update_reflection(entries[id], viewer)
 
@@ -61,6 +61,9 @@ func update_reflection(entry: Dictionary, viewer: Camera3D) -> void:
 	var normal: Vector3 = node.global_basis.z.normalized()
 	var up: Vector3 = node.global_basis.y.normalized()
 	var distance: float = normal.dot(viewer.global_position - node.global_position)
+	if distance < 0.0:
+		normal = -normal
+		distance = -distance
 	if distance <= 0.05: return
 	var virtual_eye: Vector3 = viewer.global_position - normal * (2.0 * distance)
 	camera.global_position = virtual_eye

@@ -38,6 +38,7 @@ pub struct SessionComponentRegistration {
 pub struct AttachmentRegistration {
     pub type_id: &'static str,
     pub remove: fn(&mut ObjectView) -> Result<(), String>,
+    pub defaults: fn() -> Value,
 }
 
 fn remove_mesh(object: &mut ObjectView) -> Result<(), String> {
@@ -207,10 +208,10 @@ fn no_edit(_: &mut World, _: Entity, _: &str, _: Value) {
 pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
     session_components: vec![SessionComponentRegistration { type_id: "SessionChat", validate: crate::session_chat::validate_value }],
     attachments: vec![
-        AttachmentRegistration { type_id: "MeshRenderer", remove: remove_mesh },
-        AttachmentRegistration { type_id: "WorldText", remove: remove_world_text },
-        AttachmentRegistration { type_id: "Mirror", remove: remove_mirror },
-        AttachmentRegistration { type_id: "Camera", remove: remove_camera },
+        AttachmentRegistration { type_id: "MeshRenderer", remove: remove_mesh, defaults: || json!({"color":[0.2,0.65,0.8,1.0],"visual":{"kind":"primitive","shape":"quad"}}) },
+        AttachmentRegistration { type_id: "WorldText", remove: remove_world_text, defaults: || json!({"world_text":"Text","world_text_color":[1.0,1.0,1.0,1.0]}) },
+        AttachmentRegistration { type_id: "Mirror", remove: remove_mirror, defaults: || json!({"mirror_enabled":true}) },
+        AttachmentRegistration { type_id: "Camera", remove: remove_camera, defaults: || json!({"camera_enabled":true}) },
     ],
     components: vec![
         ComponentRegistration {
@@ -531,6 +532,7 @@ impl Registry {
                 local_id: c.local_id,
                 version: 1,
                 fields: c.fields.iter().map(|f| f.schema.clone()).collect(),
+                attach_defaults: self.attachments.iter().find(|a| a.type_id == c.type_id).map(|a| (a.defaults)()),
             })
             .collect()
     }

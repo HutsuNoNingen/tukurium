@@ -52,7 +52,7 @@ Flux、階層Transformはまだない。キャラクターには移動・ジャ�
 
 内部の `WorldCommit` を、`crates/core/src/replication.rs` の登録表で `ReplicationCommit` へ変換する。通信は `component_commit`、初回状態は `component_snapshot`。各物体はComponentの安定アドレス・型名・スキーマ版と、フィールドID・revision・値を持つ。画像・モデル・動画・パネル・Scriptも同じ形式で運ぶ。保存も同じ登録表を使い、`format_version: 2` の `ReplicatedWorld` を書き込む。既存の版1ワールドにあるCamera・Mirror形状は読み込み時に対応する`Enabled=true`の機能コンポーネントを補う。版2では形状だけから機能を推定しないため、コンポーネントを外した状態も保存できる。
 
-登録表には型検証、編集可否、型付きECSへの書き込み、表示データとの変換をまとめた。`Edit.target` はルートではなく対象Componentのアドレスで、例えば位置編集はlocal_id=3を指定する。新しいComponentを追加する際は登録とECSの抽出処理を追加し、通信のメッセージ分岐や保存形式の処理は増やさない。再生・Scriptのような操作は引き続き専用コマンドで検証する。
+登録表には型検証、編集可否、型付きECSへの書き込み、表示データとの変換をまとめた。付け外しできる型は`ComponentSchema.attach_defaults`に初期値を載せ、Godotの追加一覧はこれを候補として表示する。依存関係と値の最終検証はRustが行う。`Edit.target` はルートではなく対象Componentのアドレスで、例えば位置編集はlocal_id=3を指定する。新しいComponentを追加する際は登録とECSの抽出処理を追加し、通信のメッセージ分岐や保存形式の処理は増やさない。再生・Scriptのような操作は引き続き専用コマンドで検証する。
 
 変更した物体だけをupsertし、複数Componentの変更は同じworld_revisionでまとめて適用する。ゲストは変更全体を検証し、不明なComponent・スキーマ版・フィールド、不正な値・revisionを拒否する。変更のないEntityは維持する。revisionの欠落や不正な差分では編集を止め、スナップショットを取得し直す。現段階では物体内の全Componentを送る。Component・フィールド単位の差分と購読範囲の最適化は未実装。
 

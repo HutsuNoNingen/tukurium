@@ -9,11 +9,15 @@
 
 ## 反射面を同じワールドのカメラで描くと再帰する
 
-鏡は共有の`MeshRenderer`の形状として保存し、反射画像はGodotのローカルなSubViewportで生成する。反射カメラが鏡面を再び描くと、自己参照や複数鏡の再帰で負荷と表示が不安定になる。鏡面を専用の描画レイヤーへ置き、反射カメラから除外する。鏡の枠は通常レイヤーに残す。表側から見える鏡は枚数制限を設けず、Godotの描画フレームごとに更新する。描画付きの [creation-integration.mjs](../tests/creation-integration.mjs) で、鏡の前の物体が反射に映ることを確認する。関連コード：[mirror_renderer.gd](../client-godot/mirror_renderer.gd)。確認日：2026-10-25。
+鏡は共有の`MeshRenderer`の形状として保存し、反射画像はGodotのローカルなSubViewportで生成する。反射カメラが鏡面を再び描くと、自己参照や複数鏡の再帰で負荷と表示が不安定になる。鏡面を専用の描画レイヤーへ置き、反射カメラから除外する。鏡の枠は通常レイヤーに残す。見えている鏡は枚数制限を設けず、Godotの描画フレームごとに更新する。描画付きの [creation-integration.mjs](../tests/creation-integration.mjs) で、鏡の前の物体が反射に映ることを確認する。関連コード：[mirror_renderer.gd](../client-godot/mirror_renderer.gd)。確認日：2026-10-25。
 
 ## 鏡のTransformだけ更新しても反射が遅れる
 
-保持中の鏡面は [render_hierarchy.gd](../client-godot/render_hierarchy.gd) が受け取ったプレビュー姿勢で滑らかに移動するが、反射用SubViewportを一律66ms間隔で更新すると映り込みだけが段階的に変わる。鏡が動いた場合だけ更新間隔を外しても、静止した鏡の前で視点やほかの物体が動くと反射が遅れる。反射カメラはRustの確定済みTransformではなく、実際に表示したGodotノードの`global_transform`を参照し、正面から見える各鏡を描画フレームごとに更新する。描画付きの [creation-integration.mjs](../tests/creation-integration.mjs) で、鏡と視点を同じフレーム内で別々に動かしても反射カメラが追従することを確認する。関連コード：[mirror_renderer.gd](../client-godot/mirror_renderer.gd)。確認日：2026-10-25。
+保持中の鏡面は [render_hierarchy.gd](../client-godot/render_hierarchy.gd) が受け取ったプレビュー姿勢で滑らかに移動するが、反射用SubViewportを一律66ms間隔で更新すると映り込みだけが段階的に変わる。鏡が動いた場合だけ更新間隔を外しても、静止した鏡の前で視点やほかの物体が動くと反射が遅れる。反射カメラはRustの確定済みTransformではなく、実際に表示したGodotノードの`global_transform`を参照し、見えている各鏡を描画フレームごとに更新する。描画付きの [creation-integration.mjs](../tests/creation-integration.mjs) で、鏡と視点を同じフレーム内で別々に動かしても反射カメラが追従することを確認する。関連コード：[mirror_renderer.gd](../client-godot/mirror_renderer.gd)。確認日：2026-10-25。
+
+## 鏡の裏側で反射画像が白くなる
+
+反射更新は鏡のローカルZ方向を表として距離を判定していた。裏側の視点では距離が負になって更新されず、面も裏側を描画しなかった。反射カメラの法線を視点側へ向け、距離の絶対値で更新を判定し、反射材質を両面描画にする。前後それぞれに色付きの物体を置く描画付き [creation-integration.mjs](../tests/creation-integration.mjs) で、両方向の反射テクスチャを確認する。以前の配布版には同時更新を4枚に制限する処理もあり、上限外の鏡は未描画になり得た。この制限は既に外している。関連コード：[mirror_renderer.gd](../client-godot/mirror_renderer.gd)。確認日：2026-10-26。
 
 ## 3D作成パネルの道具を形状カードに増やすと操作が隠れる
 

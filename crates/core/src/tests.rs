@@ -347,6 +347,18 @@ fn mirror_requires_quad_and_old_mirror_camera_items_gain_components() {
 }
 
 #[test]
+fn component_catalog_only_exposes_registered_attachments() {
+    let schemas = super::replication::REGISTRY.schemas();
+    for type_id in ["MeshRenderer", "WorldText", "Mirror", "Camera"] {
+        assert!(schemas.iter().find(|schema| schema.type_id == type_id).unwrap().attach_defaults.is_some());
+    }
+    for type_id in ["Slot", "Transform", "WorldPanel", "ScriptComponents"] {
+        assert!(schemas.iter().find(|schema| schema.type_id == type_id).unwrap().attach_defaults.is_none());
+    }
+    assert_eq!(schemas.iter().find(|schema| schema.type_id == "Mirror").unwrap().attach_defaults, Some(json!({"mirror_enabled":true})));
+}
+
+#[test]
 fn creation_panels_use_shared_surface_components_and_survive_restore() {
     use kokoverse_protocol::{PrimitiveShape, Visual};
     let mut host = WorldModel::new();

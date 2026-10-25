@@ -46,12 +46,13 @@ var pending_field := ""
 var pending_reference_target := ""
 var reference_values: Dictionary = {}
 var component_shape_picker: OptionButton
-var add_mesh_button: Button
-var add_text_button: Button
-var add_mirror_button: Button
-var add_camera_button: Button
 var component_remove_buttons: Dictionary = {}
 var component_actions := VBoxContainer.new()
+var component_catalog := VBoxContainer.new()
+var component_catalog_buttons: Dictionary = {}
+var component_catalog_open := false
+var component_catalog_toggle: Button
+var component_search: LineEdit
 
 func setup(controller, id: String, in_desktop: bool = false) -> void:
 	manager = controller
@@ -136,7 +137,6 @@ func build_body(body: Container) -> void:
 	tabs.add_tab("Scripts")
 	tabs.tab_changed.connect(select_tab)
 	details.add_child(tabs)
-	details.add_child(component_actions)
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	details.add_child(scroll)
@@ -211,6 +211,7 @@ func vector_field(field: String, label: String, parts: Array) -> void:
 		line_field(column, field, str(i))
 
 func build_fields() -> void:
+	if component_actions.get_parent() == fields_box: fields_box.remove_child(component_actions)
 	for child in fields_box.get_children():
 		fields_box.remove_child(child)
 		child.queue_free()
@@ -221,12 +222,14 @@ func build_fields() -> void:
 	reference_values.clear()
 	for child in component_actions.get_children():
 		component_actions.remove_child(child)
+		if child != component_catalog: child.queue_free()
+	for child in component_catalog.get_children():
+		component_catalog.remove_child(child)
 		child.queue_free()
 	component_shape_picker = null
-	add_mesh_button = null
-	add_text_button = null
-	add_mirror_button = null
-	add_camera_button = null
+	component_catalog_toggle = null
+	component_search = null
+	component_catalog_buttons.clear()
 	component_remove_buttons.clear()
 	building_field = {}
 	field_container = fields_box
@@ -234,11 +237,12 @@ func build_fields() -> void:
 		heading("Choose an object above. Deleted targets are cleared.")
 		return
 	var object: Dictionary = manager.app.objects[target_id]
+	fields_box.add_child(component_actions)
 	build_component_actions(object)
 	for schema in manager.component_schemas:
 		var fields: Array = object.fields.filter(func(field): return int(field.component_id) == int(schema.local_id))
 		if fields.is_empty(): continue
-		component_section(str(schema.type_id),int(schema.local_id))
+		component_section(str(schema.type_id),int(schema.local_id),schema.get("attach_defaults") != null)
 		for field in fields: build_field(field)
 	building_field = {}
 	component_section("Scripts",8)
@@ -255,78 +259,71 @@ func build_fields() -> void:
 	add_button(field_container, "Manage scripts", open_script.bind(""))
 
 func build_component_actions(object: Dictionary) -> void:
-	component_actions.visible = object.get("panel") == null and tabs.current_tab == 0
+	component_actions.visible = object.get("panel") == null
 	if object.get("panel") != null: return
-	var title_label := Label.new()
-	title_label.text = "Components"
-	title_label.add_theme_font_size_override("font_size", 20)
-	component_actions.add_child(title_label)
-	var mesh_row := HBoxContainer.new()
-	component_actions.add_child(mesh_row)
+	component_catalog_toggle = add_button(component_actions, "+ Add Component" if not component_catalog_open else "− Close Component List", func():
+		component_catalog_open = not component_catalog_open
+		build_fields())
+	component_catalog_toggle.tooltip_text = "Add a registered component to this Slot"
+	component_actions.add_child(component_catalog)
+	component_catalog.visible = component_catalog_open
+	if not component_catalog_open: return
+	component_search = LineEdit.new()
+	component_search.placeholder_text = "Find component…"
+	component_catalog.add_child(component_search)
+	component_search.text_changed.connect(filter_component_catalog)
 	component_shape_picker = OptionButton.new()
 	for index in PRIMITIVES.SHAPES.size(): component_shape_picker.add_item(PRIMITIVES.NAMES[index])
-	mesh_row.add_child(component_shape_picker)
-	add_mesh_button = add_button(mesh_row, "Add Mesh", change_component.bind("MeshRenderer", true))
-	add_mesh_button.disabled = not manager.app.editable or object.get("renderer") != null
-	component_remove_buttons["MeshRenderer"] = add_button(mesh_row, "Remove Mesh", change_component.bind("MeshRenderer", false))
-	component_remove_buttons["MeshRenderer"].disabled = not manager.app.editable or object.get("renderer") == null or object.get("playback") != null or object.get("mirror") != null
-	var mirror_row := HBoxContainer.new()
-	component_actions.add_child(mirror_row)
-	var mirror_label := Label.new()
-	mirror_label.text = "Mirror"
-	mirror_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	mirror_row.add_child(mirror_label)
-	var mirror_surface: bool = object.get("visual",{}).get("kind","") == "primitive" and object.visual.get("shape","") in ["quad","mirror"]
-	add_mirror_button = add_button(mirror_row, "Add", change_component.bind("Mirror", true))
-	add_mirror_button.disabled = not manager.app.editable or object.get("mirror") != null or not mirror_surface
-	component_remove_buttons["Mirror"] = add_button(mirror_row, "Remove", change_component.bind("Mirror", false))
-	component_remove_buttons["Mirror"].disabled = not manager.app.editable or object.get("mirror") == null
-	var camera_row := HBoxContainer.new()
-	component_actions.add_child(camera_row)
-	var camera_label := Label.new()
-	camera_label.text = "Camera"
-	camera_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	camera_row.add_child(camera_label)
-	add_camera_button = add_button(camera_row, "Add", change_component.bind("Camera", true))
-	add_camera_button.disabled = not manager.app.editable or object.get("camera") != null
-	component_remove_buttons["Camera"] = add_button(camera_row, "Remove", change_component.bind("Camera", false))
-	component_remove_buttons["Camera"].disabled = not manager.app.editable or object.get("camera") == null
-	var text_row := HBoxContainer.new()
-	component_actions.add_child(text_row)
-	var text_label := Label.new()
-	text_label.text = "WorldText"
-	text_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	text_row.add_child(text_label)
-	add_text_button = add_button(text_row, "Add", change_component.bind("WorldText", true))
-	add_text_button.disabled = not manager.app.editable or object.get("world_text") != null
-	component_remove_buttons["WorldText"] = add_button(text_row, "Remove", change_component.bind("WorldText", false))
-	component_remove_buttons["WorldText"].disabled = not manager.app.editable or object.get("world_text") == null
+	component_shape_picker.select(PRIMITIVES.SHAPES.find("quad"))
+	var shape_row := HBoxContainer.new()
+	component_catalog.add_child(shape_row)
+	var shape_label := Label.new()
+	shape_label.text = "Mesh shape"
+	shape_row.add_child(shape_label)
+	shape_row.add_child(component_shape_picker)
+	for schema in manager.component_schemas:
+		if schema.get("attach_defaults") == null: continue
+		var type_id := str(schema.type_id)
+		var row := HBoxContainer.new()
+		component_catalog.add_child(row)
+		var button := add_button(row, "+ " + type_id, change_component.bind(type_id, true))
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		var present: bool = object.fields.any(func(field): return int(field.component_id) == int(schema.local_id))
+		button.disabled = not manager.app.editable or present or (type_id == "Mirror" and not mirror_surface(object))
+		button.tooltip_text = "Already attached" if present else ("Needs a Quad or Mirror mesh" if type_id == "Mirror" and not mirror_surface(object) else "")
+		component_catalog_buttons[type_id] = button
+
+func filter_component_catalog(query: String) -> void:
+	for type_id in component_catalog_buttons:
+		component_catalog_buttons[type_id].get_parent().visible = query.is_empty() or str(type_id).to_lower().contains(query.to_lower())
+
+func mirror_surface(object: Dictionary) -> bool:
+	return object.get("visual",{}).get("kind","") == "primitive" and object.visual.get("shape","") in ["quad","mirror"]
 
 func change_component(type_id: String, add: bool) -> void:
 	if not manager.app.editable or not manager.app.objects.has(target_id): return
 	var object: Dictionary = manager.app.objects[target_id]
 	if object.get("panel") != null: return
-	if type_id == "MeshRenderer":
-		if (object.get("renderer") != null) == add or (not add and (object.get("playback") != null or object.get("mirror") != null)): return
-	elif type_id == "WorldText":
-		if (object.get("world_text") != null) == add: return
-	elif type_id == "Mirror":
-		if (object.get("mirror") != null) == add: return
-	elif type_id == "Camera":
-		if (object.get("camera") != null) == add: return
-	else: return
+	var schema: Dictionary = {}
+	for candidate in manager.component_schemas:
+		if candidate.type_id == type_id: schema = candidate; break
+	if schema.is_empty() or schema.get("attach_defaults") == null: return
+	var present: bool = object.fields.any(func(field): return int(field.component_id) == int(schema.local_id))
+	if present == add or (add and type_id == "Mirror" and not mirror_surface(object)): return
+	if not add and type_id == "MeshRenderer" and (object.get("playback") != null or object.get("mirror") != null): return
 	var command: Dictionary = {"action":"add_component" if add else "remove_component", "target":manager.app.address_of(object), "type_id":type_id, "expected_revision":object.object_revision}
-	if add and type_id == "MeshRenderer":
-		command["values"] = {"color":[0.2,0.65,0.8,1.0], "visual":{"kind":"primitive", "shape":PRIMITIVES.SHAPES[component_shape_picker.selected]}}
-	elif add and type_id == "WorldText":
-		command["values"] = {"world_text":"Text", "world_text_color":[1.0,1.0,1.0,1.0]}
-	elif add:
-		command["values"] = {"mirror_enabled":true} if type_id == "Mirror" else {"camera_enabled":true}
+	if add:
+		command["values"] = schema.attach_defaults.duplicate(true)
+		if type_id == "MeshRenderer": command["values"]["visual"]["shape"] = PRIMITIVES.SHAPES[component_shape_picker.selected]
 	message.text = ""
 	manager.command({"kind":"structure", "command":command}, func(result):
-		if not result.ok: message.text = result.get("message", "Could not change component"))
+		if not result.ok: message.text = result.get("message", "Could not change component")
+		elif add:
+			component_catalog_open = false
+			build_fields())
 
-func component_section(name: String, component_id: int = 0) -> void:
+func component_section(name: String, component_id: int = 0, removable: bool = false) -> void:
 	var section := VBoxContainer.new()
 	section.add_theme_constant_override("separation", 6)
 	fields_box.add_child(section)
@@ -341,7 +338,15 @@ func component_section(name: String, component_id: int = 0) -> void:
 	label.tooltip_text = "Drag / Ctrl+RMB: component reference"
 	label.add_theme_font_size_override("font_size", 19 if desktop else 23)
 	label.add_theme_color_override("font_color", Color("5ac8c5"))
-	section.add_child(label)
+	var header := HBoxContainer.new()
+	section.add_child(header)
+	header.add_child(label)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if removable and manager.app.editable:
+		var remove_button := add_button(header, "Remove", change_component.bind(name, false))
+		remove_button.disabled = name == "MeshRenderer" and (manager.app.objects[target_id].get("playback") != null or manager.app.objects[target_id].get("mirror") != null)
+		remove_button.tooltip_text = "Remove dependent components first" if remove_button.disabled else "Remove this component"
+		component_remove_buttons[name] = remove_button
 	field_container = section
 
 func build_field(field: Dictionary) -> void:
@@ -518,7 +523,7 @@ func refresh_pages(object: Dictionary) -> void:
 	tabs.current_tab = 1 if show_scripts else 0
 	tabs.set_block_signals(false)
 	script_mount.visible = show_scripts
-	component_actions.visible = not show_scripts and manager.app.objects.get(target_id, {}).get("panel") == null
+	component_actions.visible = manager.app.objects.get(target_id, {}).get("panel") == null
 	scroll.visible = not show_scripts
 	script_view.active = show_scripts
 	if show_scripts: script_view.refresh(target_id, object.inspector.get("script_id"))

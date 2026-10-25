@@ -48,6 +48,22 @@ func click_control(scene, surface, control: Control) -> void:
 	if captured and (not scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_CAPTURED):
 		push_error("FPS panel click released the mouse"); quit(1)
 
+func add_component_ui(scene, surface, panel, type_id: String) -> void:
+	if not panel.component_catalog_open:
+		panel.scroll.ensure_control_visible(panel.component_catalog_toggle)
+		await process_frame
+		await click_control(scene,surface,panel.component_catalog_toggle)
+	if not panel.component_catalog_buttons.has(type_id): push_error("Component missing from catalog: " + type_id); quit(1); return
+	panel.scroll.ensure_control_visible(panel.component_catalog_buttons[type_id])
+	await process_frame
+	await click_control(scene,surface,panel.component_catalog_buttons[type_id])
+
+func remove_component_ui(scene, surface, panel, type_id: String) -> void:
+	if not panel.component_remove_buttons.has(type_id): push_error("Component missing Remove: " + type_id); quit(1); return
+	panel.scroll.ensure_control_visible(panel.component_remove_buttons[type_id])
+	await process_frame
+	await click_control(scene,surface,panel.component_remove_buttons[type_id])
+
 func run() -> void:
 	var scene=load("res://main.tscn").instantiate()
 	root.add_child(scene)
@@ -218,6 +234,22 @@ func run() -> void:
 			if pixel.r>0.65 and pixel.r>pixel.g*1.8 and pixel.r>pixel.b*1.8: has_red=true; break
 		if has_red: break
 	if not has_red: push_error("Mirror viewport did not reflect an object in front of it"); quit(1); return
+	scene.camera.global_position=mirror_node.global_position-normal*3.0
+	scene.camera.look_at(mirror_node.global_position,mirror_node.global_basis.y.normalized())
+	red.global_position=mirror_node.global_position-normal*1.2+mirror_node.global_basis.x.normalized()*0.5
+	await create_timer(0.2).timeout
+	reflected=scene.mirror_renderer.entries[mirror_id].viewport.get_texture().get_image()
+	has_red=false
+	for y in range(0,reflected.get_height(),8):
+		for x in range(0,reflected.get_width(),8):
+			var pixel: Color=reflected.get_pixel(x,y)
+			if pixel.r>0.65 and pixel.r>pixel.g*1.8 and pixel.r>pixel.b*1.8: has_red=true; break
+		if has_red: break
+	if not has_red: push_error("Mirror back face did not update its reflection"); quit(1); return
+	scene.camera.global_position=mirror_node.global_position+normal*3.0
+	scene.camera.look_at(mirror_node.global_position,mirror_node.global_basis.y.normalized())
+	red.global_position=mirror_node.global_position+normal*1.2+mirror_node.global_basis.x.normalized()*0.5
+	await process_frame
 	var mirror_entry: Dictionary=scene.mirror_renderer.entries[mirror_id]
 	var original_pose: Transform3D=mirror_node.global_transform
 	scene.mirror_renderer.tick()
@@ -283,14 +315,25 @@ func run() -> void:
 	if not await until(func(): return scene.world_panels.panels.size()==1 and scene.world_panels.panels.values()[0].inspector_content,"Inspector did not open for Component"): quit(1); return
 	surface=scene.world_panels.panels.values()[0]
 	panel=surface.content
-	if not await until(func(): return panel.target_id==slot_id and panel.add_mesh_button!=null,"Inspector did not show Add Component"): quit(1); return
+	if not await until(func(): return panel.target_id==slot_id and panel.component_catalog_toggle!=null,"Inspector did not show Add Component"): quit(1); return
 	await process_frame
-	panel.component_shape_picker.select(PRIMITIVES.SHAPES.find("quad"))
-	await click_control(scene,surface,panel.add_mesh_button)
+	await click_control(scene,surface,panel.component_catalog_toggle)
+	if not panel.component_catalog_buttons.has("Mirror") or not panel.component_catalog_buttons["Mirror"].disabled:
+		push_error("Mirror must require a flat mesh in the component catalog"); quit(1); return
+	panel.component_search.text="cam"
+	panel.filter_component_catalog("cam")
+	if not panel.component_catalog_buttons["Camera"].get_parent().visible or panel.component_catalog_buttons["Mirror"].get_parent().visible:
+		push_error("Component catalog search did not filter entries"); quit(1); return
+	panel.component_search.text=""
+	panel.filter_component_catalog("")
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--screenshot="):
+			await RenderingServer.frame_post_draw
+			root.get_texture().get_image().save_png(arg.trim_prefix("--screenshot=").replace(".png","-components.png"))
+	await add_component_ui(scene,surface,panel,"MeshRenderer")
 	if not await until(func(): return scene.objects[slot_id].get("visual",{}).get("shape","")=="quad" and scene.render_nodes[slot_id].mesh!=null,"Quad Renderer Component did not attach"):
 		push_error("Inspector status="+panel.message.text+" selected="+scene.selected_id); quit(1); return
-	if not await until(func(): return panel.add_mirror_button!=null and not panel.add_mirror_button.disabled,"Inspector did not allow Mirror on Quad"): quit(1); return
-	await click_control(scene,surface,panel.add_mirror_button)
+	await add_component_ui(scene,surface,panel,"Mirror")
 	if not await until(func(): return scene.objects[slot_id].get("mirror")==true and scene.mirror_renderer.entries.has(slot_id) and panel.controls.has("mirror_enabled"),"Mirror Component did not attach"): quit(1); return
 	panel.scroll.ensure_control_visible(panel.controls.mirror_enabled[0])
 	await process_frame
@@ -304,14 +347,12 @@ func run() -> void:
 	if not await until(func(): return scene.objects[slot_id].get("mirror")==true and scene.mirror_renderer.entries.has(slot_id),"Mirror Enabled did not turn on"): quit(1); return
 	if scene.render_nodes[slot_id].layers!=scene.mirror_renderer.MIRROR_LAYER:
 		push_error("Enabled Mirror did not restore its reflection surface"); quit(1); return
-	await click_control(scene,surface,panel.component_remove_buttons["Mirror"])
+	await remove_component_ui(scene,surface,panel,"Mirror")
 	if not await until(func(): return scene.objects[slot_id].get("mirror")==null and not scene.mirror_renderer.entries.has(slot_id),"Mirror Component did not detach"): quit(1); return
 	if not await until(func(): return panel.component_remove_buttons.has("MeshRenderer"),"Inspector did not show Remove MeshRenderer"): quit(1); return
-	await process_frame
-	await click_control(scene,surface,panel.component_remove_buttons["MeshRenderer"])
+	await remove_component_ui(scene,surface,panel,"MeshRenderer")
 	if not await until(func(): return scene.objects[slot_id].visual.kind=="none" and scene.render_nodes[slot_id].mesh==null,"Renderer Component did not detach"): quit(1); return
-	if not await until(func(): return panel.add_camera_button!=null and not panel.add_camera_button.disabled,"Inspector did not allow Camera on Slot"): quit(1); return
-	await click_control(scene,surface,panel.add_camera_button)
+	await add_component_ui(scene,surface,panel,"Camera")
 	if not await until(func(): return scene.objects[slot_id].get("camera")==true and scene.camera_tool.is_camera(slot_id) and panel.controls.has("camera_enabled"),"Camera Component did not attach"): quit(1); return
 	panel.scroll.ensure_control_visible(panel.controls.camera_enabled[0])
 	await process_frame
@@ -321,21 +362,16 @@ func run() -> void:
 	await process_frame
 	await click_control(scene,surface,panel.controls.camera_enabled[0])
 	if not await until(func(): return scene.objects[slot_id].get("camera")==true and scene.camera_tool.is_camera(slot_id),"Camera Enabled did not turn on"): quit(1); return
-	await click_control(scene,surface,panel.component_remove_buttons["Camera"])
+	await remove_component_ui(scene,surface,panel,"Camera")
 	if not await until(func(): return scene.objects[slot_id].get("camera")==null,"Camera Component did not detach"): quit(1); return
-	if not await until(func(): return panel.add_text_button!=null,"Inspector did not show Add WorldText"): quit(1); return
-	await process_frame
-	await click_control(scene,surface,panel.add_text_button)
+	await add_component_ui(scene,surface,panel,"WorldText")
 	if not await until(func(): return scene.objects[slot_id].get("world_text")!=null and scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not attach"):
 		push_error("Inspector status="+panel.message.text+" value="+str(scene.objects[slot_id].get("world_text"))); quit(1); return
 	if scene.render_nodes[slot_id].get_node("WorldText").text!="Text": push_error("Wrong WorldText content"); quit(1); return
 	if not await until(func(): return panel.component_remove_buttons.has("WorldText"),"Inspector did not show Remove WorldText"): quit(1); return
-	await process_frame
-	await click_control(scene,surface,panel.component_remove_buttons["WorldText"])
+	await remove_component_ui(scene,surface,panel,"WorldText")
 	if not await until(func(): return scene.objects[slot_id].get("world_text")==null and not scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not detach"): quit(1); return
-	if not await until(func(): return panel.add_text_button!=null,"Inspector did not restore Add WorldText"): quit(1); return
-	await process_frame
-	await click_control(scene,surface,panel.add_text_button)
+	await add_component_ui(scene,surface,panel,"WorldText")
 	if not await until(func(): return scene.objects[slot_id].get("world_text")!=null and scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not reattach"): quit(1); return
 	await click_control(scene,surface,panel.hierarchy.child_text_button)
 	if not await until(func(): return scene.objects.values().any(func(o): return o.get("parent")!=null and o.parent.instance_id==slot_id and o.get("world_text")!=null),"Text child was not created"): quit(1); return

@@ -39,6 +39,8 @@ pub struct ComponentSchema {
     pub local_id: u32,
     pub version: u32,
     pub fields: Vec<FieldSchema>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attach_defaults: Option<Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
