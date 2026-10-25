@@ -513,6 +513,34 @@ func _collect_tint_materials(node: Node, color: Color, materials: Array) -> void
 				if not materials.has(material): materials.append(material)
 	for child in node.get_children(): _collect_tint_materials(child,color,materials)
 
+## Evict cached assets nothing references anymore, mirroring the image
+## texture eviction in apply_snapshot. In-flight transfers (downloads and
+## the active import) are never evicted from under their completion path.
+func evict_unused_assets() -> void:
+	var used := {}
+	for object in editor.objects.values():
+		var visual: Dictionary = object.get("visual",{})
+		if visual.get("kind") in ["model","video"]:
+			var id: String = str(visual.get("asset_id",""))
+			if not id.is_empty(): used[id] = true
+	for avatar in editor.avatars.values():
+		if not avatar.texture_id.is_empty(): used[avatar.texture_id] = true
+	var active_id: String = str(active.get("asset_id",""))
+	if not active_id.is_empty(): used[active_id] = true
+	for id in templates.keys():
+		if not used.has(id) and not downloads.has(id):
+			templates[id].node.free()
+			templates.erase(id)
+	for id in videos.keys():
+		if not used.has(id) and not downloads.has(id):
+			var path: String = videos[id]
+			videos.erase(id)
+			if FileAccess.file_exists(path): DirAccess.remove_absolute(path)
+	for id in avatar_textures.keys():
+		if not used.has(id): avatar_textures.erase(id)
+	for id in requested.keys():
+		if int(requested[id]) < 0 and not used.has(id): requested.erase(id)
+
 func attach_video(object_id: String) -> void:
 	var object: Dictionary = editor.objects[object_id]
 	var id: String = object.visual.asset_id
