@@ -64,6 +64,15 @@ func remove_component_ui(scene, surface, panel, type_id: String) -> void:
 	await process_frame
 	await click_control(scene,surface,panel.component_remove_buttons[type_id])
 
+func changed_image_pixels(first: Image, second: Image) -> int:
+	var count := 0
+	for y in range(first.get_height()/8, first.get_height()*7/8, 4):
+		for x in range(first.get_width()/4, first.get_width()*3/4, 4):
+			var a: Color=first.get_pixel(x,y)
+			var b: Color=second.get_pixel(x,y)
+			if absf(a.r-b.r)+absf(a.g-b.g)+absf(a.b-b.b)>0.25: count+=1
+	return count
+
 func run() -> void:
 	var scene=load("res://main.tscn").instantiate()
 	root.add_child(scene)
@@ -156,6 +165,34 @@ func run() -> void:
 	var camera_id: String=scene.selected_id
 	if scene.objects[camera_id].visual.shape!="camera" or not scene.render_nodes[camera_id].has_node("Lens"):
 		push_error("Camera item is missing its shared body or lens"); quit(1); return
+	if not scene.avatars.has(scene.self_id) or not scene.avatars[scene.self_id].visible:
+		push_error("Local avatar must stay visible to photo and mirror cameras in FPS"); quit(1); return
+	var self_layer: int=scene.avatars[scene.self_id].SELF_AVATAR_LAYER
+	if (scene.camera.cull_mask & self_layer) != 0 or (scene.camera_tool.eye.cull_mask & self_layer) == 0:
+		push_error("FPS camera must hide only its own avatar layer"); quit(1); return
+	for visual in scene.avatars[scene.self_id].find_children("*","VisualInstance3D",true,false):
+		if visual.layers!=self_layer: push_error("Local avatar visual is not on the camera-only layer"); quit(1); return
+	var self_avatar: Node3D=scene.avatars[scene.self_id]
+	var previous_avatar_position: Vector3=self_avatar.global_position
+	self_avatar.set_process(false)
+	self_avatar.global_position=Vector3(100,0,100)
+	var photo_eye: Camera3D=scene.camera_tool.eye
+	photo_eye.global_position=Vector3(100,1.1,102.5)
+	photo_eye.look_at(Vector3(100,1.1,100))
+	photo_eye.current=true
+	scene.camera_tool.viewport.render_target_update_mode=SubViewport.UPDATE_ALWAYS
+	await create_timer(0.1).timeout
+	var with_avatar: Image=scene.camera_tool.viewport.get_texture().get_image()
+	photo_eye.cull_mask &= ~self_layer
+	await create_timer(0.1).timeout
+	var without_avatar: Image=scene.camera_tool.viewport.get_texture().get_image()
+	photo_eye.cull_mask |= self_layer
+	scene.camera_tool.viewport.render_target_update_mode=SubViewport.UPDATE_DISABLED
+	self_avatar.global_position=previous_avatar_position
+	self_avatar.set_process(true)
+	var changed_pixels := changed_image_pixels(with_avatar,without_avatar)
+	if changed_pixels<80:
+		push_error("Camera viewport did not render the local avatar: "+str(changed_pixels)); quit(1); return
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--photo-dir="): scene.camera_tool.photo_directory=arg.trim_prefix("--photo-dir=")
 	scene.release_cursor()
@@ -215,6 +252,21 @@ func run() -> void:
 	var normal: Vector3=mirror_node.global_basis.z.normalized()
 	scene.camera.global_position=mirror_node.global_position+normal*3.0
 	scene.camera.look_at(mirror_node.global_position,mirror_node.global_basis.y.normalized())
+	if (scene.mirror_renderer.entries[mirror_id].camera.cull_mask & self_layer) == 0:
+		push_error("Mirror camera excluded the local avatar layer"); quit(1); return
+	self_avatar.set_process(false)
+	var mirror_avatar_position: Vector3=self_avatar.global_position
+	self_avatar.global_position=mirror_node.global_position-Vector3(0,1.0,0)+normal*1.2
+	await create_timer(0.2).timeout
+	var avatar_reflected: Image=scene.mirror_renderer.entries[mirror_id].viewport.get_texture().get_image()
+	scene.mirror_renderer.entries[mirror_id].camera.cull_mask &= ~self_layer
+	await create_timer(0.2).timeout
+	var no_avatar_reflected: Image=scene.mirror_renderer.entries[mirror_id].viewport.get_texture().get_image()
+	scene.mirror_renderer.entries[mirror_id].camera.cull_mask |= self_layer
+	self_avatar.global_position=mirror_avatar_position
+	self_avatar.set_process(true)
+	if changed_image_pixels(avatar_reflected,no_avatar_reflected)<60:
+		push_error("Mirror viewport did not render the local avatar"); quit(1); return
 	var red := MeshInstance3D.new()
 	var red_mesh := SphereMesh.new()
 	red_mesh.radius=0.23; red_mesh.height=0.46

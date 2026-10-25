@@ -19,6 +19,10 @@
 
 反射更新は鏡のローカルZ方向を表として距離を判定していた。裏側の視点では距離が負になって更新されず、面も裏側を描画しなかった。反射カメラの法線を視点側へ向け、距離の絶対値で更新を判定し、反射材質を両面描画にする。前後それぞれに色付きの物体を置く描画付き [creation-integration.mjs](../tests/creation-integration.mjs) で、両方向の反射テクスチャを確認する。以前の配布版には同時更新を4枚に制限する処理もあり、上限外の鏡は未描画になり得た。この制限は既に外している。関連コード：[mirror_renderer.gd](../client-godot/mirror_renderer.gd)。確認日：2026-10-26。
 
+## FPSの自分のアバターを隠すと撮影と鏡からも消える
+
+自分のアバターのNodeを`visible=false`にすると、通常のFPS画面だけでなく、同じ3Dワールドを描くMirrorとCameraのSubViewportからも消える。自分のアバターのVisualInstanceを専用レイヤーへ置いてNodeは表示したままにし、FPSの主カメラの`cull_mask`だけからそのレイヤーを外す。反射カメラと撮影カメラはそのレイヤーを描く。名前ラベルは自分の視点では表示しない。描画付きの [creation-integration.mjs](../tests/creation-integration.mjs) で、撮影画像と鏡の反射画像をアバターレイヤー有無で比較し、FPS主カメラでは非表示になることを確認する。関連コード：[avatar.gd](../client-godot/avatar.gd)、[main.gd](../client-godot/main.gd)。確認日：2026-10-26。
+
 ## Debug.batを押し直しても古いEngineが残ると鏡が白い
 
 `Debug.bat`は`-Build`を渡すが、既存のEngineが動いていると`start-local.ps1`がビルド前に画面を再表示して終了していた。Godotの新しいソースだけを別途起動すると、Mirror形状の古いSnapshotには`Mirror`コンポーネントがなく、新しいGodotは反射を有効にできず、平面の素の色だけを表示する。実際のデバッグセッションでは3枚のMirrorがすべてコンポーネントなしで、保存ワールドは形式1だった。`-Build`を受けたら既存セッションを保存してEngineを停止し、ビルドしてから両方を起動する。保存ワールドのコピーを新しいEngineで開くと、3枚とも`Mirror.Enabled=true`に移行したことを確認した。関連コード：[start-local.ps1](../scripts/start-local.ps1)、[復元処理](../crates/core/src/replication.rs)。確認日：2026-10-26。

@@ -1070,9 +1070,10 @@ func _process(delta: float) -> void:
 			camera.position = target + Vector3(sin(orbit_yaw) * cos(orbit_pitch), -sin(orbit_pitch), cos(orbit_yaw) * cos(orbit_pitch)) * orbit_distance
 			camera.look_at(target)
 	if avatars.has(self_id):
-		avatars[self_id].visible = not first_person or not avatar_camera
+		avatars[self_id].visible = true
 		avatars[self_id].target_position = player_position
 		avatars[self_id].target_yaw = player_yaw
+	camera.cull_mask = 0xfffff ^ AVATAR.SELF_AVATAR_LAYER if first_person and avatar_camera else 0xfffff
 	mirror_renderer.tick()
 	if connected and Time.get_ticks_msec() - last_input_at >= 16:
 		last_input_at = Time.get_ticks_msec()

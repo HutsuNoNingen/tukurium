@@ -1,5 +1,6 @@
 extends Node3D
 
+const SELF_AVATAR_LAYER := 1 << 18
 var target_position := Vector3.ZERO
 var target_yaw := 0.0
 var local := false
@@ -85,6 +86,11 @@ func apply_texture(texture: Texture2D) -> void:
 		paint_material.albedo_texture = texture if texture != null else load("res://assets/oekaki/sample.png")
 
 func set_state(view: Dictionary, is_local: bool, immediate: bool = false) -> void:
+	if local != is_local:
+		var layer := SELF_AVATAR_LAYER if is_local else 1
+		for visual in find_children("*", "VisualInstance3D", true, false):
+			visual.layers = layer
+		name_label.visible = not is_local
 	local = is_local
 	var p: Array = view.pose.position
 	target_position = Vector3(p[0], p[1], p[2])
