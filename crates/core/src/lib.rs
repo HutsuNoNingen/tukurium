@@ -392,6 +392,9 @@ impl WorldModel {
     pub fn snapshot(&self) -> Snapshot {
         self.world.resource::<SnapshotCache>().0.clone()
     }
+    pub fn world_revision(&self) -> &str {
+        &self.world.resource::<SnapshotCache>().0.world_revision
+    }
     pub fn enqueue_as(
         &mut self,
         command: WorldCommand,
