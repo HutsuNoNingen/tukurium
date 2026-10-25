@@ -20,6 +20,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .map_err(|e| e.1)?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     println!("tukurium service http://{}", listener.local_addr()?);
+    // Expired records are swept at startup (Server::open) and then hourly.
+    let sweeper = server.clone();
+    tokio::spawn(async move {
+        let mut timer = tokio::time::interval(std::time::Duration::from_secs(3600));
+        timer.tick().await;
+        loop {
+            timer.tick().await;
+            match sweeper.sweep_expired() {
+                Ok(n) if n > 0 => println!("Catalog sweep removed {n} expired records"),
+                Ok(_) => {}
+                Err(e) => eprintln!("Catalog sweep failed: {}", e.1),
+            }
+        }
+    });
     axum::serve(listener, server.router())
         .with_graceful_shutdown(async {
             #[cfg(unix)]
