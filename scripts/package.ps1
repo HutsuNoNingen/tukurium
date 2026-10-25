@@ -54,6 +54,7 @@ try {
     }
     New-Item -ItemType Directory -Force -Path (Join-Path $packageRoot 'client-godot/assets/ui') | Out-Null
     Copy-Item -LiteralPath 'client-godot/assets/ui/selection-cursor.png','client-godot/assets/ui/selection-cursor.png.import' -Destination (Join-Path $packageRoot 'client-godot/assets/ui')
+    Copy-Item -LiteralPath 'client-godot/assets/branding' -Destination (Join-Path $packageRoot 'client-godot/assets') -Recurse
     $displayVersion = $name.Substring('Kokoverse-Windows-x64-'.Length)
     $displayVersion | Set-Content -LiteralPath (Join-Path $packageRoot 'client-godot/version.txt') -Encoding Ascii -NoNewline
     $godotOutput = & .tools/godot/Godot_v4.7.2-stable_win64_console.exe --headless --path client-godot --editor --import --quit 2>&1
@@ -120,6 +121,7 @@ User-imported world assets are NOT included in this archive.
     New-Item -ItemType Directory -Path (Join-Path $packageRoot 'source/client-godot/assets') -Force | Out-Null
     Copy-Item -LiteralPath 'client-godot/assets/oekaki' -Destination (Join-Path $packageRoot 'source/client-godot/assets') -Recurse
     Copy-Item -LiteralPath 'client-godot/assets/ui' -Destination (Join-Path $packageRoot 'source/client-godot/assets') -Recurse
+    Copy-Item -LiteralPath 'client-godot/assets/branding' -Destination (Join-Path $packageRoot 'source/client-godot/assets') -Recurse
     $files = @(Get-ChildItem -LiteralPath $packageRoot -File -Recurse -Force | ForEach-Object {
         @{ path=$_.FullName.Substring($packageRoot.Length+1).Replace('\','/'); size=$_.Length; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
     })

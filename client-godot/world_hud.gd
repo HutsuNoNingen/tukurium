@@ -3,6 +3,7 @@ extends CanvasLayer
 const RING = preload("res://ring_menu.gd")
 const DesktopWindow = preload("res://desktop_window.gd")
 const CURSOR_IMAGE = preload("res://assets/ui/selection-cursor.png")
+const BRAND_ART = preload("res://brand_art.gd")
 const INK := Color("101b25")
 const LINE := Color("304550")
 const TEXT := Color("e6f0f4")
@@ -81,7 +82,17 @@ func setup(owner) -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation",12)
 	bar.add_child(row)
-	row.add_child(text("◇  tukurium",21))
+	var brand_panel := PanelContainer.new()
+	brand_panel.add_theme_stylebox_override("panel", style(Color("f5e9d5"), 3))
+	brand_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(brand_panel)
+	var brand := HBoxContainer.new()
+	brand.name = "Brand"
+	brand.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	brand.add_theme_constant_override("separation", 4)
+	brand_panel.add_child(brand)
+	brand.add_child(BRAND_ART.picture(BRAND_ART.mascot(), Vector2(30, 30)))
+	brand.add_child(BRAND_ART.picture(BRAND_ART.wordmark(), Vector2(125, 23)))
 	row.add_child(VSeparator.new())
 	var edit_switch := HBoxContainer.new()
 	edit_switch.add_theme_constant_override("separation",2)

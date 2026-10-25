@@ -2,6 +2,7 @@ extends CanvasLayer
 ## HN home, saved items and workshop. The Engine keeps session credentials.
 const Art = preload("res://service_art.gd")
 const DesktopWindow = preload("res://desktop_window.gd")
+const BRAND_ART = preload("res://brand_art.gd")
 const PAPER = Color("fffdf9")
 const GROUND = Color("eae5db")
 const INK = Color("26262e")
@@ -194,6 +195,10 @@ func setup(scene) -> void:
 		main.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 		var top := row(main)
 		frame.use_titlebar(top)
+		if key=="sessions":
+			var logo := BRAND_ART.picture(BRAND_ART.logo(), Vector2(136, 100))
+			logo.name="BrandLogo"
+			top.add_child(logo)
 		var title_group := column(top,3)
 		title_group.mouse_filter=Control.MOUSE_FILTER_IGNORE
 		title_group.size_flags_horizontal=Control.SIZE_EXPAND_FILL
@@ -213,7 +218,9 @@ func setup(scene) -> void:
 		if key=="sessions":
 			back_button=close_button
 			var account := surface(main,PAPER,12)
-			var account_body := column(account,7)
+			var account_layout := row(account,12)
+			var account_body := column(account_layout,7)
+			account_body.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 			identity=paragraph("HNを入力してはじめる",13)
 			account_body.add_child(identity)
 			var account_row := row(account_body)
@@ -226,6 +233,9 @@ func setup(scene) -> void:
 					DisplayServer.clipboard_set(str(current_user.id))
 					status_labels.sessions.text="ユーザーコードをコピーしました。"
 			).tooltip_text="ワークショップを使わず直接渡すときに使います。"
+			var mascot := BRAND_ART.picture(BRAND_ART.mascot(), Vector2(90, 82))
+			mascot.name="BrandMascot"
+			account_layout.add_child(mascot)
 		var workspace := row(main,16)
 		workspace.size_flags_vertical=Control.SIZE_EXPAND_FILL
 		var pane := column(workspace,12)

@@ -1,5 +1,7 @@
 # tukurium
 
+<img src="client-godot/assets/branding/logo.png" alt="tukuriumのロゴ" width="280">
+
 Rust / bevy_ecs のEngineとGodotの表示クライアントを別プロセスで動かす、共同編集の最初のプロトタイプ。各Engine間はGoアダプターを経由してKokoSyncで接続する。Tonariumとのデータ互換性は持たせない。
 
 画面と案内に表示する名前は`tukurium`。既存のワールド、本人情報、テスター向け更新との接続を保つため、実行ファイル名、Rust crate名、`%LOCALAPPDATA%/Kokoverse/`、通信キー、配布版の識別子`Kokoverse-Windows-x64-`、R2バケット名は現時点で維持する。これらは保存・通信・更新に使う内部識別子で、表示名とは別に扱う。

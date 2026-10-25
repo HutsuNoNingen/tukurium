@@ -3,6 +3,8 @@ config_version=5
 [application]
 config/name="tukurium"
 run/main_scene="res://main.tscn"
+config/icon="res://assets/branding/mascot.png"
+boot_splash/image="res://assets/branding/logo.png"
 
 [display]
 window/size/viewport_width=1280
