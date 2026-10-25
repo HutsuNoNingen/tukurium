@@ -94,7 +94,7 @@ struct Engine {
     managed_verified: bool,
     managed_peers: HashMap<String, String>,
     managed_aliases: HashMap<String, Vec<String>>,
-    managed_placed: HashSet<String>,
+    managed_placed: HashMap<String, std::time::Instant>,
     edit_sessions: kokoverse_core::edit_sessions::EditSessions,
     documents: script_documents::Bridge,
     graph_documents: graph_documents::Bridge,
@@ -471,6 +471,7 @@ impl Engine {
         self.previews.clear();
         for id in self.remote_seen.keys() {
             self.model.remove_participant(id);
+            self.chat_last_sent.remove(id);
         }
         self.remote_seen.clear();
         self.remote_epochs.clear();
@@ -955,6 +956,7 @@ impl Engine {
                     self.rays_dirty = true;
                     self.remote_seen.remove(&id);
                     self.model.remove_participant(&id);
+                    self.chat_last_sent.remove(&id);
                     self.edit_sessions.forget(&id);
                     if peer == self.host_peer && !self.host {
                         self.synced = false;
@@ -977,6 +979,7 @@ impl Engine {
                         self.previews.forget(&format!("{peer}:{old}"));
                         self.model.remove_participant(&format!("{peer}:{old}"));
                         self.remote_seen.remove(&format!("{peer}:{old}"));
+                        self.chat_last_sent.remove(&format!("{peer}:{old}"));
                     }
                     if peer == self.host_peer && !self.host {
                         self.synced = false;
@@ -1334,7 +1337,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         managed_verified: false,
         managed_peers: HashMap::new(),
         managed_aliases: HashMap::new(),
-        managed_placed: HashSet::new(),
+        managed_placed: HashMap::new(),
         clock,
         assets: assets::Assets::new(asset_root)?,
         local_ray: None,
@@ -1454,7 +1457,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 if !engine.host && !engine.synced && engine.adapter.is_some() {engine.request_snapshot();}
                 let stale:Vec<_> = engine.remote_seen.iter().filter(|(_,time)| time.elapsed()>Duration::from_secs(5)).map(|(id,_)| id.clone()).collect();
-                for id in stale { engine.remote_seen.remove(&id); engine.model.remove_participant(&id); engine.remote_rays.remove(&id); engine.rays_dirty=true; }
+                for id in stale { engine.remote_seen.remove(&id); engine.model.remove_participant(&id); engine.chat_last_sent.remove(&id); engine.remote_rays.remove(&id); engine.rays_dirty=true; }
+                // Placement tokens expire server-side after 60s; remembering them
+                // longer only needs a margin for clock skew, so the set stays bounded.
+                engine.managed_placed.retain(|_, placed| placed.elapsed() < Duration::from_secs(120));
             },
             event = rx.recv() => match event {
                 Some(Event::Connected(id, adapter, out)) => {
@@ -1482,8 +1488,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             if body["kind"]=="service_place" && engine.host {
                                 if let Some(token)=body["placement"].as_str()
-                                    && !engine.managed_placed.contains(token) {
-                                        let key=token.to_string();engine.managed_placed.insert(key.clone());
+                                    && !engine.managed_placed.contains_key(token) {
+                                        let key=token.to_string();engine.managed_placed.insert(key.clone(),std::time::Instant::now());
                                         engine.start_service_job(0,key,"resolve_placement".into(),json!({"action":"resolve_placement","placement":token}),&events);
                                 }
                                 continue;
@@ -1590,7 +1596,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         if operation=="place_item" {
                             let token=completion.response["placement"].as_str().ok_or("Missing placement")?.to_string();
-                            if engine.host {engine.managed_placed.insert(token.clone());engine.start_service_job(id,request.clone(),"resolve_placement".into(),json!({"action":"resolve_placement","placement":token}),&events);}
+                            if engine.host {engine.managed_placed.insert(token.clone(),std::time::Instant::now());engine.start_service_job(id,request.clone(),"resolve_placement".into(),json!({"action":"resolve_placement","placement":token}),&events);}
                             else {let host=engine.host_peer.clone();engine.network(Some(&host),json!({"kind":"service_place","placement":token}));}
                         }
                         if operation=="save_item" && engine.host {
