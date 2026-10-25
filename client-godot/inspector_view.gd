@@ -182,7 +182,7 @@ func line_field(parent: Node, field: String, part: String) -> LineEdit:
 	var line := LineEdit.new()
 	line.custom_minimum_size = Vector2(0, 30 if desktop else 44)
 	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	line.max_length = 80 if field in ["name", "world_text"] else 32
+	line.max_length = 80 if field in ["name", "world_text", "value_text"] else 32
 	line.set_meta("field", field)
 	line.set_meta("part", part)
 	parent.add_child(line)
@@ -291,8 +291,9 @@ func build_component_actions(object: Dictionary) -> void:
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		var present: bool = object.fields.any(func(field): return int(field.component_id) == int(schema.local_id))
-		button.disabled = not manager.app.editable or present or (type_id == "Mirror" and not mirror_surface(object))
-		button.tooltip_text = "Already attached" if present else ("Needs a Quad or Mirror mesh" if type_id == "Mirror" and not mirror_surface(object) else "")
+		var motion_ready: bool = object.get("parent") == null and object.get("renderer") != null and object.get("collider") != null and object.collider.get("solid", false)
+		button.disabled = not manager.app.editable or present or (type_id == "Mirror" and not mirror_surface(object)) or (type_id == "PlanarMotion" and not motion_ready)
+		button.tooltip_text = "Already attached" if present else ("Needs a Quad or Mirror mesh" if type_id == "Mirror" and not mirror_surface(object) else ("Needs a root Slot with a renderer and solid Collider" if type_id == "PlanarMotion" and not motion_ready else ""))
 		component_catalog_buttons[type_id] = button
 
 func filter_component_catalog(query: String) -> void:
@@ -312,7 +313,8 @@ func change_component(type_id: String, add: bool) -> void:
 	if schema.is_empty() or schema.get("attach_defaults") == null: return
 	var present: bool = object.fields.any(func(field): return int(field.component_id) == int(schema.local_id))
 	if present == add or (add and type_id == "Mirror" and not mirror_surface(object)): return
-	if not add and type_id == "MeshRenderer" and (object.get("panel") != null or object.get("playback") != null or object.get("mirror") != null or not object.get("scripts",[]).is_empty()): return
+	if add and type_id == "PlanarMotion" and (object.get("parent") != null or object.get("renderer") == null or object.get("collider") == null or not object.collider.get("solid", false)): return
+	if not add and type_id == "MeshRenderer" and (object.get("panel") != null or object.get("playback") != null or object.get("mirror") != null or object.get("planar_motion") != null or not object.get("scripts",[]).is_empty()): return
 	var command: Dictionary = {"action":"add_component" if add else "remove_component", "target":manager.app.address_of(object), "type_id":type_id, "expected_revision":object.object_revision}
 	if add:
 		command["values"] = schema.attach_defaults.duplicate(true)
@@ -345,7 +347,7 @@ func component_section(name: String, component_id: int = 0, removable: bool = fa
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if removable and manager.app.editable:
 		var remove_button := add_button(header, "Remove", change_component.bind(name, false))
-		remove_button.disabled = name == "MeshRenderer" and (manager.app.objects[target_id].get("panel") != null or manager.app.objects[target_id].get("playback") != null or manager.app.objects[target_id].get("mirror") != null or not manager.app.objects[target_id].get("scripts",[]).is_empty())
+		remove_button.disabled = name == "MeshRenderer" and (manager.app.objects[target_id].get("panel") != null or manager.app.objects[target_id].get("playback") != null or manager.app.objects[target_id].get("mirror") != null or manager.app.objects[target_id].get("planar_motion") != null or not manager.app.objects[target_id].get("scripts",[]).is_empty())
 		remove_button.tooltip_text = "Remove dependent components first" if remove_button.disabled else "Remove this component"
 		component_remove_buttons[name] = remove_button
 	field_container = section
@@ -374,6 +376,9 @@ func build_field(field: Dictionary) -> void:
 			"string":
 				heading(field.label)
 				line_field(field_container, field.id, "0")
+			"number":
+				heading(field.label)
+				line_field(field_container, field.id, "0")
 			"bool":
 				var check := CheckBox.new()
 				check.text = field.label
@@ -383,6 +388,7 @@ func build_field(field: Dictionary) -> void:
 				check.toggled.connect(func(_enabled): changed(field.id, check, true))
 			"vec3": vector_field(field.id, field.label, ["X", "Y", "Z"])
 			"quat": vector_field(field.id, field.label + " · degrees", ["X", "Y", "Z"])
+			"vec4": vector_field(field.id, field.label, ["min X", "max X", "min Z", "max Z"])
 			"color": vector_field(field.id, field.label, ["R", "G", "B", "A"])
 			"collider":
 				heading("Collider")
@@ -407,7 +413,7 @@ func build_field(field: Dictionary) -> void:
 					add_button(row, "Restart", func(): playback("restart"))
 			_:
 				heading(field.label + " · " + JSON.stringify(field.value))
-		if field.id in ["position", "rotation", "scale", "color", "world_text", "world_text_color"]:
+		if field.id in ["position", "rotation", "scale", "color", "world_text", "world_text_color", "value_number", "value_bool", "value_text"]:
 			var info := Label.new()
 			info.add_theme_font_size_override("font_size", 18)
 			info.add_theme_color_override("font_color", Color("c5a5ed"))
@@ -553,6 +559,7 @@ func fill_values() -> void:
 			parts[1].button_pressed = value != null and value.solid
 			for i in range(3): parts[i+2].text = String.num(float(value.half_extents[i]) if value != null else 0.5, 4)
 		elif data.value_type == "string": parts[0].text = str(value)
+		elif data.value_type == "number": parts[0].text = String.num(float(value), 4)
 		elif data.value_type == "bool": parts[0].button_pressed = value == true
 		elif data.value_type == "quat":
 			var angles := Quaternion(value[0],value[1],value[2],value[3]).get_euler()
@@ -612,6 +619,7 @@ func read_value(field: String) -> Dictionary:
 		var q := Quaternion.from_euler(Vector3(deg_to_rad(values[0]),deg_to_rad(values[1]),deg_to_rad(values[2])))
 		return {"ok":true,"value":[q.x,q.y,q.z,q.w]}
 	if type == "collider": return {"ok":true,"value":{"solid":parts[1].button_pressed,"half_extents":values}}
+	if type == "number": return {"ok":true,"value":values[0]}
 	return {"ok":true,"value":values}
 
 func edit_result(result: Dictionary, field: String) -> void:

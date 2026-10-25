@@ -5,7 +5,7 @@ signal operations(ops: Array)
 const PREFIX := "@tukurium-graph-v1\n"
 const PORT_HELP := "Port colors and labels show types · Right-click empty space to add nodes."
 const TYPES := {
-	"on_update":[[], [["flow","flow"]]], "on_interact":[[], [["flow","flow"]]], "on_drive":[[], [["flow","flow"]]],
+	"on_update":[[], [["flow","flow"]]], "on_interact":[[], [["flow","flow"]]], "on_button_press":[[], [["flow","flow"]]], "on_button_release":[[], [["flow","flow"]]], "on_contact_start":[[], [["flow","flow"]]], "on_contact_end":[[], [["flow","flow"]]], "on_drive":[[], [["flow","flow"]]],
 	"branch":[[["flow","flow"],["test","bool"]],[["yes","flow"],["no","flow"]]],
 	"sequence":[[["flow","flow"]],[["first","flow"],["second","flow"]]],
 	"write_field":[[["flow","flow"],["value","any"]],[["next","flow"]]],
@@ -15,7 +15,7 @@ const TYPES := {
 	"number":[[],[["value","number"]]], "public_number":[[],[["value","number"]]],
 	"bool":[[],[["value","bool"]]], "string":[[],[["value","string"]]],
 	"vec3":[[],[["value","vec3"]]], "color":[[],[["value","color"]]],
-	"delta":[[],[["value","number"]]], "time":[[],[["value","number"]]], "world_time":[[],[["value","number"]]],
+	"delta":[[],[["value","number"]]], "time":[[],[["value","number"]]], "world_time":[[],[["value","number"]]], "contact_other_id":[[],[["value","string"]]],
 	"read_field":[[],[["value","any"]]], "get_state":[[],[["value","any"]]],
 	"display":[[["value","any"]],[["value","any"]]],
 	"add":[[["a","number"],["b","number"]],[["value","number"]]],
@@ -74,7 +74,7 @@ func _ready() -> void:
 	palette = OptionButton.new()
 	palette.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for kind in TYPES:
-		var category := "Event" if kind.begins_with("on_") else ("Flow" if kind in ["branch","sequence","write_field","drive_field","set_state","capture_camera"] else ("Value" if kind in ["number","public_number","bool","string","vec3","color","delta","time","world_time","read_field","get_state"] else ("Convert" if kind in ["to_string","join","rotation_y"] else "Math / Logic")))
+		var category := "Event" if kind.begins_with("on_") else ("Flow" if kind in ["branch","sequence","write_field","drive_field","set_state","capture_camera"] else ("Value" if kind in ["number","public_number","bool","string","vec3","color","delta","time","world_time","contact_other_id","read_field","get_state"] else ("Convert" if kind in ["to_string","join","rotation_y"] else "Math / Logic")))
 		palette.add_item(category + " · " + kind.replace("_", " ").capitalize())
 	tools.add_child(palette)
 	var add := Button.new()

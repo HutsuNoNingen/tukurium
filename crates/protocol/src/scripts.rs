@@ -25,6 +25,14 @@ pub struct ScriptSchema {
     #[serde(default)]
     pub has_drive: bool,
     pub has_interact: bool,
+    #[serde(default)]
+    pub has_button_press: bool,
+    #[serde(default)]
+    pub has_button_release: bool,
+    #[serde(default)]
+    pub has_contact_start: bool,
+    #[serde(default)]
+    pub has_contact_end: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -63,6 +71,8 @@ pub enum ScriptAction {
         expected_revision: String,
     },
     Interact,
+    Press,
+    Release,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

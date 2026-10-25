@@ -42,8 +42,8 @@ pub struct AttachmentRegistration {
 }
 
 fn remove_mesh(object: &mut ObjectView) -> Result<(), String> {
-    if object.panel.is_some() || object.playback.is_some() || object.mirror.is_some() || !object.scripts.is_empty() {
-        return Err("Remove dependent panel, playback, mirror, or scripts first".into());
+    if object.panel.is_some() || object.playback.is_some() || object.mirror.is_some() || object.planar_motion.is_some() || !object.scripts.is_empty() {
+        return Err("Remove dependent panel, playback, mirror, PlanarMotion, or scripts first".into());
     }
     object.renderer = None;
     object.visual = Visual::None;
@@ -62,7 +62,31 @@ fn remove_camera(object: &mut ObjectView) -> Result<(), String> {
     object.camera = None;
     Ok(())
 }
+fn remove_value_number(object: &mut ObjectView) -> Result<(), String> { object.value_number = None; Ok(()) }
+fn remove_value_bool(object: &mut ObjectView) -> Result<(), String> { object.value_bool = None; Ok(()) }
+fn remove_value_text(object: &mut ObjectView) -> Result<(), String> { object.value_text = None; Ok(()) }
+fn remove_button(object: &mut ObjectView) -> Result<(), String> { object.button = None; Ok(()) }
+fn remove_contact_sensor(object: &mut ObjectView) -> Result<(), String> { object.contact_sensor = None; Ok(()) }
+fn remove_planar_motion(object: &mut ObjectView) -> Result<(), String> { object.planar_motion = None; Ok(()) }
 fn boolean(v: &Value) -> Result<(), String> { valid(v.is_boolean()) }
+fn number(v: &Value) -> Result<(), String> {
+    valid(v.as_f64().is_some_and(|n| n.is_finite() && n.abs() <= 1e9))
+}
+fn planar_velocity(v: &Value) -> Result<(), String> {
+    vector::<3>(v, -50.0, 50.0)?;
+    valid(v[1].as_f64().is_some_and(|y| y.abs() < 1e-9))
+}
+fn planar_drag(v: &Value) -> Result<(), String> {
+    valid(v.as_f64().is_some_and(|n| n.is_finite() && (0.0..=10.0).contains(&n)))
+}
+fn planar_bounce(v: &Value) -> Result<(), String> {
+    valid(v.as_f64().is_some_and(|n| n.is_finite() && (0.0..=1.0).contains(&n)))
+}
+fn planar_bounds(v: &Value) -> Result<(), String> {
+    vector::<4>(v, -1000.0, 1000.0)?;
+    let b: [f64; 4] = parse(v)?;
+    valid(b[0] + 0.2 < b[1] && b[2] + 0.2 < b[3])
+}
 
 fn world_text(v: &Value) -> Result<(), String> {
     valid(v.as_str().is_some_and(|s| s.chars().count() <= 80 && s.len() <= 512))
@@ -77,7 +101,7 @@ fn field(
     access: FieldAccess,
 ) -> FieldRegistration {
     let script_write = access == FieldAccess::Edit
-        && matches!(id, "name" | "position" | "rotation" | "scale" | "color" | "world_text" | "world_text_color" | "mirror_enabled" | "camera_enabled");
+        && matches!(id, "name" | "position" | "rotation" | "scale" | "color" | "world_text" | "world_text_color" | "mirror_enabled" | "camera_enabled" | "value_number" | "value_bool" | "value_text" | "planar_velocity");
     FieldRegistration {
         schema: FieldSchema {
             id: id.into(),
@@ -87,7 +111,7 @@ fn field(
             persistent: true,
             access,
             script_write,
-            script_drive: script_write && !matches!(id, "name" | "mirror_enabled" | "camera_enabled"),
+            script_drive: script_write && !matches!(id, "name" | "mirror_enabled" | "camera_enabled" | "planar_velocity"),
         },
         ui_order: order,
         validate,
@@ -212,6 +236,12 @@ pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
         AttachmentRegistration { type_id: "WorldText", remove: remove_world_text, defaults: || json!({"world_text":"Text","world_text_color":[1.0,1.0,1.0,1.0]}) },
         AttachmentRegistration { type_id: "Mirror", remove: remove_mirror, defaults: || json!({"mirror_enabled":true}) },
         AttachmentRegistration { type_id: "Camera", remove: remove_camera, defaults: || json!({"camera_enabled":true}) },
+        AttachmentRegistration { type_id: "ValueNumber", remove: remove_value_number, defaults: || json!({"value_number":0.0}) },
+        AttachmentRegistration { type_id: "ValueBool", remove: remove_value_bool, defaults: || json!({"value_bool":false}) },
+        AttachmentRegistration { type_id: "ValueText", remove: remove_value_text, defaults: || json!({"value_text":""}) },
+        AttachmentRegistration { type_id: "Button", remove: remove_button, defaults: || json!({"button_enabled":true}) },
+        AttachmentRegistration { type_id: "ContactSensor", remove: remove_contact_sensor, defaults: || json!({"contact_enabled":true}) },
+        AttachmentRegistration { type_id: "PlanarMotion", remove: remove_planar_motion, defaults: || json!({"planar_enabled":true,"planar_velocity":[0.0,0.0,0.0],"planar_drag":0.1,"planar_bounce":0.9,"planar_bounds":[-3.0,3.0,-5.0,5.0]}) },
     ],
     components: vec![
         ComponentRegistration {
@@ -481,6 +511,66 @@ pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
             restore: |o, v| { o.camera = Some(parse(&v["camera_enabled"])?); Ok(()) },
             apply: |w, e, _, v| w.get_mut::<Camera>(e).unwrap().0 = v.as_bool().unwrap(),
         },
+        ComponentRegistration {
+            type_id: "ValueNumber",
+            local_id: 14,
+            fields: vec![editable("value_number", "Value", "number", 19, number)],
+            present: |o| o.value_number.is_some(),
+            project: |o| json!({"value_number":o.value_number.unwrap()}),
+            restore: |o, v| { o.value_number = Some(parse(&v["value_number"])?); Ok(()) },
+            apply: |w, e, _, v| w.get_mut::<ValueNumber>(e).unwrap().0 = v.as_f64().unwrap(),
+        },
+        ComponentRegistration {
+            type_id: "ValueBool",
+            local_id: 15,
+            fields: vec![editable("value_bool", "Value", "bool", 20, boolean)],
+            present: |o| o.value_bool.is_some(),
+            project: |o| json!({"value_bool":o.value_bool.unwrap()}),
+            restore: |o, v| { o.value_bool = Some(parse(&v["value_bool"])?); Ok(()) },
+            apply: |w, e, _, v| w.get_mut::<ValueBool>(e).unwrap().0 = v.as_bool().unwrap(),
+        },
+        ComponentRegistration {
+            type_id: "ValueText",
+            local_id: 16,
+            fields: vec![editable("value_text", "Value", "string", 21, world_text)],
+            present: |o| o.value_text.is_some(),
+            project: |o| json!({"value_text":o.value_text.as_ref().unwrap()}),
+            restore: |o, v| { o.value_text = Some(parse(&v["value_text"])?); Ok(()) },
+            apply: |w, e, _, v| w.get_mut::<ValueText>(e).unwrap().0 = v.as_str().unwrap().into(),
+        },
+        ComponentRegistration {
+            type_id: "Button",
+            local_id: 17,
+            fields: vec![editable("button_enabled", "Enabled", "bool", 22, boolean)],
+            present: |o| o.button.is_some(),
+            project: |o| json!({"button_enabled":o.button.unwrap()}),
+            restore: |o, v| { o.button = Some(parse(&v["button_enabled"])?); Ok(()) },
+            apply: |w, e, _, v| w.get_mut::<Button>(e).unwrap().0 = v.as_bool().unwrap(),
+        },
+        ComponentRegistration {
+            type_id: "ContactSensor",
+            local_id: 18,
+            fields: vec![editable("contact_enabled", "Enabled", "bool", 23, boolean)],
+            present: |o| o.contact_sensor.is_some(),
+            project: |o| json!({"contact_enabled":o.contact_sensor.unwrap()}),
+            restore: |o, v| { o.contact_sensor = Some(parse(&v["contact_enabled"])?); Ok(()) },
+            apply: |w, e, _, v| w.get_mut::<ContactSensor>(e).unwrap().0 = v.as_bool().unwrap(),
+        },
+        ComponentRegistration {
+            type_id: "PlanarMotion",
+            local_id: 19,
+            fields: vec![
+                editable("planar_enabled", "Enabled", "bool", 24, boolean),
+                editable("planar_velocity", "Velocity X/Y/Z", "vec3", 25, planar_velocity),
+                editable("planar_drag", "Drag", "number", 26, planar_drag),
+                editable("planar_bounce", "Bounce", "number", 27, planar_bounce),
+                editable("planar_bounds", "Bounds min X / max X / min Z / max Z", "vec4", 28, planar_bounds),
+            ],
+            present: |o| o.planar_motion.is_some(),
+            project: |o| { let m = o.planar_motion.as_ref().unwrap(); json!({"planar_enabled":m.enabled,"planar_velocity":m.velocity,"planar_drag":m.drag,"planar_bounce":m.bounce,"planar_bounds":m.bounds}) },
+            restore: |o, v| { o.planar_motion = Some(PlanarMotionSpec { enabled: parse(&v["planar_enabled"])?, velocity: parse(&v["planar_velocity"])?, drag: parse(&v["planar_drag"])?, bounce: parse(&v["planar_bounce"])?, bounds: parse(&v["planar_bounds"])? }); Ok(()) },
+            apply: |w, e, id, v| { let mut m = w.get_mut::<PlanarMotion>(e).unwrap(); match id { "planar_enabled" => m.0.enabled = v.as_bool().unwrap(), "planar_velocity" => m.0.velocity = parse(&v).unwrap(), "planar_drag" => m.0.drag = v.as_f64().unwrap(), "planar_bounce" => m.0.bounce = v.as_f64().unwrap(), "planar_bounds" => m.0.bounds = parse(&v).unwrap(), _ => unreachable!() } },
+        },
     ],
 });
 
@@ -504,6 +594,9 @@ impl Registry {
             }
             if type_id == "Mirror" && !matches!(object.visual, Visual::Primitive { shape: PrimitiveShape::Quad | PrimitiveShape::Mirror }) {
                 return Err("Mirror requires a Quad surface".into());
+            }
+            if type_id == "PlanarMotion" && (object.parent.is_some() || object.renderer.is_none() || object.collider.as_ref().is_none_or(|c| !c.solid)) {
+                return Err("PlanarMotion needs a root Slot with a renderer and solid Collider".into());
             }
             (component.restore)(object, values)?;
             for field in component.fields.iter().filter(|f| f.ui_order.is_some()) {

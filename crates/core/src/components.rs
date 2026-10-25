@@ -59,6 +59,24 @@ pub struct Mirror(pub bool);
 #[derive(Component, Clone, Copy)]
 pub struct Camera(pub bool);
 
+#[derive(Component, Clone, Copy)]
+pub struct ValueNumber(pub f64);
+
+#[derive(Component, Clone, Copy)]
+pub struct ValueBool(pub bool);
+
+#[derive(Component, Clone)]
+pub struct ValueText(pub String);
+
+#[derive(Component, Clone, Copy)]
+pub struct Button(pub bool);
+
+#[derive(Component, Clone, Copy)]
+pub struct ContactSensor(pub bool);
+
+#[derive(Component, Clone)]
+pub struct PlanarMotion(pub kokoverse_protocol::PlanarMotionSpec);
+
 #[derive(Component)]
 pub struct MeshRenderer {
     pub host: Address,

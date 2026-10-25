@@ -35,6 +35,52 @@ fn run(model: &mut WorldModel, command: WorldCommand) -> CommandOutcome {
 }
 
 #[test]
+fn typed_value_fields_edit_replicate_and_restore() {
+    use kokoverse_protocol::TypedReference;
+    let mut host = WorldModel::new();
+    let mut guest = WorldModel::new();
+    guest.restore(host.snapshot()).unwrap();
+    for (type_id, id, default) in [
+        ("ValueNumber", "value_number", json!(0.0)),
+        ("ValueBool", "value_bool", json!(false)),
+        ("ValueText", "value_text", json!("")),
+    ] {
+        let object = host.snapshot().objects.remove(0);
+        let mut values = json!({});
+        values[id] = default;
+        let outcome = run(&mut host, structure(StructuralOperation::AddComponent {
+            target: object.address, type_id: type_id.into(),
+            expected_revision: object.object_revision,
+            values,
+        }));
+        guest.apply_commit(outcome.result.unwrap()).unwrap();
+    }
+    for (id, value) in [
+        ("value_number", json!(7.5)),
+        ("value_bool", json!(true)),
+        ("value_text", json!("Team A")),
+    ] {
+        let command = edit(&host, id, value.clone());
+        let outcome = run(&mut host, command);
+        guest.apply_commit(outcome.result.unwrap()).unwrap();
+        let object = &host.snapshot().objects[0];
+        let reference = TypedReference::Field {
+            target: replication::REGISTRY.field_address(&object.address, id).unwrap(),
+            field_id: id.into(),
+        };
+        replication::REGISTRY.script_field(&host.snapshot(), &reference, &value, false).unwrap();
+    }
+    assert_eq!(guest.snapshot(), host.snapshot());
+    let encoded = replication::REGISTRY.encode_world(&host.snapshot());
+    assert_eq!(replication::REGISTRY.decode_world(encoded).unwrap(), host.snapshot());
+    let mut restored = WorldModel::new();
+    restored.restore(host.snapshot()).unwrap();
+    assert_eq!(restored.snapshot(), host.snapshot());
+    let invalid = edit(&host, "value_number", json!(1e12));
+    assert!(run(&mut host, invalid).result.is_err());
+}
+
+#[test]
 fn placing_library_item_rebinds_its_own_field_references() {
     use kokoverse_protocol::{ItemIdentity, ItemPermissions, ScriptClock, ScriptComponent, TypedReference};
     let mut model = WorldModel::new();

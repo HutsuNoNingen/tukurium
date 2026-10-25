@@ -1,6 +1,7 @@
 //! A renderer-independent ECS world with a scheduled command/transform/output pipeline.
 pub mod asset_validation;
 mod collision;
+mod contacts;
 mod drives;
 mod components;
 pub mod edit_sessions;
@@ -8,6 +9,7 @@ mod grabbing;
 mod hierarchy;
 mod references;
 pub mod locomotion;
+mod motion;
 pub mod panels;
 pub mod presence;
 pub mod session_chat;
@@ -39,8 +41,10 @@ pub struct WorldModel {
     simulation: Schedule,
     accumulator: f64,
     script_schedule: Schedule,
+    motion_schedule: Schedule,
     drive_schedule: Schedule,
     script_accumulator: f64,
+    motion_accumulator: f64,
     script_authority: bool,
     panel_schedule: Schedule,
 }
@@ -70,6 +74,8 @@ impl WorldModel {
         world.init_resource::<locomotion::LocalControl>();
         world.init_resource::<collision::CollisionWorld>();
         world.init_resource::<collision::PreviewPositions>();
+        world.init_resource::<contacts::ContactRuntime>();
+        world.init_resource::<motion::MotionStep>();
         world.init_resource::<grabbing::GrabState>();
         world.init_resource::<scripting::ScriptRuntime>();
         world.init_resource::<drives::DriveRuntime>();
@@ -97,6 +103,7 @@ impl WorldModel {
                 grabbing::update_grab,
                 hierarchy::update_evaluated,
                 collision::sync_colliders,
+                contacts::detect,
                 locomotion::simulate_character,
                 presence::extract_presence,
             )
@@ -116,6 +123,15 @@ impl WorldModel {
         );
         let mut drive_schedule = Schedule::default();
         drive_schedule.add_systems(drives::evaluate);
+        let mut motion_schedule = Schedule::default();
+        motion_schedule.add_systems((
+            motion::prepare_frame,
+            systems::apply_commands,
+            systems::update_transforms,
+            systems::collect_changes,
+            systems::extract_snapshot,
+            systems::publish_changes,
+        ).chain());
         let mut panel_schedule = Schedule::default();
         panel_schedule.add_systems(
             (
@@ -134,8 +150,10 @@ impl WorldModel {
             simulation,
             accumulator: 0.0,
             script_schedule,
+            motion_schedule,
             drive_schedule,
             script_accumulator: 0.0,
+            motion_accumulator: 0.0,
             script_authority: false,
             panel_schedule,
         }
@@ -172,7 +190,7 @@ impl WorldModel {
     }
 
     pub fn enqueue_script_interaction_as(&mut self, command: WorldCommand, requester: String) -> Result<u64, String> {
-        if !matches!(&command, WorldCommand::Script { command } if matches!(command.action, kokoverse_protocol::ScriptAction::Interact)) {
+        if !matches!(&command, WorldCommand::Script { command } if matches!(command.action, kokoverse_protocol::ScriptAction::Interact | kokoverse_protocol::ScriptAction::Press | kokoverse_protocol::ScriptAction::Release)) {
             return Err("Expected a script interaction".into());
         }
         let ticket = self.enqueue(command)?;
@@ -215,6 +233,13 @@ impl WorldModel {
                     &mut self.world.resource_mut::<OutputQueue>().0,
                 ));
             }
+            self.motion_accumulator += elapsed.as_secs_f64().min(0.25);
+            while self.motion_accumulator + 1e-9 >= motion::STEP {
+                self.world.resource_mut::<motion::MotionStep>().0 = motion::STEP;
+                self.motion_schedule.run(&mut self.world);
+                outcomes.extend(std::mem::take(&mut self.world.resource_mut::<OutputQueue>().0));
+                self.motion_accumulator -= motion::STEP;
+            }
             self.panel_schedule.run(&mut self.world);
             outcomes.extend(std::mem::take(
                 &mut self.world.resource_mut::<OutputQueue>().0,
@@ -238,6 +263,7 @@ impl WorldModel {
 
     pub fn set_script_authority(&mut self, enabled: bool) {
         self.script_authority = enabled;
+        self.world.resource_mut::<contacts::ContactRuntime>().authority = enabled;
     }
     pub fn script_statuses(&self) -> Vec<kokoverse_protocol::ScriptStatus> {
         self.world
@@ -625,6 +651,9 @@ impl WorldModel {
             *replacement.world.resource_mut::<locomotion::LocalControl>() = control;
         }
         replacement.accumulator = self.accumulator;
+        replacement.motion_accumulator = self.motion_accumulator;
+        replacement.script_authority = self.script_authority;
+        *replacement.world.resource_mut::<contacts::ContactRuntime>() = self.world.resource::<contacts::ContactRuntime>().clone();
         *replacement
             .world
             .resource_mut::<collision::PreviewPositions>() =
@@ -745,6 +774,12 @@ pub(crate) fn new_object(name: String, position: [f64; 3], color: [f64; 4]) -> O
         world_text: None,
         mirror: None,
         camera: None,
+        value_number: None,
+        value_bool: None,
+        value_text: None,
+        button: None,
+        contact_sensor: None,
+        planar_motion: None,
         fields: vec![
             field("name", "Name", "string", json!(name), &Revisions::default()),
             field("parent", "Parent", "address", Value::Null, &Revisions::default()),
@@ -881,6 +916,9 @@ pub(crate) fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
         if object.mirror.is_some() && !matches!(object.visual, kokoverse_protocol::Visual::Primitive { shape: kokoverse_protocol::PrimitiveShape::Quad | kokoverse_protocol::PrimitiveShape::Mirror }) {
             return Err("Mirror requires a Quad surface".into());
         }
+        if object.planar_motion.is_some() && (object.parent.is_some() || object.renderer.is_none() || object.collider.as_ref().is_none_or(|c| !c.solid)) {
+            return Err("PlanarMotion needs a root Slot with a renderer and solid Collider".into());
+        }
         if let kokoverse_protocol::Visual::Image {
             data_url,
             width,
@@ -958,6 +996,28 @@ pub(crate) fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
             if (f.id == "mirror_enabled" && f.value.as_bool() != object.mirror)
                 || (f.id == "camera_enabled" && f.value.as_bool() != object.camera) {
                 return Err("Function component does not match its field".into());
+            }
+            if (f.id == "value_number" && f.value.as_f64() != object.value_number)
+                || (f.id == "value_bool" && f.value.as_bool() != object.value_bool)
+                || (f.id == "value_text" && f.value.as_str() != object.value_text.as_deref()) {
+                return Err("ValueField does not match its field".into());
+            }
+            if f.id == "button_enabled" && f.value.as_bool() != object.button {
+                return Err("Button does not match its field".into());
+            }
+            if f.id == "contact_enabled" && f.value.as_bool() != object.contact_sensor {
+                return Err("ContactSensor does not match its field".into());
+            }
+            if let Some(motion) = &object.planar_motion {
+                let expected = match f.id.as_str() {
+                    "planar_velocity" => Some(json!(motion.velocity)),
+                    "planar_drag" => Some(json!(motion.drag)),
+                    "planar_bounce" => Some(json!(motion.bounce)),
+                    "planar_bounds" => Some(json!(motion.bounds)),
+                    "planar_enabled" => Some(json!(motion.enabled)),
+                    _ => None,
+                };
+                if expected.is_some_and(|value| value != f.value) { return Err("PlanarMotion does not match its fields".into()); }
             }
         }
     }

@@ -537,7 +537,7 @@ impl Engine {
             // Keep verified authorship and the normal revision/edit-session checks below.
             let interaction = matches!(&command, WorldCommand::Playback { .. })
                 || matches!(&command, WorldCommand::Script { command }
-                    if matches!(command.action, kokoverse_protocol::ScriptAction::Interact));
+                    if matches!(command.action, kokoverse_protocol::ScriptAction::Interact | kokoverse_protocol::ScriptAction::Press | kokoverse_protocol::ScriptAction::Release));
             if interaction {
                 None
             } else {
@@ -581,7 +581,7 @@ impl Engine {
         }
         // Asset references can be committed before their bytes arrive.
         // Missing bytes are resolved by the bounded asset waiters, not world edits.
-        let queued = if matches!(&command, WorldCommand::Script { command } if matches!(command.action, kokoverse_protocol::ScriptAction::Interact)) {
+        let queued = if matches!(&command, WorldCommand::Script { command } if matches!(command.action, kokoverse_protocol::ScriptAction::Interact | kokoverse_protocol::ScriptAction::Press | kokoverse_protocol::ScriptAction::Release)) {
             self.model.enqueue_script_interaction_as(command, requester.to_string())
         } else if let Some(editor) = actor {
             self.model.enqueue_as(command, editor)

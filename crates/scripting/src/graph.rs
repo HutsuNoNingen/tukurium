@@ -42,7 +42,7 @@ struct Spec {
 
 fn spec(kind: &str) -> Option<Spec> {
     let s = match kind {
-        "on_update" | "on_interact" | "on_drive" => Spec {
+        "on_update" | "on_interact" | "on_button_press" | "on_button_release" | "on_contact_start" | "on_contact_end" | "on_drive" => Spec {
             inputs: &[],
             outputs: &[("flow", "flow")],
         },
@@ -70,6 +70,7 @@ fn spec(kind: &str) -> Option<Spec> {
             inputs: &[],
             outputs: &[("value", "number")],
         },
+        "contact_other_id" => Spec { inputs: &[], outputs: &[("value", "string")] },
         "bool" => Spec {
             inputs: &[],
             outputs: &[("value", "bool")],
@@ -239,6 +240,7 @@ impl Compiler<'_> {
             "delta" => "dt".into(),
             "time" => "ctx.time".into(),
             "world_time" => "ctx.world_time".into(),
+            "contact_other_id" => "(ctx.other and ctx.other.instance_id or '')".into(),
             "read_field" => format!("ctx:read(ctx.self.{}.ref_{})", self.graph.name, id),
             "get_state" => format!("ctx:get_state({}, 0)", lua_string(state_key(node)?)),
             "display" => self.input(id, "value", stack)?,
@@ -389,7 +391,7 @@ pub fn compile(source: &str) -> Result<String, String> {
         }
         spec(&node.kind).ok_or_else(|| format!("Unknown node: {}", node.kind))?;
         match node.kind.as_str() {
-            "on_update" | "on_interact" | "on_drive" => {
+            "on_update" | "on_interact" | "on_button_press" | "on_button_release" | "on_contact_start" | "on_contact_end" | "on_drive" => {
                 if !event_kinds.insert(node.kind.as_str()) {
                     return Err("Only one node of each event kind is allowed".into());
                 }
@@ -416,7 +418,7 @@ pub fn compile(source: &str) -> Result<String, String> {
         }
     }
     if event_kinds.is_empty() {
-        return Err("Graph needs an On Update, On Interact or On Drive event".into());
+        return Err("Graph needs an event node".into());
     }
     if fields.len() > 16 {
         return Err("Graph supports at most 16 public fields".into());
@@ -505,6 +507,10 @@ pub fn compile(source: &str) -> Result<String, String> {
     for (kind, handler, drive) in [
         ("on_update", "update", false),
         ("on_interact", "on_interact", false),
+        ("on_button_press", "on_button_press", false),
+        ("on_button_release", "on_button_release", false),
+        ("on_contact_start", "on_contact_start", false),
+        ("on_contact_end", "on_contact_end", false),
         ("on_drive", "drive", true),
     ] {
         if let Some(node) = graph.nodes.iter().find(|n| n.kind == kind) {
@@ -550,6 +556,39 @@ mod tests {
         assert!(program.schema.has_update);
         assert_eq!(program.schema.fields[0].id, "p_p");
         assert_eq!(program.schema.fields[0].default, json!(3));
+    }
+
+    #[test]
+    fn button_and_contact_nodes_compile_and_expose_the_other_slot() {
+        let graph = json!({"name":"Events","nodes":[
+            {"id":"press","kind":"on_button_press","x":0,"y":0},
+            {"id":"release","kind":"on_button_release","x":0,"y":100},
+            {"id":"start","kind":"on_contact_start","x":0,"y":200},
+            {"id":"end","kind":"on_contact_end","x":0,"y":300},
+            {"id":"state","kind":"set_state","x":200,"y":200,"value":"other"},
+            {"id":"other","kind":"contact_other_id","x":0,"y":400}
+        ],"links":[
+            {"from":"start","out":"flow","to":"state","input":"flow"},
+            {"from":"other","out":"value","to":"state","input":"value"}
+        ]});
+        let graph_source = source(graph);
+        let program = Program::compile(&graph_source).unwrap();
+        assert!(program.schema.has_button_press);
+        assert!(program.schema.has_button_release);
+        assert!(program.schema.has_contact_start);
+        assert!(program.schema.has_contact_end);
+        let component = ScriptComponent {
+            id: "1".into(), revision: "0".into(), enabled: true, source: graph_source,
+            schema: program.schema.clone(), parameters: parameters(&program.schema, &Default::default()).unwrap(),
+            state: Default::default(), clock: ScriptClock::default(),
+        };
+        let object: ObjectView = serde_json::from_value(json!({
+            "address":{"instance_id":"00000000-0000-0000-0000-000000000001","local_id":1},
+            "object_revision":"0","world_position":[0,0,0],"fields":[],"scripts":[component.clone()]
+        })).unwrap();
+        let other = kokoverse_protocol::Address { instance_id: "00000000-0000-0000-0000-000000000002".into(), local_id: 1 };
+        let outcome = program.run_at_with_event(&object, &component, Event::ContactStart, 0.0, 0.0, &Default::default(), Some(&other)).unwrap();
+        assert_eq!(outcome.state["other"], json!(other.instance_id));
     }
 
     #[test]

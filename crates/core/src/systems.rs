@@ -128,11 +128,20 @@ pub(crate) fn validate_commands(
                     let entity=*index.0.get(&command.target).ok_or("Target no longer exists")?;
                     slots.get(entity).map_err(|_|"Expected an ObjectRoot Slot")?;
                     let current=&scripts.get(entity).map_err(|_|"Missing script container")?.0;
-                    if matches!(command.action,kokoverse_protocol::ScriptAction::Interact) {
-                        let handlers=current.iter().filter(|s|s.enabled && s.schema.has_interact).count();
+                    if matches!(&command.action,kokoverse_protocol::ScriptAction::Interact | kokoverse_protocol::ScriptAction::Press | kokoverse_protocol::ScriptAction::Release) {
+                        let object = snapshot.0.objects.iter().find(|o| o.address == command.target).ok_or("Target no longer exists")?;
+                        if matches!(&command.action,kokoverse_protocol::ScriptAction::Press | kokoverse_protocol::ScriptAction::Release) && object.button != Some(true) {
+                            return Err("Button is missing or disabled".into());
+                        }
+                        let handlers=current.iter().filter(|s|s.enabled).map(|s| match &command.action {
+                            kokoverse_protocol::ScriptAction::Interact => usize::from(s.schema.has_interact),
+                            kokoverse_protocol::ScriptAction::Press => usize::from(s.schema.has_interact) + usize::from(s.schema.has_button_press),
+                            kokoverse_protocol::ScriptAction::Release => usize::from(s.schema.has_button_release),
+                            _ => 0,
+                        }).sum::<usize>();
                         if colliders.get(entity).is_err() || handlers==0 {return Err("This object has no active interaction".into());}
                         if runtime.events.len()+handlers>128 {return Err("Too many pending script interactions".into());}
-                        return Ok(Mutation::ScriptInteract{entity});
+                        return Ok(Mutation::ScriptInteract{entity,action:command.action});
                     }
                     let value=crate::scripting::prepare_edit(current,command.action,clock.0)?;
                     if snapshot.0.objects.iter().find(|o| o.address == command.target).is_some_and(|o| o.renderer.is_none()) && !value.is_empty() {
@@ -156,6 +165,9 @@ pub(crate) fn validate_commands(
                         return Err("Use the component's commands to change this field".into());
                     }
                     (spec.validate)(&edit.value)?;
+                    if edit.field_id == "collider" && object.planar_motion.is_some() && serde_json::from_value::<Option<kokoverse_protocol::ColliderSpec>>(edit.value.clone()).ok().flatten().is_none_or(|c| !c.solid) {
+                        return Err("Remove PlanarMotion before disabling its Collider".into());
+                    }
                     if edit.field_id == "panel_pin" && !edit.value.is_null() && object.parent.is_some() { return Err("Move the panel to World before pinning it".into()); }
                     if edit.field_id == "inspector_tree" {
                         let tree: kokoverse_protocol::InspectorTree = serde_json::from_value(edit.value.clone()).unwrap();
@@ -248,6 +260,7 @@ pub(crate) fn validate_commands(
                             let object = snapshot.0.objects.iter().find(|o| o.address == target).ok_or("Target no longer exists")?;
                             if object.object_revision != expected_revision { return Err("Object changed before reparenting".into()); }
                             if object.panel.as_ref().is_some_and(|p| p.attachment.is_some()) { return Err("Unpin the panel before reparenting".into()); }
+                            if parent.is_some() && object.planar_motion.is_some() { return Err("Remove PlanarMotion before parenting this Slot".into()); }
                             crate::hierarchy::validate_parent(&snapshot.0, &target, &parent)?;
                             let local = crate::hierarchy::relative(crate::hierarchy::global_of(object), crate::hierarchy::parent_transform(&snapshot.0,&parent)?);
                             validate_value("position", &serde_json::json!(local.translation))?;
@@ -347,15 +360,27 @@ pub(crate) fn apply_commands(world: &mut World) {
                     world.get_mut::<ObjectRoot>(entity).unwrap().revision += 1;
                     Some(world.get::<Identity>(entity).unwrap().0.clone())
                 }
-                Mutation::ScriptInteract { entity } => {
+                Mutation::ScriptInteract { entity, action } => {
                     let target = world.get::<Identity>(entity).unwrap().0.clone();
                     let events: Vec<_> = world
                         .get::<ScriptComponents>(entity)
                         .unwrap()
                         .0
                         .iter()
-                        .filter(|s| s.enabled && s.schema.has_interact)
-                        .map(|s| (target.clone(), s.id.clone(), script_actor.clone()))
+                        .filter(|s| s.enabled)
+                        .flat_map(|s| {
+                            let mut kinds = Vec::new();
+                            if matches!(&action, kokoverse_protocol::ScriptAction::Interact | kokoverse_protocol::ScriptAction::Press) && s.schema.has_interact {
+                                kinds.push(kokoverse_scripting::Event::Interact);
+                            }
+                            if matches!(&action, kokoverse_protocol::ScriptAction::Press) && s.schema.has_button_press {
+                                kinds.push(kokoverse_scripting::Event::ButtonPress);
+                            }
+                            if matches!(&action, kokoverse_protocol::ScriptAction::Release) && s.schema.has_button_release {
+                                kinds.push(kokoverse_scripting::Event::ButtonRelease);
+                            }
+                            kinds.into_iter().map(|kind| (target.clone(), s.id.clone(), script_actor.clone(), kind, None))
+                        })
                         .collect();
                     world
                         .resource_mut::<crate::scripting::ScriptRuntime>()
@@ -409,6 +434,17 @@ pub(crate) fn apply_commands(world: &mut World) {
                     }
                     for write in field_writes {
                         crate::replication::apply_field(world, write.entity, write.component_id, &write.id, write.value);
+                    }
+                    None
+                }
+                Mutation::MotionFrame { patches } => {
+                    for patch in patches {
+                        world.get_mut::<LocalTransform>(patch.entity).unwrap().translation = patch.position;
+                        world.get_mut::<PlanarMotion>(patch.entity).unwrap().0.velocity = patch.velocity;
+                        let mut revisions = world.get_mut::<Revisions>(patch.entity).unwrap();
+                        *revisions.0.entry("position".into()).or_default() += 1;
+                        *revisions.0.entry("planar_velocity".into()).or_default() += 1;
+                        world.get_mut::<ObjectRoot>(patch.entity).unwrap().revision += 1;
                     }
                     None
                 }
@@ -533,6 +569,12 @@ pub(crate) fn collect_changes(
 pub(crate) fn extract_snapshot(
     roots: Query<SnapshotRoot>,
     meshes: Query<&MeshRenderer>,
+    value_numbers: Query<&ValueNumber>,
+    value_bools: Query<&ValueBool>,
+    value_texts: Query<&ValueText>,
+    buttons: Query<&Button>,
+    contact_sensors: Query<&ContactSensor>,
+    planar_motions: Query<&PlanarMotion>,
     index: Res<EntityIndex>,
     revision: Res<WorldRevision>,
     changes: Res<ChangeSet>,
@@ -560,6 +602,7 @@ pub(crate) fn extract_snapshot(
         camera,
     ) in &roots
     {
+        let entity = index.0[&identity.0];
         let mesh = root.renderer.as_ref().map(|address| meshes.get(index.0[address]).expect("registered renderer"));
         let mut object = kokoverse_protocol::ObjectView {
             parent: slot.parent.clone(),
@@ -580,6 +623,12 @@ pub(crate) fn extract_snapshot(
             world_text: world_text.map(|t| t.0.clone()),
             mirror: mirror.map(|m| m.0),
             camera: camera.map(|c| c.0),
+            value_number: value_numbers.get(entity).ok().map(|v| v.0),
+            value_bool: value_bools.get(entity).ok().map(|v| v.0),
+            value_text: value_texts.get(entity).ok().map(|v| v.0.clone()),
+            button: buttons.get(entity).ok().map(|v| v.0),
+            contact_sensor: contact_sensors.get(entity).ok().map(|v| v.0),
+            planar_motion: planar_motions.get(entity).ok().map(|v| v.0.clone()),
             fields: vec![
                 crate::field(
                     "name",
@@ -640,6 +689,32 @@ pub(crate) fn extract_snapshot(
         }
         if let Some(enabled) = object.camera {
             object.fields.push(crate::field("camera_enabled", "Enabled", "bool", serde_json::json!(enabled), revisions));
+        }
+        if let Some(value) = object.value_number {
+            object.fields.push(crate::field("value_number", "Value", "number", serde_json::json!(value), revisions));
+        }
+        if let Some(value) = object.value_bool {
+            object.fields.push(crate::field("value_bool", "Value", "bool", serde_json::json!(value), revisions));
+        }
+        if let Some(value) = &object.value_text {
+            object.fields.push(crate::field("value_text", "Value", "string", serde_json::json!(value), revisions));
+        }
+        if let Some(enabled) = object.button {
+            object.fields.push(crate::field("button_enabled", "Enabled", "bool", serde_json::json!(enabled), revisions));
+        }
+        if let Some(enabled) = object.contact_sensor {
+            object.fields.push(crate::field("contact_enabled", "Enabled", "bool", serde_json::json!(enabled), revisions));
+        }
+        if let Some(motion) = &object.planar_motion {
+            for (id, value) in [
+                ("planar_enabled", serde_json::json!(motion.enabled)),
+                ("planar_velocity", serde_json::json!(motion.velocity)),
+                ("planar_drag", serde_json::json!(motion.drag)),
+                ("planar_bounce", serde_json::json!(motion.bounce)),
+                ("planar_bounds", serde_json::json!(motion.bounds)),
+            ] {
+                object.fields.push(crate::field(id, "", "", value, revisions));
+            }
         }
         objects.push(object);
     }

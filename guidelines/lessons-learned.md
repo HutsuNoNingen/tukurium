@@ -379,3 +379,10 @@ Component欄もスキーマの存在だけで表示すると、未装着のMedia
 
 - 再現・確認：[creation-integration.mjs](../tests/creation-integration.mjs) の `--rendered` で3Dインスペクタから長文入力と空文字への変更、ホストへの同期、途中参加を確認する。[inspector-integration.mjs](../tests/inspector-integration.mjs) の `--rendered` で共通インスペクタの操作を確認する。
 - コード：[inspector_view.gd](../client-godot/inspector_view.gd)、[replication.rs](../crates/core/src/replication.rs)。設計上の不足は[Componentとインスペクタの対応](../docs/component-inspector-review.md)に整理する。確認日：2026-10-26。
+
+## 一回の共有更新で同じObject revisionを二度進めない
+
+PlanarMotionの1フレームでPositionとVelocityを同時に確定するとき、各Fieldの更新処理にObject revisionの加算を任せると、単一のコミットなのにObject revisionが二度進む。Field revisionはそれぞれ更新し、Object revisionはコマンド単位で一度だけ進める。これを揃えないと、ゲストのコミット適用や次の編集の競合判定がずれる。
+
+- 再現・確認：[motion.rs](../crates/core/src/motion.rs) の反射・ゲストへのコミット適用・保存復元テストと、`cargo test -p kokoverse-core`で確認する。
+- コード：[systems.rs](../crates/core/src/systems.rs) の`MotionFrame`適用処理。確認日：2026-10-26。

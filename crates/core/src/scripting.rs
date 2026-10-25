@@ -19,7 +19,7 @@ struct Cached {
 #[derive(Resource, Default)]
 pub(crate) struct ScriptRuntime {
     cache: HashMap<String, Cached>,
-    pub(crate) events: Vec<(Address, String, Option<String>)>,
+    pub(crate) events: Vec<(Address, String, Option<String>, Event, Option<Address>)>,
     pub(crate) actors: HashMap<u64, String>,
     capture_owners: HashMap<String, String>,
     last_capture_at: HashMap<String, f64>,
@@ -153,7 +153,7 @@ pub(crate) fn prepare_edit(
             }
             scripts.retain(|s| s.id != script_id);
         }
-        ScriptAction::Interact => unreachable!(),
+        ScriptAction::Interact | ScriptAction::Press | ScriptAction::Release => unreachable!(),
     }
     validate_world_scripts(std::iter::once(scripts.as_slice()))?;
     Ok(scripts)
@@ -228,7 +228,7 @@ pub(crate) fn prepare_frame(world: &mut World) {
                     events
                         .iter()
                         .enumerate()
-                        .filter(|(_, (_, id, _))| id == &script.id)
+                        .filter(|(_, (_, id, _, _, _))| id == &script.id)
                         .map(|(index, _)| index),
                 );
                 continue;
@@ -246,8 +246,8 @@ pub(crate) fn prepare_frame(world: &mut World) {
                 events
                     .iter()
                     .enumerate()
-                    .filter(|(_, (address, id, _))| *address == object.address && id == &script.id)
-                    .map(|(index, _)| (Event::Interact, Some(index))),
+                    .filter(|(_, (address, id, _, _, _))| *address == object.address && id == &script.id)
+                    .map(|(index, (_, _, _, event, _))| (*event, Some(index))),
             );
             for (event, event_index) in callbacks {
                 if started.elapsed().as_millis() >= 10 {
@@ -256,13 +256,14 @@ pub(crate) fn prepare_frame(world: &mut World) {
                 if let Some(index) = event_index {
                     delivered.insert(index);
                 }
-                match program.run_at_with_fields(
+                match program.run_at_with_event(
                     &object,
                     &object.scripts[index],
                     event,
                     dt,
                     world.resource::<MediaClock>().0,
                     &crate::references::values(&snapshot, &object.scripts[index]),
+                    event_index.and_then(|i| events[i].4.as_ref()),
                 ) {
                     Ok(output) => {
                         let proposed_writes: Result<Vec<_>, String> = output.field_writes.iter().map(|(reference, value)| {
@@ -366,7 +367,7 @@ pub(crate) fn prepare_frame(world: &mut World) {
     runtime.events = events
         .into_iter()
         .enumerate()
-        .filter(|(index, (_, id, _))| !delivered.contains(index) && alive.contains(id))
+        .filter(|(index, (_, id, _, _, _))| !delivered.contains(index) && alive.contains(id))
         .map(|(_, event)| event)
         .collect();
     let mut compacted: Vec<FieldWrite> = Vec::new();
@@ -535,6 +536,46 @@ mod tests {
                 .unwrap()
                 .contains("expected failure")
         );
+    }
+
+    #[test]
+    fn button_press_and_release_are_distinct_shared_events() {
+        let mut host = WorldModel::new();
+        host.set_script_authority(true);
+        let object = host.snapshot().objects.remove(0);
+        host.enqueue(WorldCommand::Structure { command: StructuralCommand {
+            command_id: "button".into(),
+            operation: StructuralOperation::AddComponent {
+                target: object.address,
+                type_id: "Button".into(),
+                expected_revision: object.object_revision,
+                values: serde_json::json!({"button_enabled":true}),
+            },
+        }}).unwrap();
+        assert!(host.tick().remove(0).result.is_ok());
+        command(&mut host, ScriptAction::Attach { source: "return {name='Counter',on_interact=function(ctx) ctx:set_state('click',ctx:get_state('click',0)+1) end,on_button_press=function(ctx) ctx:set_state('press',ctx:get_state('press',0)+1) end,on_button_release=function(ctx) ctx:set_state('release',ctx:get_state('release',0)+1) end}".into() }).unwrap();
+        command(&mut host, ScriptAction::Press).unwrap();
+        host.advance(Duration::ZERO);
+        let state = &host.snapshot().objects[0].scripts[0].state;
+        assert_eq!(state["click"], serde_json::json!(1));
+        assert_eq!(state["press"], serde_json::json!(1));
+        command(&mut host, ScriptAction::Release).unwrap();
+        host.advance(Duration::ZERO);
+        assert_eq!(host.snapshot().objects[0].scripts[0].state["release"], serde_json::json!(1));
+        let mut restored = WorldModel::new();
+        restored.restore(host.snapshot()).unwrap();
+        assert_eq!(restored.snapshot(), host.snapshot());
+        let object = host.snapshot().objects.remove(0);
+        let invalid = WorldCommand::Edit { edit: kokoverse_protocol::Edit {
+            command_id: "disable".into(),
+            target: crate::replication::REGISTRY.field_address(&object.address, "button_enabled").unwrap(),
+            field_id: "button_enabled".into(),
+            expected_revision: object.fields.iter().find(|f| f.id == "button_enabled").unwrap().revision.clone(),
+            value: serde_json::json!(false),
+        }};
+        host.enqueue(invalid).unwrap();
+        assert!(host.tick().remove(0).result.is_ok());
+        assert!(command(&mut host, ScriptAction::Press).is_err());
     }
 
     #[test]

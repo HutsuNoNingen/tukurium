@@ -110,7 +110,7 @@ return {
 | API | 動作 |
 |---|---|
 | `ctx.world_time` / `ctx.time` | ホストに合わせた時刻 / 停止・再開可能なスクリプトの経過秒数 |
-| `ctx:write(entity, field, value)` | 共有Write。update / on_interact専用。対象はposition / rotation / scale / color |
+| `ctx:write(entity, field, value)` | 共有Write。共有コールバック用。対象はposition / rotation / scale / color |
 | `ctx:drive(entity, field, value)` | 同じ4フィールドのローカル値を導出。drive専用 |
 | `ctx:rotation_y(degrees, base?)` | Y軸回転を基準Quaternionへ加算して返す。基準省略時は単位回転 |
 | `ctx.self` | 取り付け先のEntity。各ScriptのパラメータとTransform、Renderer、存在すればColliderを読める |
@@ -122,6 +122,10 @@ return {
 | `ctx:set_color(entity, {r,g,b,a})` | 色を設定 |
 | `ctx:get_state("key", default)` | 明示的に保存された実行状態を読む |
 | `ctx:set_state("key", value)` | 実行状態を変更。成功したコールバックの終了時に反映する |
+
+`on_button_press(ctx)`と`on_button_release(ctx)`はButton付きのSlotに届く。押下時は既存の`on_interact(ctx)`も呼ばれる。`on_contact_start(ctx)`と`on_contact_end(ctx)`はContactSensor付きのSlotに届き、`ctx.other`から相手のAddressを読める。接触イベントはホストが共有Colliderの重なりから作る。スクリプトの公開`field_ref`へValueNumber・ValueBool・ValueTextやPlanarMotionのVelocityを渡し、`ctx:read` / `ctx:write_field`で扱える。PlanarMotionのVelocityは共有Write用で、毎フレームのローカルDrive先にはできない。
+
+ノードグラフには`On Button Press`、`On Button Release`、`On Contact Start`、`On Contact End`、`Contact Other ID`を追加した。押下でパックを打ち出す場合は、`On Button Press`から`Write Field`へつなぎ、参照先にパックの`planar_velocity`を渡す。得点表示は`On Contact Start`からValueNumberのWriteとWorldTextのWriteへつなげられる。薄いセンサーを高速で通過すると、離散的な重なり判定で接触を見落とす場合があるため、センサーに厚みを持たせる。
 
 Entityから読める値はその呼び出し開始時点のコピー。変更はAPIで要求する。複数の書き込みはコールバック内で積み重ね、エラーならそのコールバックの変更を破棄する。通常のLua変数やクロージャーはVM内だけで生き、保存・複製に引き継がない。必要な状態は `get_state` / `set_state` を使う。
 

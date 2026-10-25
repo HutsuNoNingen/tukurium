@@ -38,8 +38,10 @@ pub(crate) enum Mutation {
     },
     ScriptInteract {
         entity: Entity,
+        action: kokoverse_protocol::ScriptAction,
     },
     ScriptFrame { patches: Vec<crate::scripting::FramePatch>, field_writes: Vec<crate::scripting::FieldWrite> },
+    MotionFrame { patches: Vec<crate::motion::MotionPatch> },
     Insert(Box<ObjectView>),
     InsertMany(Vec<ObjectView>),
     Replace(Box<ObjectView>),
@@ -141,6 +143,12 @@ pub(crate) fn insert_object(world: &mut World, object: ObjectView) {
     if let Some(enabled) = object.camera {
         world.entity_mut(slot).insert(Camera(enabled));
     }
+    if let Some(value) = object.value_number { world.entity_mut(slot).insert(ValueNumber(value)); }
+    if let Some(value) = object.value_bool { world.entity_mut(slot).insert(ValueBool(value)); }
+    if let Some(value) = object.value_text.clone() { world.entity_mut(slot).insert(ValueText(value)); }
+    if let Some(enabled) = object.button { world.entity_mut(slot).insert(Button(enabled)); }
+    if let Some(enabled) = object.contact_sensor { world.entity_mut(slot).insert(ContactSensor(enabled)); }
+    if let Some(motion) = object.planar_motion.clone() { world.entity_mut(slot).insert(PlanarMotion(motion)); }
     world
         .entity_mut(slot)
         .insert(ScriptComponents(object.scripts.clone()));

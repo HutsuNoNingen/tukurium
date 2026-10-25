@@ -48,6 +48,21 @@ func click_control(scene, surface, control: Control) -> void:
 	if captured and (not scene.fps_active or Input.mouse_mode!=Input.MOUSE_MODE_CAPTURED):
 		push_error("FPS panel click released the mouse"); quit(1)
 
+func focus_line(scene, surface, panel, field: String) -> LineEdit:
+	for _attempt in range(4):
+		if not panel.controls.has(field):
+			await process_frame
+			continue
+		var line: LineEdit=panel.controls[field][0]
+		if not is_instance_valid(line): continue
+		panel.scroll.ensure_control_visible(line)
+		await process_frame
+		if not is_instance_valid(line): continue
+		await click_control(scene,surface,line)
+		await process_frame
+		if is_instance_valid(line) and line.has_focus(): return line
+	return null
+
 func add_component_ui(scene, surface, panel, type_id: String) -> void:
 	if not panel.component_catalog_open:
 		panel.scroll.ensure_control_visible(panel.component_catalog_toggle)
@@ -426,6 +441,8 @@ func run() -> void:
 	await click_control(scene,surface,panel.component_catalog_toggle)
 	if not panel.component_catalog_buttons.has("Mirror") or not panel.component_catalog_buttons["Mirror"].disabled:
 		push_error("Mirror must require a flat mesh in the component catalog"); quit(1); return
+	if not panel.component_catalog_buttons.has("PlanarMotion") or not panel.component_catalog_buttons["PlanarMotion"].disabled:
+		push_error("PlanarMotion must require a root renderer and solid Collider"); quit(1); return
 	panel.component_search.text="cam"
 	panel.filter_component_catalog("cam")
 	if not panel.component_catalog_buttons["Camera"].get_parent().visible or panel.component_catalog_buttons["Mirror"].get_parent().visible:
@@ -479,11 +496,8 @@ func run() -> void:
 	if not await until(func(): return scene.objects[slot_id].get("world_text")==null and not scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not detach"): quit(1); return
 	await add_component_ui(scene,surface,panel,"WorldText")
 	if not await until(func(): return scene.objects[slot_id].get("world_text")!=null and scene.render_nodes[slot_id].has_node("WorldText"),"WorldText did not reattach"): quit(1); return
-	var text_line: LineEdit=panel.controls.world_text[0]
-	panel.scroll.ensure_control_visible(text_line)
-	await process_frame
-	await click_control(scene,surface,text_line)
-	if not await until(func(): return text_line.has_focus(),"WorldText field did not receive 3D input focus"): quit(1); return
+	var text_line: LineEdit=await focus_line(scene,surface,panel,"world_text")
+	if text_line==null: push_error("WorldText field did not receive 3D input focus"); quit(1); return
 	text_line.select_all()
 	var long_text := "A shared WorldText field accepts more than thirty two characters"
 	for character in long_text:
@@ -499,6 +513,34 @@ func run() -> void:
 	root.push_input(erase,true)
 	erase=erase.duplicate(); erase.pressed=false; root.push_input(erase,true)
 	if not await until(func(): return scene.objects[slot_id].world_text.text=="","Inspector could not clear WorldText"): quit(1); return
+	await add_component_ui(scene,surface,panel,"ValueNumber")
+	if not await until(func(): return scene.objects[slot_id].get("value_number")!=null and panel.controls.has("value_number"),"ValueNumber did not attach"): quit(1); return
+	var number_line: LineEdit=await focus_line(scene,surface,panel,"value_number")
+	if number_line==null: push_error("ValueNumber did not receive 3D input focus"); quit(1); return
+	number_line.select_all()
+	for character in "42":
+		var typed_number := InputEventKey.new()
+		typed_number.keycode=character.unicode_at(0); typed_number.unicode=typed_number.keycode; typed_number.pressed=true
+		root.push_input(typed_number,true)
+		typed_number=typed_number.duplicate(); typed_number.pressed=false; root.push_input(typed_number,true)
+	if not await until(func(): return scene.objects[slot_id].value_number==42.0,"ValueNumber edit did not reach host"): quit(1); return
+	await add_component_ui(scene,surface,panel,"ValueBool")
+	if not await until(func(): return scene.objects[slot_id].get("value_bool")!=null and panel.controls.has("value_bool"),"ValueBool did not attach"): quit(1); return
+	panel.scroll.ensure_control_visible(panel.controls.value_bool[0])
+	await process_frame
+	await click_control(scene,surface,panel.controls.value_bool[0])
+	if not await until(func(): return scene.objects[slot_id].value_bool==true,"ValueBool edit did not reach host"): quit(1); return
+	await add_component_ui(scene,surface,panel,"ValueText")
+	if not await until(func(): return scene.objects[slot_id].get("value_text")!=null and panel.controls.has("value_text"),"ValueText did not attach"): quit(1); return
+	var value_line: LineEdit=await focus_line(scene,surface,panel,"value_text")
+	if value_line==null: push_error("ValueText did not receive 3D input focus"); quit(1); return
+	value_line.select_all()
+	for character in "ready":
+		var typed_value := InputEventKey.new()
+		typed_value.keycode=character.unicode_at(0); typed_value.unicode=typed_value.keycode; typed_value.pressed=true
+		root.push_input(typed_value,true)
+		typed_value=typed_value.duplicate(); typed_value.pressed=false; root.push_input(typed_value,true)
+	if not await until(func(): return scene.objects[slot_id].value_text=="ready","ValueText edit did not reach host"): quit(1); return
 	await click_control(scene,surface,panel.hierarchy.child_text_button)
 	if not await until(func(): return scene.objects.values().any(func(o): return o.get("parent")!=null and o.parent.instance_id==slot_id and o.get("world_text")!=null),"Text child was not created"): quit(1); return
 	var child_id: String=scene.selected_id

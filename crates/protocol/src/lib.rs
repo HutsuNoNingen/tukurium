@@ -203,7 +203,30 @@ pub struct ObjectView {
     pub mirror: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_number: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_bool: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub button: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contact_sensor: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planar_motion: Option<PlanarMotionSpec>,
     pub fields: Vec<Field>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PlanarMotionSpec {
+    pub enabled: bool,
+    /// Metres per second in the world X/Z plane; Y is always zero.
+    pub velocity: [f64; 3],
+    pub drag: f64,
+    pub bounce: f64,
+    /// World-space [min_x, max_x, min_z, max_z].
+    pub bounds: [f64; 4],
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

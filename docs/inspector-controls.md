@@ -67,7 +67,13 @@ FPSの操作レーザーと右クリック保持は、従来の6m制限をなく
 
 右側の `Object` / `Scripts` タブでフィールドとLuaエディタを切り替える。左の階層は両方のタブで表示する。2D窓のタブとスクリプトの選択はローカルな状態で、3Dパネルの表示は切り替えない。3Dパネルにも同じタブがあり、こちらの選択はその共有パネルを見ている参加者全員に同期する。入力中にタブを変えた場合は、送信中の編集が落ち着いてから切り替える。フィールドやコードの編集内容は従来どおり共有する。
 
-既存Slotの部品は `Object` タブの `+ Add Component` から探して追加する。現在の候補は`MeshRenderer`・`WorldText`・`Mirror`・`Camera`で、候補はRustの登録表から受け取る。MeshRendererの形状は一覧の上で選ぶ。`Mirror`はQuadかMirrorの平面メッシュがあるSlotだけに追加できる。付いたコンポーネントは各欄の`Remove`で外せる。`Mirror`付きのSlotでは先に`Mirror`を外してからMeshRendererを外す。MirrorとCameraの`Enabled`は欄内のチェックボックスで切り替える。構造の基礎となるSlotやTransformは一覧に出さない。付け外しは対象SlotのAddressとrevisionを添えた `add_component` / `remove_component` 構造コマンドとしてRustへ送り、登録表で検証する。
+既存Slotの部品は `Object` タブの `+ Add Component` から探して追加する。候補はRustの登録表から受け取り、MeshRenderer・WorldText・Mirror・Camera・ValueNumber・ValueBool・ValueText・Button・ContactSensor・PlanarMotionを追加できる。MeshRendererの形状は一覧の上で選ぶ。`Mirror`はQuadかMirrorの平面メッシュがあるSlotだけに追加できる。`PlanarMotion`は親を持たないSlotで、RendererとSolidなColliderがある場合に追加できる。付いたコンポーネントは各欄の`Remove`で外せる。`Mirror`や`PlanarMotion`付きのSlotでは、それらを先に外してからMeshRendererを外す。機能の`Enabled`は欄内のチェックボックスで切り替える。構造の基礎となるSlotやTransformは一覧に出さない。付け外しは対象SlotのAddressとrevisionを添えた `add_component` / `remove_component` 構造コマンドとしてRustへ送り、登録表で検証する。
+
+`ValueNumber`・`ValueBool`・`ValueText`は、スクリプトやノードから参照する共有値をSlotに置く部品。各Slotに型ごと1つ付けられる。インスペクタで値を編集し、フィールド見出しをScriptの参照欄へ渡す。値は同期・保存され、Write/Driveの対象にもできる。数値は有限値で絶対値10億以下、文字列は80文字以下。
+
+`Button`を付けたCollider付きの物体は、左クリックで`on_button_press`、ボタンを放すと`on_button_release`を実行する。従来の`on_interact`は押したときにも実行される。`Enabled`を切ると押下を受け付けない。`ContactSensor`はColliderが別のColliderと重なり始めたときに`on_contact_start`、離れたときに`on_contact_end`をホストで実行する。相手のSlot IDは`ctx.other.instance_id`またはノードの`Contact Other ID`で読める。接触判定は共有された位置に対して行い、各端末のDriveによる見かけの移動は使わない。
+
+`PlanarMotion`はX/Z平面で物体を動かす簡易部品。`Velocity X/Y/Z`のX/Zに速度を入れるとホストが毎秒20回進め、SolidなColliderと範囲端で反射する。Y速度は使わない。`Drag`は減速率、`Bounce`は反発率、`Bounds`は最小X・最大X・最小Z・最大Z。たとえばホッケーのパックに付け、スクリプトの`Write Field`で`planar_velocity`を設定して打ち出す。位置と速度の確定値は同期・保存される。現段階では矩形Colliderを使う軽量な盤面向けで、得点判定や一般的な剛体物理は含まない。
 
 2D窓の表示対象・階層の表示起点・折り畳みもローカルな表示状態。窓はいくつでも独立して開ける。表示対象が削除されても窓は残り、別の対象を選べる。ワールドのSlot、共有パネルの上限、保存データには含めない。
 

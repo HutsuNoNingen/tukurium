@@ -98,6 +98,7 @@ var hand_grab: Dictionary = {}
 var grab_waiting := false
 var grab_releasing := false
 var right_down := false
+var pressed_button_id := ""
 var crosshair: Label
 var interaction_rays: Array = []
 var aiming_at_collider := false
@@ -1517,6 +1518,9 @@ func refresh_fields() -> void:
 	filling = false
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed and not pressed_button_id.is_empty():
+		script_editor.button_event(pressed_button_id, "release")
+		pressed_button_id = ""
 	if camera_tool.handle_input(event):
 		get_viewport().set_input_as_handled()
 		return
@@ -1600,7 +1604,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				camera_tool.open(hit_id)
 				get_viewport().set_input_as_handled()
 				return
-			script_editor.interact(hit_id)
+			var button: Variant = objects.get(hit_id, {}).get("button")
+			if button == true:
+				if script_editor.button_event(hit_id, "press"): pressed_button_id = hit_id
+			elif button == null: script_editor.interact(hit_id)
 	if event is InputEventKey and event.keycode == KEY_F and event.pressed: focus_selected()
 	if event is InputEventKey and event.keycode == KEY_SPACE and event.pressed and not event.echo: try_jump()
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT:

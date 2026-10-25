@@ -723,3 +723,14 @@ func interact(id: String) -> void:
 	if object.get("collider") == null: return
 	if not object.get("scripts", []).any(func(c): return c.enabled and c.schema.has_interact): return
 	app.requests.request({"kind":"script", "command":{"target":app.address_of(object), "action":"interact"}}, Callable())
+
+func button_event(id: String, action: String) -> bool:
+	if not app.editable or not app.objects.has(id): return false
+	var object: Dictionary = app.objects[id]
+	if object.get("button") != true or object.get("collider") == null: return false
+	var key := "has_button_press" if action == "press" else "has_button_release"
+	var has_handler: bool = object.get("scripts", []).any(func(c): return c.enabled and (c.schema.get(key, false) or (action == "press" and c.schema.has_interact)))
+	if not has_handler:
+		return action == "press" and object.get("scripts", []).any(func(c): return c.enabled and c.schema.get("has_button_release", false))
+	app.requests.request({"kind":"script", "command":{"target":app.address_of(object), "action":action}}, Callable())
+	return true

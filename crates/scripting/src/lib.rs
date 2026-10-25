@@ -1,5 +1,5 @@
 //! Restricted Luau programs. A call produces a proposal; it never owns an ECS World.
-use kokoverse_protocol::{ObjectView, ScriptComponent, ScriptField, ScriptSchema, TypedReference};
+use kokoverse_protocol::{Address, ObjectView, ScriptComponent, ScriptField, ScriptSchema, TypedReference};
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue, VmState, chunk::ChunkMode};
 use serde_json::{Value, json};
 use std::{
@@ -22,6 +22,10 @@ const MAX_COMMANDS: usize = 128;
 pub enum Event {
     Update,
     Interact,
+    ButtonPress,
+    ButtonRelease,
+    ContactStart,
+    ContactEnd,
     Drive,
 }
 
@@ -311,7 +315,7 @@ impl Program {
             }
             fields.sort_by(|a, b| a.id.cmp(&b.id));
             let mut handlers = 0;
-            for name in ["update", "on_interact", "drive"] {
+            for name in ["update", "on_interact", "on_button_press", "on_button_release", "on_contact_start", "on_contact_end", "drive"] {
                 match module.get::<LuaValue>(name)? {
                     LuaValue::Function(_) => handlers += 1,
                     LuaValue::Nil => {}
@@ -320,11 +324,15 @@ impl Program {
             }
             if handlers == 0 {
                 return Err(error(
-                    "Define drive(ctx), update(ctx, dt) or on_interact(ctx)",
+                    "Define drive(ctx), update(ctx, dt), or an interaction handler",
                 ));
             }
             let has_update = module.get::<Option<Function>>("update")?.is_some();
             let has_interact = module.get::<Option<Function>>("on_interact")?.is_some();
+            let has_button_press = module.get::<Option<Function>>("on_button_press")?.is_some();
+            let has_button_release = module.get::<Option<Function>>("on_button_release")?.is_some();
+            let has_contact_start = module.get::<Option<Function>>("on_contact_start")?.is_some();
+            let has_contact_end = module.get::<Option<Function>>("on_contact_end")?.is_some();
             let has_drive = module.get::<Option<Function>>("drive")?.is_some();
             Ok(Self {
                 lua,
@@ -336,6 +344,10 @@ impl Program {
                     has_update,
                     has_drive,
                     has_interact,
+                    has_button_press,
+                    has_button_release,
+                    has_contact_start,
+                    has_contact_end,
                 },
             })
         };
@@ -372,6 +384,19 @@ impl Program {
         world_time: f64,
         readable_fields: &BTreeMap<String, Value>,
     ) -> Result<Output, String> {
+        self.run_at_with_event(object, component, event, dt, world_time, readable_fields, None)
+    }
+
+    pub fn run_at_with_event(
+        &self,
+        object: &ObjectView,
+        component: &ScriptComponent,
+        event: Event,
+        dt: f64,
+        world_time: f64,
+        readable_fields: &BTreeMap<String, Value>,
+        other: Option<&Address>,
+    ) -> Result<Output, String> {
         let run = || -> mlua::Result<Output> {
             let color: [f64; 4] = object.fields.iter().find(|f| f.id == "color")
                 .map(|field| serde_json::from_value(field.value.clone()))
@@ -393,6 +418,10 @@ impl Program {
             let handler = match event {
                 Event::Update => "update",
                 Event::Interact => "on_interact",
+                Event::ButtonPress => "on_button_press",
+                Event::ButtonRelease => "on_button_release",
+                Event::ContactStart => "on_contact_start",
+                Event::ContactEnd => "on_contact_end",
                 Event::Drive => "drive",
             };
             let Some(function) = self.module.get::<Option<Function>>(handler)? else {
@@ -405,6 +434,7 @@ impl Program {
                 matches!(event, Event::Drive),
                 world_time,
                 readable_fields,
+                other,
             )?;
             self.budget.reset();
             function.call::<()>((ctx, dt))?;
@@ -423,6 +453,7 @@ impl Program {
         local_drive: bool,
         world_time: f64,
         readable_fields: &BTreeMap<String, Value>,
+        other: Option<&Address>,
     ) -> mlua::Result<Table> {
         let lua = &self.lua;
         let ctx = lua.create_table()?;
@@ -443,6 +474,7 @@ impl Program {
         )?;
         ctx.set("world_time", world_time)?;
         ctx.set("time", component.clock.time(world_time, component.enabled))?;
+        ctx.set("other", lua.to_value(&other)?)?;
         ctx.set(
             "rotation_y",
             lua.create_function(|lua, (_ctx, degrees, base): (Table, f64, Option<Table>)| {

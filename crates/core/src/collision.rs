@@ -17,6 +17,28 @@ pub(crate) struct Bounds {
     pub solid: bool,
 }
 impl Bounds {
+    pub(crate) fn intersects(&self, other: &Self) -> bool {
+        let basis = |rotation: DQuat| [rotation * DVec3::X, rotation * DVec3::Y, rotation * DVec3::Z];
+        let a = basis(self.rotation);
+        let b = basis(other.rotation);
+        let mut axes = Vec::from(a);
+        axes.extend(b);
+        for left in a {
+            for right in b {
+                let axis = left.cross(right);
+                if axis.length_squared() > 1e-12 { axes.push(axis.normalize()); }
+            }
+        }
+        let distance = DVec3::from_array(other.center) - DVec3::from_array(self.center);
+        axes.into_iter().all(|axis| {
+            let radius = |half: DVec3, basis: [DVec3; 3]| {
+                half.x * basis[0].dot(axis).abs()
+                    + half.y * basis[1].dot(axis).abs()
+                    + half.z * basis[2].dot(axis).abs()
+            };
+            distance.dot(axis).abs() <= radius(self.half, a) + radius(other.half, b) + 1e-9
+        })
+    }
     pub fn frame(&self) -> DAffine3 {
         DAffine3::from_scale_rotation_translation(
             DVec3::from_array(self.scale),

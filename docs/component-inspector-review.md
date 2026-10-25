@@ -18,6 +18,10 @@ tukuriumでは、**RustのComponent登録表を、共有・保存されるField�
 | WorldText | Text、Color | 空文字と80文字までをRustは許すが、従来の入力欄は空文字を拒否し32文字で切った。この監査で修正。Size・Alignmentなどは現状Godotの固定値で、共有Fieldはまだない |
 | Camera | Enabled | FOVはGodotの撮影画面だけの値。共有・保存されない。ProjectionやNear/FarもまだFieldがない。撮影操作と撮影画像はFieldにしない |
 | Mirror | Enabled | 反射解像度と反射テクスチャは端末内。共有設定が必要になれば鏡面の意味をRustに追加する |
+| ValueNumber / ValueBool / ValueText | 型付きValue | 追加・編集・参照・同期・保存を実装。今後は同型の値を複数置ける設計を検討する |
+| Button | Enabled | 押下・解放イベントを実装。物体の見た目と当たり判定は別Componentに任せる |
+| ContactSensor | Enabled | Colliderの重なり開始・終了イベントを実装。高速通過や衝突レイヤーは今後の検討対象 |
+| PlanarMotion | Enabled、Velocity、Drag、Bounce、Bounds | ホストのX/Z盤面移動を実装。汎用剛体や得点ルールとは分ける |
 | MediaPlayback | Play、Pause、Restart | Seek・LoopはRustコマンドにあるがComponent欄にはない。動画以外に空の節が出る問題はこの監査で修正 |
 | ScriptComponents | Scriptの一覧、Source、公開パラメータ、実行状態 | 専用Script画面を維持。Field参照とDrive元は通常のFieldから辿れるようにする |
 | WorldPanel / InspectorView / CreationView | 一部が汎用欄でJSON表示される | 共有の編集道具が持つ内部表示状態。通常設定、専用操作、内部状態をスキーマで区別する |
@@ -27,10 +31,10 @@ tukuriumでは、**RustのComponent登録表を、共有・保存されるField�
 
 ## 実装順と完了条件
 
-1. **既存Fieldの欠落を直す。** WorldTextの空文字・80文字を2D/3Dから編集でき、ホストとゲストに届くことを確認する。動画以外の空のMediaPlayback節を消し、Removeの事前判定をRustの依存条件へ合わせる。
+1. **既存Fieldの欠落を直す（実装済み）。** WorldTextの空文字・80文字を2D/3Dから編集でき、ホストとゲストに届くことを確認した。動画以外の空のMediaPlayback節を消し、Removeの事前判定をRustの依存条件へ合わせた。
 2. **スキーマに表示上の役割を持たせる。** 制作者が編集する設定、読み取り専用の派生値、専用コマンド、内部状態を区別する。`FieldSchema.access`とUIの操作可否を照合し、編集可能な型にエディタがない場合はテストで検出する。3Dと2Dで別々のField定義を持たない。
 3. **既存の見えない情報を示す。** MeshRendererの形状・素材概要、ワールド姿勢、動画の現在位置・Loop・Seekを適切な読み取り欄や操作欄に置く。
-4. **新しい制作者向けFieldを設計する。** Camera LensのFOV、WorldText Styleのサイズ・配置などから着手する。Colliderやホッケー用のPuckMotion等も、まずComponentの意味・検証・同期・保存とインスペクタ欄を一緒に定義する。
+4. **新しい制作者向けFieldを設計する。** 型付きValueField、Button、ContactSensor、盤面用PlanarMotionは、Componentの意味・検証・同期・保存とインスペクタ欄を一緒に実装した。Camera LensのFOV、WorldText Styleのサイズ・配置、より広い物理機能は残る。
 
 既存ComponentのField数をそのまま増やすと、現在の復元処理が厳密なField数・スキーマ版を要求するため、保存済みワールドを読み込めなくなる。過去データの移行を決めるまでは、LensやStyleを**任意の新Component**として追加する方法を優先して検討する。既存ワールドの消去や暗黙の移行は行わない。
 
