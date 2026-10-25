@@ -1336,6 +1336,7 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 	mirror_renderer.sync(objects, render_nodes)
 	for source in image_textures.keys():
 		if not used_images.has(source): image_textures.erase(source)
+	asset_importer.evict_unused_assets()
 	camera_tool.world_updated()
 	if not objects.has(selected_id):
 		selected_id = "" if objects.is_empty() else str(objects.keys()[0])
