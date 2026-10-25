@@ -795,8 +795,8 @@ async fn upload(
     if format!("{:x}", digest.finalize()) != id {
         return Err(bad("Asset checksum mismatch"));
     }
-    let bytes = tokio::fs::read(&temporary.0).await?;
-    tokio::task::spawn_blocking(move || validate_asset(&bytes))
+    let validation_path = temporary.0.clone();
+    tokio::task::spawn_blocking(move || validate_asset(&validation_path))
         .await
         .map_err(|_| bad("Asset validation failed"))??;
     let mut db = s.db.lock().unwrap();
@@ -847,31 +847,56 @@ async fn download(
         Body::from_stream(tokio_util::io::ReaderStream::new(file)),
     ))
 }
-fn validate_asset(bytes: &[u8]) -> Result<()> {
-    if bytes.len() > 128 * 1024 * 1024 || bytes.len() < 20 {
+/// Validate an uploaded asset in place, header-first, instead of
+/// reading the whole file into memory up front: format detection
+/// and the image dimension check only need the leading bytes /
+/// headers, oversized images are rejected before any decode, and
+/// the image decode itself runs under an explicit allocation
+/// limit (a 4096x4096 RGBA decode is ~64 MiB; the limit leaves
+/// headroom without letting a crafted file exceed it). Validation
+/// strength is unchanged: GLB structure, the theora marker, image
+/// dimensions, and full image decodability are all still checked.
+fn validate_asset(path: &std::path::Path) -> Result<()> {
+    use std::io::Read as _;
+    let size = std::fs::metadata(path).map_err(|_| bad("Invalid asset size"))?.len() as usize;
+    if size > 128 * 1024 * 1024 || size < 20 {
         return Err(bad("Invalid asset size"));
     }
-    if bytes.starts_with(b"glTF") {
-        kokoverse_core::asset_validation::validate_glb(bytes).map_err(|e| bad(&e))?;
+    let mut head = vec![0u8; size.min(65536)];
+    std::fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut head))
+        .map_err(|_| bad("Invalid asset size"))?;
+    if head.starts_with(b"glTF") {
+        // GLB validation walks chunk headers over the whole file;
+        // it does not copy or decode, so reading it here (only in
+        // this branch) stays proportional to the file itself.
+        let bytes = std::fs::read(path).map_err(|_| bad("Invalid asset size"))?;
+        kokoverse_core::asset_validation::validate_glb(&bytes).map_err(|e| bad(&e))?;
         return Ok(());
     }
-    if bytes.starts_with(b"OggS")
-        && bytes[..bytes.len().min(65536)]
-            .windows(7)
-            .any(|w| w == b"\x80theora")
-    {
+    if head.starts_with(b"OggS") && head.windows(7).any(|w| w == b"\x80theora") {
         return Ok(());
     }
-    let img = image::ImageReader::new(std::io::Cursor::new(bytes))
+    let dimensions = image::ImageReader::open(path)
+        .map_err(|_| bad("Invalid image"))?
         .with_guessed_format()
-        .map_err(|_| bad("Invalid image"))?;
-    let (w, h) = img
+        .map_err(|_| bad("Invalid image"))?
         .into_dimensions()
         .map_err(|_| bad("Unsupported asset format"))?;
+    let (w, h) = dimensions;
     if w == 0 || h == 0 || w > 4096 || h > 4096 {
         return Err(bad("Image dimensions exceed 4096"));
     }
-    image::load_from_memory(bytes).map_err(|_| bad("Corrupt image data"))?;
+    let mut reader = image::ImageReader::open(path)
+        .map_err(|_| bad("Invalid image"))?
+        .with_guessed_format()
+        .map_err(|_| bad("Invalid image"))?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(4096);
+    limits.max_image_height = Some(4096);
+    limits.max_alloc = Some(96 * 1024 * 1024);
+    reader.limits(limits);
+    reader.decode().map_err(|_| bad("Corrupt image data"))?;
     Ok(())
 }
 
@@ -1110,6 +1135,50 @@ mod hn_tests {
         let root = s.root.clone();
         drop(s);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn asset_validation_is_header_first_but_keeps_its_strength() {
+        let dir = std::env::temp_dir().join(format!("kokoverse-validate-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, bytes: &[u8]| {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            path
+        };
+        // A valid small PNG passes, as before.
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(8, 8)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let png = png.into_inner();
+        assert!(validate_asset(&write("ok.png", &png)).is_ok());
+        // Over-limit dimensions are rejected from the header.
+        let mut wide = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(4097, 1)
+            .write_to(&mut wide, image::ImageFormat::Png)
+            .unwrap();
+        let wide = write("wide.png", &wide.into_inner());
+        let error = validate_asset(&wide).unwrap_err();
+        assert!(error.1.contains("4096"), "{}", error.1);
+        // A truncated PNG still fails the decode check.
+        assert!(validate_asset(&write("cut.png", &png[..png.len() / 2])).is_err());
+        // Tiny files are rejected on size alone.
+        assert!(validate_asset(&write("tiny.bin", b"abc")).is_err());
+        // A minimal valid GLB passes; a truncated one does not.
+        let mut document = serde_json::to_vec(&json!({"asset":{"version":"2.0"},"meshes":[{}]})).unwrap();
+        while !document.len().is_multiple_of(4) {
+            document.push(b' ');
+        }
+        let mut glb = b"glTF".to_vec();
+        glb.extend(2u32.to_le_bytes());
+        glb.extend((20u32 + document.len() as u32).to_le_bytes());
+        glb.extend((document.len() as u32).to_le_bytes());
+        glb.extend(b"JSON");
+        glb.extend(&document);
+        assert!(validate_asset(&write("ok.glb", &glb)).is_ok());
+        assert!(validate_asset(&write("cut.glb", &glb[..glb.len() - 4])).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
 
