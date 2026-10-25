@@ -238,14 +238,59 @@ func run() -> void:
 	if not await until(func(): return scene.objects.values().any(func(o): return o.visual.kind=="image" and str(o.fields[0].value).begins_with("Photo ")),"Camera did not share an image item"): quit(1); return
 	scene.camera_tool.park()
 	if not await until(func(): return not scene.camera_tool.active and Vector3(scene.objects[camera_id].world_position[0],scene.objects[camera_id].world_position[1],scene.objects[camera_id].world_position[2]).distance_to(camera_start)>0.2,"Drone pose did not commit"): quit(1); return
-	var shutter_source := "return {name='Shutter',on_interact=function(ctx) ctx:set_state('deadline',ctx.time+1) end,update=function(ctx) local deadline=ctx:get_state('deadline',0); if deadline>0 and ctx.time>=deadline then ctx:capture_camera(ctx.self); ctx:set_state('deadline',0) end end}"
+	if scene.objects[camera_id].get("world_text") == null or not scene.render_nodes[camera_id].has_node("WorldText"):
+		push_error("Camera preset has no countdown WorldText"); quit(1); return
+	scene.set_view_mode(2,false)
+	var camera_node: MeshInstance3D=scene.render_nodes[camera_id]
+	var text_position: Vector3=camera_node.to_global(Vector3(0,0,0.8))
+	scene.camera.global_position=text_position+camera_node.global_basis.z.normalized()*3.0+Vector3.UP*0.3
+	scene.camera.look_at(text_position,Vector3.UP)
+	var shutter_source := ""
+	var nodes_source := ""
+	for template in scene.script_templates:
+		if template.name == "Countdown Camera · Lua": shutter_source = template.source
+		if template.name == "Countdown Camera · Nodes": nodes_source = template.source
+	if shutter_source.is_empty(): push_error("Countdown Camera Lua template is missing"); quit(1); return
+	if not nodes_source.begins_with("@tukurium-graph-v1\n") or not nodes_source.contains('"kind":"ceil"'):
+		push_error("Countdown Camera node template is missing Ceil"); quit(1); return
 	scene.requests.request({"kind":"script","command":{"target":scene.address_of(scene.objects[camera_id]),"action":"attach","source":shutter_source}},Callable())
 	if not await until(func(): return scene.objects.get(camera_id,{}).get("scripts",[]).size()==1,"Camera script did not attach"): quit(1); return
+	var shutter: Dictionary=scene.objects[camera_id].scripts[0]
+	var parameters: Dictionary=shutter.parameters.duplicate(true)
+	parameters.label={"kind":"field","target":scene.field_address(camera_id,"world_text"),"field_id":"world_text"}
+	scene.requests.request({"kind":"script","command":{"target":scene.address_of(scene.objects[camera_id]),"action":"update","script_id":shutter.id,"expected_revision":shutter.revision,"source":shutter.source,"enabled":true,"parameters":parameters}},Callable())
+	if not await until(func(): return scene.objects[camera_id].scripts[0].parameters.get("label") is Dictionary,"Camera WorldText binding did not apply"): quit(1); return
 	scene.script_editor.interact(camera_id)
 	if not await until(func(): return scene.objects.get(camera_id,{}).get("scripts",[]).size()==1 and scene.objects[camera_id].scripts[0].state.get("deadline",0)>0,"Camera script did not start its timer"): quit(1); return
 	if scene.camera_tool.active: push_error("Camera captured before the scripted deadline"); quit(1); return
+	var countdown_label: Label3D=scene.render_nodes[camera_id].get_node("WorldText")
+	for digit in ["3","2","1"]:
+		if not await until(func(): return countdown_label.text==digit,"Countdown WorldText missed "+digit): quit(1); return
+		if digit=="3":
+			for arg in OS.get_cmdline_user_args():
+				if arg.begins_with("--screenshot="):
+					await RenderingServer.frame_post_draw
+					root.get_texture().get_image().save_png(arg.trim_prefix("--screenshot=").replace(".png","-countdown.png"))
 	if not await until(func(): return scene.camera_tool.status.text.begins_with("保存: ") and scene.camera_tool.status.text.trim_prefix("保存: ")!=saved_photo,"Scripted camera did not save a new photo"): quit(1); return
-	if not FileAccess.file_exists(scene.camera_tool.status.text.trim_prefix("保存: ")): push_error("Scripted photo file is missing"); quit(1); return
+	if countdown_label.text!="": push_error("Countdown WorldText was not cleared after capture"); quit(1); return
+	var lua_photo: String=scene.camera_tool.status.text.trim_prefix("保存: ")
+	if not FileAccess.file_exists(lua_photo): push_error("Scripted photo file is missing"); quit(1); return
+	scene.camera_tool.park()
+	shutter=scene.objects[camera_id].scripts[0]
+	scene.requests.request({"kind":"script","command":{"target":scene.address_of(scene.objects[camera_id]),"action":"remove","script_id":shutter.id,"expected_revision":shutter.revision}},Callable())
+	if not await until(func(): return scene.objects.get(camera_id,{}).get("scripts",[]).is_empty(),"Lua countdown script did not remove"): quit(1); return
+	scene.requests.request({"kind":"script","command":{"target":scene.address_of(scene.objects[camera_id]),"action":"attach","source":nodes_source}},Callable())
+	if not await until(func(): return scene.objects.get(camera_id,{}).get("scripts",[]).size()==1 and scene.objects[camera_id].scripts[0].schema.name=="CountdownCameraNodes","Node countdown script did not attach"): quit(1); return
+	shutter=scene.objects[camera_id].scripts[0]
+	parameters=shutter.parameters.duplicate(true)
+	parameters.ref_write={"kind":"field","target":scene.field_address(camera_id,"world_text"),"field_id":"world_text"}
+	scene.requests.request({"kind":"script","command":{"target":scene.address_of(scene.objects[camera_id]),"action":"update","script_id":shutter.id,"expected_revision":shutter.revision,"source":shutter.source,"enabled":true,"parameters":parameters}},Callable())
+	if not await until(func(): return scene.objects[camera_id].scripts[0].parameters.get("ref_write") is Dictionary,"Node WorldText binding did not apply"): quit(1); return
+	scene.script_editor.interact(camera_id)
+	for digit in ["3","2","1"]:
+		if not await until(func(): return countdown_label.text==digit,"Node countdown WorldText missed "+digit): quit(1); return
+	if not await until(func(): return scene.camera_tool.status.text.begins_with("保存: ") and scene.camera_tool.status.text.trim_prefix("保存: ")!=lua_photo,"Node camera did not save a photo"): quit(1); return
+	if countdown_label.text!="": push_error("Node countdown text was not cleared"); quit(1); return
 	scene.camera_tool.park()
 	scene.hud.open_creation()
 	if not await until(func(): return scene.world_panels.panels.size()==1,"Creation panel did not reopen for Mirror"): quit(1); return

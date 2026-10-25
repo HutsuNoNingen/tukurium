@@ -124,6 +124,10 @@ fn spec(kind: &str) -> Option<Spec> {
             inputs: &[("a", "bool")],
             outputs: &[("value", "bool")],
         },
+        "ceil" => Spec {
+            inputs: &[("value", "number")],
+            outputs: &[("value", "number")],
+        },
         "select" => Spec {
             inputs: &[("test", "bool"), ("yes", "any"), ("no", "any")],
             outputs: &[("value", "any")],
@@ -262,6 +266,7 @@ impl Compiler<'_> {
                 }
             }
             "not" => format!("(not {})", self.input(id, "a", stack)?),
+            "ceil" => format!("math.ceil({})", self.input(id, "value", stack)?),
             "to_string" => format!("tostring({})", self.input(id, "value", stack)?),
             "join" => format!(
                 "({} .. {})",
@@ -726,6 +731,7 @@ mod tests {
             "and",
             "or",
             "not",
+            "ceil",
             "select",
             "to_string",
             "join",

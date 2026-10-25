@@ -31,6 +31,7 @@ const TYPES := {
 	"and":[[["a","bool"],["b","bool"]],[["value","bool"]]],
 	"or":[[["a","bool"],["b","bool"]],[["value","bool"]]],
 	"not":[[["a","bool"]],[["value","bool"]]],
+	"ceil":[[["value","number"]],[["value","number"]]],
 	"select":[[["test","bool"],["yes","any"],["no","any"]],[["value","any"]]],
 	"to_string":[[["value","any"]],[["value","string"]]],
 	"join":[[["a","string"],["b","string"]],[["value","string"]]],
@@ -537,11 +538,12 @@ func preview_value(id: String, stack: Dictionary, component: Dictionary) -> Dict
 				result = {"value":now if item.kind == "world_time" else float(clock.get("elapsed",0.0)) + (maxf(0.0,now-float(clock.get("anchor",0.0))) if component.get("enabled",false) else 0.0)}
 		"display":
 			result = preview_input(id,"value",stack,component)
-		"not", "to_string":
+		"not", "to_string", "ceil":
 			var a := preview_input(id,"a" if item.kind == "not" else "value",stack,component)
 			if a.has("value"):
 				if item.kind == "not" and a.value is bool: result = {"value":not a.value}
 				elif item.kind == "to_string" and not (a.value is Array or a.value is Dictionary): result = {"value":str(a.value)}
+				elif item.kind == "ceil" and (a.value is float or a.value is int): result = {"value":ceilf(float(a.value))}
 		"select":
 			var test := preview_input(id,"test",stack,component)
 			if test.has("value") and test.value is bool:

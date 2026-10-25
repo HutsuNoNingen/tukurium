@@ -413,7 +413,9 @@ impl Engine {
             "drive_frame":self.model.drive_frame(),
             "component_schemas":REGISTRY.schemas(),
             "script_templates":[{"name":"Rotator","source":kokoverse_core::scripting::ROTATOR},
-                {"name":"ClickColor","source":kokoverse_core::scripting::CLICK_COLOR}]})
+                {"name":"ClickColor","source":kokoverse_core::scripting::CLICK_COLOR},
+                {"name":"Countdown Camera · Lua","source":kokoverse_core::scripting::COUNTDOWN_CAMERA_LUA},
+                {"name":"Countdown Camera · Nodes","source":kokoverse_core::scripting::COUNTDOWN_CAMERA_NODES}]})
     }
     fn publish_state(&mut self) {
         self.previews.prune(&self.model, std::time::Instant::now());

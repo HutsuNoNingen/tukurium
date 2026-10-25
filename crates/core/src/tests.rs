@@ -277,6 +277,7 @@ fn mirror_and_camera_components_toggle_replicate_and_restore() {
     let camera_id = camera.selected.unwrap();
     guest.apply_commit(camera.result.unwrap()).unwrap();
     assert_eq!(host.snapshot(), guest.snapshot());
+    assert_eq!(host.snapshot().objects.iter().find(|o| o.address == camera_id).unwrap().world_text.as_ref().unwrap().text, "");
     for (id, field_id) in [(&mirror_id, "mirror_enabled"), (&camera_id, "camera_enabled")] {
         let before = host.snapshot().objects.into_iter().find(|o| &o.address == id).unwrap();
         assert_eq!(before.fields.iter().find(|f| f.id == field_id).unwrap().value, json!(true));

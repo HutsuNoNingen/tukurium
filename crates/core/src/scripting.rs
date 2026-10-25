@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
 use uuid::Uuid;
 
-pub use kokoverse_scripting::{CLICK_COLOR, ROTATOR};
+pub use kokoverse_scripting::{CLICK_COLOR, COUNTDOWN_CAMERA_LUA, COUNTDOWN_CAMERA_NODES, ROTATOR};
 
 struct Cached {
     revision: String,

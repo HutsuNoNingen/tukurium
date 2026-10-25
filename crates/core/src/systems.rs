@@ -290,6 +290,9 @@ pub(crate) fn validate_commands(
                             if let Some(type_id) = preset {
                                 let values = if type_id == "Mirror" { serde_json::json!({"mirror_enabled":true}) } else { serde_json::json!({"camera_enabled":true}) };
                                 crate::replication::REGISTRY.change_component(&mut object, type_id, Some(&values))?;
+                                if type_id == "Camera" {
+                                    crate::replication::REGISTRY.change_component(&mut object, "WorldText", Some(&serde_json::json!({"world_text":"","world_text_color":[1.0,0.88,0.55,1.0]})))?;
+                                }
                             }
                             object.world_rotation = rotation;
                             crate::set_default_collider(&mut object);

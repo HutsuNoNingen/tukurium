@@ -19,17 +19,26 @@ Editの「新規作成…」パネルで「Camera を作成」を押すと、カ
 
 「撮影」はワールドと参加者のアバターを写し、自分のアバターも入る。ウィンドウやチャットは写真に入れない。撮影後は「ローカル保存」で自分の`user://photos`フォルダーへPNGを書き出すか、「写真をワールドに置く」で画像アイテムを参加者全員に共有できる。実際のローカル保存先はウィンドウの下部に表示する。ワールドの写真アイテムは既存のライブラリ保存操作でも作品として扱える。共有用写真は画像の上限に合わせてJPEGへ縮小するため、ローカルPNGと画質が異なる。
 
-CameraのSlotにScriptを付けると、クリックを起点にタイマーを組んで撮影できる。タイマーは共有Scriptの状態と`ctx.time`で管理し、`ctx:capture_camera(ctx.self)`は撮影だけを要求する。Cameraコンポーネントがオンの自身のSlotだけを撮影できる。
+CameraのSlotにScriptを付けると、クリックを起点にタイマーを組んで撮影できる。タイマーは共有Scriptの状態と`ctx.time`で管理し、`ctx:capture_camera(ctx.self)`は撮影だけを要求する。Cameraコンポーネントがオンの自身のSlotだけを撮影できる。新しく作るCameraには空の`WorldText`が付く。既存のCameraにはインスペクタの`+ Add Component`から`WorldText`を追加できる。
+
+表示まで含めるには、CameraのScript Systemsで`Countdown Camera · Lua`か`Countdown Camera · Nodes`テンプレートを追加する。Cameraのインスペクタから`WorldText`の`Text`フィールド参照を取り出し、Scriptの`Countdown WorldText`（Lua版）または`ref_write`（ノード版）に結び、適用する。別のText Slotを子に置き、その`Text`フィールドを結んでもよい。秒数の初期値は3で、Lua版の`Countdown seconds`またはノード版の`p_duration`から変更できる。Cameraをクリックすると、共有のテキストが`3 → 2 → 1`と変わり、消えてから操作した本人が撮影される。
 
 ```lua
 return {
     name = "Shutter",
+    fields = { label = { type = "field_ref" } },
     on_interact = function(ctx)
         ctx:set_state("deadline", ctx.time + 3)
     end,
     update = function(ctx)
         local deadline = ctx:get_state("deadline", 0)
-        if deadline > 0 and ctx.time >= deadline then
+        if deadline <= 0 then return end
+        local remaining = math.max(0, math.ceil(deadline - ctx.time))
+        if remaining ~= ctx:get_state("shown", -1) then
+            ctx:write_field(ctx.self.Shutter.label, remaining > 0 and tostring(remaining) or "")
+            ctx:set_state("shown", remaining)
+        end
+        if remaining == 0 then
             ctx:capture_camera(ctx.self)
             ctx:set_state("deadline", 0)
         end
@@ -37,7 +46,7 @@ return {
 }
 ```
 
-ノードでは`On Interact → Set State(deadline)`へ`Time + Number(3)`を入れる。`On Update`から`deadline > 0`と`Time > deadline`を`And`でまとめて`Branch`へつなぎ、`Yes → Capture Camera → Set State(deadline, 0)`とする。`Apply graph`後、そのCameraをクリックするとスクリプトが3秒を数え、期限に達してから操作した本人の撮影ウィンドウが開く。写真は本人の`user://photos`へPNGで自動保存される。共有したい場合は「写真をワールドに置く」を押す。撮影要求は一時的な操作で、ワールドの保存データには含めない。
+ノード版テンプレートでは、`On Interact`が`Time + Countdown seconds`を`deadline`へ保存する。`On Update`が`Ceil(deadline − Time)`を計算し、`To String → Write Field`でWorldTextへ書き込む。期限に達すると空文字を書いてから`Capture Camera`を通す。グラフ内の`Display`は編集画面の値確認用で、ワールドに文字を表示するのは`Write Field`と`WorldText`の組み合わせ。撮った写真は本人の`user://photos`へPNGで自動保存される。共有したい場合は「写真をワールドに置く」を押す。撮影要求は一時的な操作で、カウントダウンの文字と期限は共有・保存される。
 
 - カーソルが表示された状態で `Esc` を押すと、リング、設定、手前の個人ウィンドウを一つ閉じる。カーソルは表示したままにする。複数の個人ウィンドウを同時に開け、ドックの同じアイコンをもう一度押すとそのウィンドウだけを閉じる。共有の3Dパネルはワールドに残る。FPS操作に戻るにはワールドをクリックする。
 - FPS操作中は視点中央で3Dパネルのボタンを押す。クリックやドラッグ中もマウスは視点操作のままで、カーソルには切り替わらない。TPS・Fly cameraやEscでカーソルを出した状態では、マウスポインターでパネルを操作する。

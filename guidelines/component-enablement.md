@@ -17,4 +17,6 @@
 
 Cameraの`Enabled`と姿勢は共有データだが、シャッター操作は保存するフィールドではない。Scriptの`on_interact`で期限を状態に記録し、`update`で`ctx.time`と比較すれば、タイマーの意味をUGC側で組める。期限に達して`ctx:capture_camera(ctx.self)`を呼ぶと、ホストのScript SystemがCameraの有効状態・対象を検証し、最後に操作したクライアントへ一度だけ撮影要求を送る。Godotはその要求を受けて描画し、本人の写真フォルダーへ保存する。要求をComponentの値やDriveの毎フレーム出力にすると、途中参加で再撮影したり全員が同じ写真を保存したりするため、この経路を使い分ける。複数人が期限前に同じCameraを操作した場合は、後から操作した人へ撮影する。
 
+カウントダウンの表示は既存の`WorldText`を使う。Scriptの状態から残り秒数を計算し、値が変わったときだけ束縛した`world_text`フィールドへ`write_field`する。Lua版とノード版をテンプレートとして用意し、ノード版には`Ceil → To String → Write Field`を使う。これなら文字は通常のComponentとして同期・保存され、撮影という一時要求と混同しない。新しいCameraプリセットには空のWorldTextを付け、既存Cameraには任意で追加する。
+
 確認：[scripting.rs](../crates/core/src/scripting.rs) の宛先・無効化テストと、[creation-integration.mjs](../tests/creation-integration.mjs) の描画付き撮影テスト。操作方法は[インスペクタの操作](../docs/inspector-controls.md)。

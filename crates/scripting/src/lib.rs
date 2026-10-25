@@ -731,9 +731,36 @@ pub const CLICK_COLOR: &str = r#"return {
     end
 }"#;
 
+pub const COUNTDOWN_CAMERA_LUA: &str = r#"return {
+    name = "CountdownCameraLua",
+    fields = {
+        seconds = {type = "number", default = 3, min = 0, max = 30, label = "Countdown seconds"},
+        label = {type = "field_ref", label = "Countdown WorldText"}
+    },
+    on_interact = function(ctx)
+        ctx:set_state("deadline", ctx.time + ctx.self.CountdownCameraLua.seconds)
+    end,
+    update = function(ctx)
+        local deadline = ctx:get_state("deadline", 0)
+        if deadline <= 0 then return end
+        local remaining = math.max(0, math.ceil(deadline - ctx.time))
+        if remaining ~= ctx:get_state("shown", -1) then
+            ctx:write_field(ctx.self.CountdownCameraLua.label, remaining > 0 and tostring(remaining) or "")
+            ctx:set_state("shown", remaining)
+        end
+        if remaining == 0 then
+            ctx:capture_camera(ctx.self)
+            ctx:set_state("deadline", 0)
+        end
+    end
+}"#;
+
+pub const COUNTDOWN_CAMERA_NODES: &str = include_str!("../templates/countdown_camera.graph");
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kokoverse_protocol::{ScriptClock, ScriptComponent};
     #[test]
     fn schema_defaults_and_invalid_values_are_checked() {
         let p = Program::compile(ROTATOR).unwrap();
@@ -761,5 +788,33 @@ mod tests {
             assert!(Program::compile(&format!("assert({key} == nil); {CLICK_COLOR}")).is_ok());
         }
         assert!(Program::compile("return {name='Huge',update=function() end,fields={x={type='string',default=string.rep('a',8000000)}}}").is_err());
+    }
+
+    #[test]
+    fn countdown_templates_write_world_text_and_then_capture() {
+        for (source, field) in [(COUNTDOWN_CAMERA_LUA, "label"), (COUNTDOWN_CAMERA_NODES, "ref_write")] {
+            let program = Program::compile(source).unwrap();
+            let reference = json!({"kind":"field","target":{"instance_id":"00000000-0000-0000-0000-000000000001","local_id":11},"field_id":"world_text"});
+            let mut values = parameters(&program.schema, &BTreeMap::new()).unwrap();
+            values.insert(field.into(), reference);
+            let mut component = ScriptComponent {
+                id: "1".into(), revision: "0".into(), enabled: true,
+                source: source.into(), schema: program.schema.clone(), parameters: values,
+                state: BTreeMap::new(), clock: ScriptClock::default(),
+            };
+            let object: ObjectView = serde_json::from_value(json!({
+                "address":{"instance_id":"00000000-0000-0000-0000-000000000001","local_id":1},
+                "object_revision":"0","world_position":[0,0,0],"fields":[],"camera":true,
+                "scripts":[component.clone()]
+            })).unwrap();
+            let armed = program.run_at(&object, &component, Event::Interact, 0.0, 0.0).unwrap();
+            component.state = armed.state;
+            for (time, expected) in [(0.1, "3"), (1.1, "2"), (2.1, "1"), (3.1, "")] {
+                let result = program.run_at(&object, &component, Event::Update, 0.1, time).unwrap();
+                assert_eq!(result.field_writes.last().unwrap().1, json!(expected), "{} at {time}", program.schema.name);
+                assert_eq!(result.camera_capture, time > 3.0, "{} at {time}", program.schema.name);
+                component.state = result.state;
+            }
+        }
     }
 }
