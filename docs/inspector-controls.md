@@ -21,7 +21,7 @@ Editの「新規作成…」パネルで「Camera を作成」を押すと、カ
 
 CameraのSlotにScriptを付けると、クリックを起点にタイマーを組んで撮影できる。タイマーは共有Scriptの状態と`ctx.time`で管理し、`ctx:capture_camera(ctx.self)`は撮影だけを要求する。Cameraコンポーネントがオンの自身のSlotだけを撮影できる。新しく作るCameraには空の`WorldText`が付く。既存のCameraにはインスペクタの`+ Add Component`から`WorldText`を追加できる。
 
-表示まで含めるには、CameraのScript Systemsで`Countdown Camera · Lua`か`Countdown Camera · Nodes`テンプレートを追加する。Cameraのインスペクタから`WorldText`の`Text`フィールド参照を取り出し、Scriptの`Countdown WorldText`（Lua版）または`ref_write`（ノード版）に結び、適用する。別のText Slotを子に置き、その`Text`フィールドを結んでもよい。秒数の初期値は3で、Lua版の`Countdown seconds`またはノード版の`p_duration`から変更できる。Cameraをクリックすると、共有のテキストが`3 → 2 → 1`と変わり、消えてから操作した本人が撮影される。
+完成済みのカウントダウンカメラは、ワークショップで「カウントダウンカメラ | ノード」を探し、ライブラリに保存してから配置する。Camera・WorldText・ノードグラフとフィールド参照が結び付いた作品で、Cameraをクリックすると共有のテキストが`3 → 2 → 1`と変わり、消えてから操作した本人が撮影される。秒数はScript Systemsの`p_duration`で変更できる。自分で組み立てる場合は、通常のCameraにScript Systemsの`+ Node graph`または`+ Blank script`でロジックを追加する。
 
 ```lua
 return {
@@ -46,7 +46,7 @@ return {
 }
 ```
 
-ノード版テンプレートでは、`On Interact`が`Time + Countdown seconds`を`deadline`へ保存する。`On Update`が`Ceil(deadline − Time)`を計算し、`To String → Write Field`でWorldTextへ書き込む。期限に達すると空文字を書いてから`Capture Camera`を通す。グラフ内の`Display`は編集画面の値確認用で、ワールドに文字を表示するのは`Write Field`と`WorldText`の組み合わせ。撮った写真は本人の`user://photos`へPNGで自動保存される。共有したい場合は「写真をワールドに置く」を押す。撮影要求は一時的な操作で、カウントダウンの文字と期限は共有・保存される。
+ワークショップ作品のノードグラフでは、`On Interact`が`Time + Countdown seconds`を`deadline`へ保存する。`On Update`が`Ceil(deadline − Time)`を計算し、`To String → Write Field`でWorldTextへ書き込む。期限に達すると空文字を書いてから`Capture Camera`を通す。グラフ内の`Display`は編集画面の値確認用で、ワールドに文字を表示するのは`Write Field`と`WorldText`の組み合わせ。撮った写真は本人の`user://photos`へPNGで自動保存される。共有したい場合は「写真をワールドに置く」を押す。撮影要求は一時的な操作で、カウントダウンの文字と期限は共有・保存される。
 
 - カーソルが表示された状態で `Esc` を押すと、リング、設定、手前の個人ウィンドウを一つ閉じる。カーソルは表示したままにする。複数の個人ウィンドウを同時に開け、ドックの同じアイコンをもう一度押すとそのウィンドウだけを閉じる。共有の3Dパネルはワールドに残る。FPS操作に戻るにはワールドをクリックする。
 - FPS操作中は視点中央で3Dパネルのボタンを押す。クリックやドラッグ中もマウスは視点操作のままで、カーソルには切り替わらない。TPS・Fly cameraやEscでカーソルを出した状態では、マウスポインターでパネルを操作する。

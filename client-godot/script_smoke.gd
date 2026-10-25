@@ -89,7 +89,7 @@ func run() -> void:
 		if not await check_until(func(): return scene.objects[id].scripts.size() == count and editor.pending_id.is_empty(), "Blank script was not attached"): quit(1); return
 	if editor.current_script().schema.name != "Script2" or editor.component_count.text.find("4 / 4") < 0:
 		push_error("Attached script count or unique blank names are wrong"); quit(1); return
-	if not editor.new_button.disabled or not editor.attach_button.disabled:
+	if not editor.new_button.disabled or not editor.graph_button.disabled:
 		push_error("Script limit is not shown by add controls"); quit(1); return
 	editor.scripts.item_selected.emit(0)
 	if editor.current_script().schema.name != "Rotator" or editor.code.text.find('name = "Rotator"') < 0:

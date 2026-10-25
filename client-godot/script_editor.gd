@@ -16,7 +16,6 @@ var object_title: Label
 var component_count: Label
 var add_hint: Label
 var scripts: ItemList
-var templates: OptionButton
 var code: CodeEdit
 var graph
 var code_heading: Label
@@ -31,7 +30,6 @@ var pause_button: Button
 var feedback: Label
 var apply_button: Button
 var reload_button: Button
-var attach_button: Button
 var new_button: Button
 var remove_confirmation: PanelContainer
 var remove_message: Label
@@ -124,14 +122,6 @@ func setup(owner, mount: Control = null) -> void:
 	var add_heading := Label.new()
 	add_heading.text = "Add a script"
 	sidebar.add_child(add_heading)
-	templates = OptionButton.new()
-	templates.tooltip_text = "Choose starter code for a new script."
-	templates.item_selected.connect(func(_index): refresh_buttons())
-	sidebar.add_child(templates)
-	attach_button = Button.new()
-	attach_button.text = "+ Add template"
-	attach_button.pressed.connect(func(): add_template(templates.selected))
-	sidebar.add_child(attach_button)
 	new_button = Button.new()
 	new_button.text = "+ Blank script"
 	new_button.tooltip_text = "Add your own script with a unique name, then paste or write its code."
@@ -578,18 +568,15 @@ func refresh() -> void:
 			config_signature = ""
 		for i in scripts.item_count:
 			if scripts.get_item_metadata(i) == selected: scripts.select(i)
-	if templates.item_count != app.script_templates.size():
-		templates.clear()
-		for template in app.script_templates: templates.add_item(template.name)
 	var component := current_script()
 	if not removal.is_empty() and (removal.get("target") != target or removal.get("script_id") != component.get("id") or removal.get("revision") != component.get("revision")):
 		cancel_removal()
 	selected_title.text = str(component.get("schema", {}).get("name", "Select a script"))
-	run_status.text = "Add a template or a blank script from the left." if component.is_empty() else execution_label(component) + (" · local Drive" if component.get("schema", {}).get("has_drive", false) else " · shared Write on host")
+	run_status.text = "Add a blank script or node graph from the left." if component.is_empty() else execution_label(component) + (" · local Drive" if component.get("schema", {}).get("has_drive", false) else " · shared Write on host")
 	run_status.modulate = Color("ed9f93") if not script_error(selected).is_empty() else (Color("82d9d0") if component.get("enabled", false) else Color("d6bb87"))
 	if component.is_empty():
 		source_dirty = false
-		code.text = "Add a component template to begin."
+		code.text = "Add a blank script or node graph to begin."
 		code.show()
 		graph.hide()
 		clear_parameters()
@@ -707,13 +694,7 @@ func refresh_buttons() -> void:
 	var component := current_script()
 	var components: Array = app.objects.get(target,{}).get("scripts",[])
 	var full := components.size() >= 4
-	var duplicate := false
-	if templates.selected >= 0 and templates.selected < app.script_templates.size():
-		duplicate = components.any(func(c): return c.schema.name == app.script_templates[templates.selected].name)
-	attach_button.disabled = not ready or source_dirty or full or duplicate
-	attach_button.tooltip_text = "Limit reached: 4 scripts per object." if full else ("This template is already attached. Select it on the left to edit, or add a Blank script." if duplicate else "Attach the chosen template as a new script on this object.")
-	add_hint.text = "Up to 4 scripts per object, each with a different name. Use Blank script to write your own."
-	if duplicate: add_hint.text = "This template is already attached. Select it on the left, choose another template, or add a Blank script."
+	add_hint.text = "Create logic here. Find finished objects in the Workshop."
 	if full: add_hint.text = "4 / 4 scripts attached. Remove a script before adding another."
 	if source_dirty: add_hint.text = "Apply or Reload this code draft before adding another script."
 	new_button.disabled = not ready or source_dirty or full

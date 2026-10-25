@@ -80,3 +80,5 @@ Remove-Item Env:KOKOVERSE_TEST_SERVER
 
 2026-10-24（JST）更新：ライブラリの保存・取得・共有・再公開に対する所有者・ライセンス制限を解除した。サインイン済みの利用者は既知の保存版IDと素材ハッシュから取得できる。個人の一覧の編集、公開停止、セッション管理、形式・ハッシュ・容量の検証は維持する。公開HTTPS/WSS経由の統合テストとGodot画面のテストに合格した。
 更新前の実行ファイルとDBは `/opt/kokoverse/backups/20261023T183309/` に保管した。フォルダー名はUTC時刻である。ビルドに使ったソースは `/opt/kokoverse/builds/library-open-20261024/` に残し、通常の更新先 `/opt/kokoverse/source/` にも現在のソースを反映した。
+
+2026-10-26（JST）更新：`c6fc8ca48a4e`のソースから管理APIを再ビルドし、Camera・WorldText・ノードScript付き作品を保存できる版へ更新した。ビルド元は`/opt/kokoverse/builds/camera-workshop-20261026/`、更新直前の実行ファイルとDBのバックアップは`/opt/kokoverse/backups/20261025T161619/`。`deploy/install.sh`によるnginx設定検査とHTTPSヘルスチェックに成功し、公開APIでカウントダウンカメラを保存・公開・再取得して構成を確認した。
