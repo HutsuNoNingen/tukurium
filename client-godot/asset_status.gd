@@ -8,7 +8,8 @@ var panel := PanelContainer.new()
 var rows := VBoxContainer.new()
 var heading := Label.new()
 var row_nodes: Dictionary = {}
-var refresh_at := 0
+var expiry := Timer.new()
+var refresh_queued := false
 const TITLES := {
 	"queued":"Queued", "converting":"Converting FBX / video", "preparing":"Preparing model",
 	"uploading_local":"Sending to local engine", "uploading_host":"Uploading to host",
@@ -42,6 +43,19 @@ func setup(application: Node) -> void:
 	rows.add_child(heading)
 	rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.visible = false
+	expiry.one_shot = true
+	expiry.timeout.connect(refresh)
+	add_child(expiry)
+	changed.connect(func(_key: String, _state: Dictionary): _queue_refresh())
+
+func _queue_refresh() -> void:
+	if refresh_queued: return
+	refresh_queued = true
+	call_deferred("_run_queued_refresh")
+
+func _run_queued_refresh() -> void:
+	refresh_queued = false
+	refresh()
 
 func name_for(key: String) -> String:
 	for object in app.objects.values():
@@ -55,7 +69,6 @@ func update(key: String, phase: String, completed: int = 0, total: int = 0, mess
 	entry.merge({"phase":phase,"completed":maxi(0,completed),"total":maxi(0,total),"message":message,"updated":Time.get_ticks_msec()},true)
 	if not title.is_empty(): entry.title = title
 	entries[key] = entry
-	refresh_at = 0
 	changed.emit(key,entry.duplicate())
 
 func description(entry: Dictionary) -> String:
@@ -64,11 +77,6 @@ func description(entry: Dictionary) -> String:
 		text += " · %d%% · %s / %s" % [mini(100,int(100.0*entry.completed/entry.total)),String.humanize_size(entry.completed),String.humanize_size(entry.total)]
 	if not str(entry.message).is_empty(): text += " · " + str(entry.message)
 	return text
-
-func _process(_delta: float) -> void:
-	if app == null or Time.get_ticks_msec() < refresh_at: return
-	refresh_at = Time.get_ticks_msec()+100
-	refresh()
 
 func refresh() -> void:
 	var now := Time.get_ticks_msec()
@@ -128,7 +136,22 @@ func refresh() -> void:
 		widgets.bar.value = int(entry.completed)
 		widgets.retry.visible = entry.phase == "error" and not key.begins_with("import:") and app.editable
 	panel.offset_bottom = panel.offset_top+rows.get_combined_minimum_size().y+24
+	_schedule_expiry(now)
 	refresh_badges()
+
+## Ready entries fade out 5s after their last update. Instead of polling,
+## wake up once when the oldest ready entry reaches that deadline.
+func _schedule_expiry(now: int) -> void:
+	if expiry.get_parent() == null: return
+	var oldest := -1
+	for key in entries.keys():
+		if entries[key].phase == "ready":
+			var updated := int(entries[key].updated)
+			if oldest < 0 or updated < oldest: oldest = updated
+	if oldest < 0:
+		expiry.stop()
+	else:
+		expiry.start(maxf(0.05, float(oldest + 5000 - now) / 1000.0))
 
 func refresh_badges() -> void:
 	var wanted := {}
