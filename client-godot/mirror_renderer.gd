@@ -1,8 +1,6 @@
 extends Node
 ## Local planar reflections for shared Mirror primitives. Only the item's pose is world state.
 const MIRROR_LAYER := 1 << 19
-const MAX_ACTIVE_MIRRORS := 4
-const UPDATE_INTERVAL_MS := 66
 var app
 var entries := {}
 
@@ -31,30 +29,18 @@ func sync(objects: Dictionary, nodes: Dictionary) -> void:
 		reflection.current = true
 		viewport.add_child(reflection)
 		node.material_override.albedo_texture = viewport.get_texture()
-		entries[id] = {"node":node, "viewport":viewport, "camera":reflection, "last_update":0, "last_transform":node.global_transform}
+		entries[id] = {"node":node, "viewport":viewport, "camera":reflection}
 
 func tick() -> void:
 	if entries.is_empty(): return
 	var viewer: Camera3D = app.camera_tool.eye if app.camera_tool.active else app.camera
-	var candidates := []
 	for id in entries:
 		var node: MeshInstance3D = entries[id].node
 		if not is_instance_valid(node) or not node.is_visible_in_tree(): continue
 		var normal: Vector3 = node.global_basis.z.normalized()
 		var distance: float = normal.dot(viewer.global_position - node.global_position)
 		if distance > 0.05 and distance < 4000.0 and not viewer.is_position_behind(node.global_position):
-			candidates.append({"id":id, "distance":distance})
-	candidates.sort_custom(func(a,b): return a.distance < b.distance)
-	for index in mini(candidates.size(), MAX_ACTIVE_MIRRORS):
-		var id: String = candidates[index].id
-		var entry: Dictionary = entries[id]
-		var now := Time.get_ticks_msec()
-		var displayed_transform: Transform3D = entry.node.global_transform
-		var moving: bool = displayed_transform != entry.last_transform
-		if not moving and now - int(entry.last_update) < UPDATE_INTERVAL_MS: continue
-		entry.last_update = now
-		entry.last_transform = displayed_transform
-		update_reflection(entry, viewer)
+			update_reflection(entries[id], viewer)
 
 func update_reflection(entry: Dictionary, viewer: Camera3D) -> void:
 	var node: MeshInstance3D = entry.node

@@ -9,11 +9,11 @@
 
 ## 反射面を同じワールドのカメラで描くと再帰する
 
-鏡は共有の`MeshRenderer`の形状として保存し、反射画像はGodotのローカルなSubViewportで生成する。反射カメラが鏡面を再び描くと、自己参照や複数鏡の再帰で負荷と表示が不安定になる。鏡面を専用の描画レイヤーへ置き、反射カメラから除外する。鏡の枠は通常レイヤーに残す。表側から見える鏡を最大4枚更新し、静止中は更新間隔を空ける。描画付きの [creation-integration.mjs](../tests/creation-integration.mjs) で、鏡の前の物体が反射に映ることを確認する。関連コード：[mirror_renderer.gd](../client-godot/mirror_renderer.gd)。確認日：2026-10-25。
+鏡は共有の`MeshRenderer`の形状として保存し、反射画像はGodotのローカルなSubViewportで生成する。反射カメラが鏡面を再び描くと、自己参照や複数鏡の再帰で負荷と表示が不安定になる。鏡面を専用の描画レイヤーへ置き、反射カメラから除外する。鏡の枠は通常レイヤーに残す。表側から見える鏡は枚数制限を設けず、Godotの描画フレームごとに更新する。描画付きの [creation-integration.mjs](../tests/creation-integration.mjs) で、鏡の前の物体が反射に映ることを確認する。関連コード：[mirror_renderer.gd](../client-godot/mirror_renderer.gd)。確認日：2026-10-25。
 
-## 保持中の鏡のTransformだけ更新しても反射が遅れる
+## 鏡のTransformだけ更新しても反射が遅れる
 
-保持中の鏡面は [render_hierarchy.gd](../client-godot/render_hierarchy.gd) が受け取ったプレビュー姿勢で滑らかに移動するが、反射用SubViewportを一律66ms間隔で更新すると映り込みだけが段階的に変わる。反射カメラはRustの確定済みTransformではなく、実際に表示したGodotノードの`global_transform`を参照する。そのTransformが前回の反射から変わった場合は間隔を待たずに更新し、静止した鏡だけ更新間隔を保つ。描画付きの [creation-integration.mjs](../tests/creation-integration.mjs) で、更新間隔内に鏡を動かしても反射カメラが追従することを確認する。関連コード：[mirror_renderer.gd](../client-godot/mirror_renderer.gd)。確認日：2026-10-25。
+保持中の鏡面は [render_hierarchy.gd](../client-godot/render_hierarchy.gd) が受け取ったプレビュー姿勢で滑らかに移動するが、反射用SubViewportを一律66ms間隔で更新すると映り込みだけが段階的に変わる。鏡が動いた場合だけ更新間隔を外しても、静止した鏡の前で視点やほかの物体が動くと反射が遅れる。反射カメラはRustの確定済みTransformではなく、実際に表示したGodotノードの`global_transform`を参照し、正面から見える各鏡を描画フレームごとに更新する。描画付きの [creation-integration.mjs](../tests/creation-integration.mjs) で、鏡と視点を同じフレーム内で別々に動かしても反射カメラが追従することを確認する。関連コード：[mirror_renderer.gd](../client-godot/mirror_renderer.gd)。確認日：2026-10-25。
 
 ## 3D作成パネルの道具を形状カードに増やすと操作が隠れる
 
