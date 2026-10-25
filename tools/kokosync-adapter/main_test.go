@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/katteni-kaihatu/kokosync/protocol"
 )
@@ -39,6 +41,47 @@ func TestFullTransformLatestFitsDatagramAndRoundTrips(t *testing.T) {
 	legacy, err := decodeLatest(string(data))
 	if err != nil || !bytes.Equal(data, legacy) {
 		t.Fatal("legacy decode failed")
+	}
+}
+
+func TestOfferLatestCoalescesAndNeverBlocks(t *testing.T) {
+	latest := make(chan outbound, 1)
+	ctx := context.Background()
+	if !offerLatest(ctx, latest, outbound{Sequence: "1"}) {
+		t.Fatal("first offer rejected")
+	}
+	// No consumer: a newer pose replaces the stale one instead of blocking.
+	done := make(chan bool, 1)
+	go func() { done <- offerLatest(ctx, latest, outbound{Sequence: "2"}) }()
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Fatal("second offer rejected")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("offerLatest blocked without a consumer")
+	}
+	if got := <-latest; got.Sequence != "2" {
+		t.Fatalf("expected newest pose to win, got sequence %q", got.Sequence)
+	}
+	// A cancelled context rejects the offer immediately.
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if offerLatest(cancelled, latest, outbound{Sequence: "3"}) {
+		t.Fatal("offer accepted after cancellation")
+	}
+}
+
+func TestNextRetryDelayBacksOffAndResets(t *testing.T) {
+	delay := retryMinDelay
+	for _, want := range []time.Duration{4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second, retryMaxDelay, retryMaxDelay} {
+		delay = nextRetryDelay(delay, time.Second)
+		if delay != want {
+			t.Fatalf("delay = %v, want %v", delay, want)
+		}
+	}
+	if got := nextRetryDelay(retryMaxDelay, 2*time.Minute); got != retryMinDelay {
+		t.Fatalf("healthy run should reset delay, got %v", got)
 	}
 }
 
