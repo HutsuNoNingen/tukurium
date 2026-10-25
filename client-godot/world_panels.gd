@@ -33,7 +33,9 @@ func edit(object_id: String, field: String, value: Variant, callback: Callable =
 		if callback.is_valid(): callback.call({"ok":false,"message":"Object unavailable or disconnected"})
 		return
 	var current_field := field_data(object_id, field)
-	if current_field.is_empty(): return
+	if current_field.is_empty():
+		if callback.is_valid(): callback.call({"ok":false,"message":"Field unavailable"})
+		return
 	command({"kind":"edit","edit":{"target":app.field_address(object_id,field),"field_id":field,"expected_revision":str(current_field.revision) if revision.is_empty() else revision,"value":value}}, callback)
 
 func field_data(object_id: String, field: String) -> Dictionary:
