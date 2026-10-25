@@ -809,6 +809,100 @@ fn image_panels_validate_bytes_dimensions_and_replication() {
     assert_eq!(guest.snapshot(), before);
 }
 
+#[test]
+fn image_validation_strength_is_unchanged_by_the_decode_memo() {
+    use base64::Engine;
+    let encode = |bytes: &[u8]| {
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )
+    };
+    let image = image::DynamicImage::new_rgb8(8, 4);
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut cursor, image::ImageFormat::Png).unwrap();
+    let png = cursor.into_inner();
+    let valid = encode(&png);
+    // First sight fully decodes; repeats hit the memo. Both succeed and
+    // report the header dimensions.
+    for _ in 0..2 {
+        let visual = validate_image(&valid).unwrap();
+        assert!(matches!(
+            visual,
+            kokoverse_protocol::Visual::Image {
+                width: 8,
+                height: 4,
+                ..
+            }
+        ));
+        validate_visual(&visual).unwrap();
+    }
+    // A payload whose header parses but whose body is truncated must be
+    // rejected on every call: failures are never memoized.
+    let truncated = encode(&png[..png.len() / 2]);
+    for _ in 0..2 {
+        assert_eq!(
+            validate_image(&truncated).unwrap_err(),
+            "Invalid image data"
+        );
+    }
+    // Stored dimensions that disagree with the header are rejected even
+    // though the payload itself is memoized as decodable.
+    let mut mismatched = validate_image(&valid).unwrap();
+    if let kokoverse_protocol::Visual::Image { height, .. } = &mut mismatched {
+        *height = 5;
+    }
+    assert_eq!(
+        validate_visual(&mismatched).unwrap_err(),
+        "Invalid image dimensions"
+    );
+    // Over-limit dimensions are rejected before any decode.
+    let wide = image::DynamicImage::new_rgb8(2049, 1);
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    wide.write_to(&mut cursor, image::ImageFormat::Png).unwrap();
+    assert_eq!(
+        validate_image(&encode(&cursor.into_inner())).unwrap_err(),
+        "Image dimensions must be at most 2048 × 2048"
+    );
+}
+
+#[test]
+fn hierarchy_validation_handles_deep_chains_and_rejects_cycles_and_missing_parents() {
+    let mut host = WorldModel::new();
+    // Build a 24-deep chain: each new Slot is parented under the previous.
+    let mut parent = host.snapshot().objects[0].address.clone();
+    for _ in 0..24 {
+        let created = run(
+            &mut host,
+            structure(StructuralOperation::CreateSlot {
+                parent: Some(parent.clone()),
+                position: [0.0, 0.0, 0.0],
+                rotation: None,
+                position_space: PositionSpace::Parent,
+                components: vec![],
+            }),
+        );
+        parent = created.result.unwrap().upserts[0].address.clone();
+    }
+    let snapshot = host.snapshot();
+    let mut guest = WorldModel::new();
+    guest.restore(snapshot.clone()).unwrap();
+    assert_eq!(guest.snapshot(), snapshot);
+
+    // A cycle (root parented under the deepest descendant) is rejected.
+    let mut cyclic = snapshot.clone();
+    let deepest = parent.clone();
+    cyclic.objects[0].parent = Some(deepest);
+    assert!(WorldModel::new().restore(cyclic).is_err());
+
+    // A parent that does not exist is rejected.
+    let mut orphaned = snapshot.clone();
+    let mut missing = orphaned.objects[0].address.clone();
+    missing.instance_id = uuid::Uuid::new_v4().to_string();
+    orphaned.objects[1].parent = Some(missing);
+    assert!(WorldModel::new().restore(orphaned).is_err());
+}
+
 fn video_model() -> (WorldModel, Address) {
     let mut model = WorldModel::new();
     model.set_media_time(100.0);
@@ -1003,3 +1097,4 @@ fn legacy_video_snapshot_and_invalid_state_are_rejected() {
         assert_eq!(model.snapshot(), before);
     }
 }
+
