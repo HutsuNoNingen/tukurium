@@ -91,6 +91,12 @@ try {
         } else {
             $engine = @($old.processes | Where-Object { [IO.Path]::GetFileName($_.path) -eq 'kokoverse-engine.exe' -and (Get-KokoverseProcess $_) }) | Select-Object -First 1
             $frontends = @($old.processes | Where-Object { [IO.Path]::GetFileName($_.path) -like 'Godot_*.exe' -and (Get-KokoverseProcess $_) })
+            if ($engine -and $Build) {
+                Write-Host "Saving and restarting the running $Profile profile before rebuilding."
+                & (Join-Path $PSScriptRoot 'stop-local.ps1') -Profile $Profile -Online:(-not $isLocal)
+                $engine = $null
+                $frontends = @()
+            }
             if ($engine) {
                 $uiPort = [int]$old.ui_port
                 if (-not (Test-KokoverseIpc $uiPort)) { throw "The existing Engine is not responding. It was left running to preserve its world. Check $clientRoot/engine-error.log." }

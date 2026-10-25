@@ -15,9 +15,13 @@
 
 保持中の鏡面は [render_hierarchy.gd](../client-godot/render_hierarchy.gd) が受け取ったプレビュー姿勢で滑らかに移動するが、反射用SubViewportを一律66ms間隔で更新すると映り込みだけが段階的に変わる。鏡が動いた場合だけ更新間隔を外しても、静止した鏡の前で視点やほかの物体が動くと反射が遅れる。反射カメラはRustの確定済みTransformではなく、実際に表示したGodotノードの`global_transform`を参照し、見えている各鏡を描画フレームごとに更新する。描画付きの [creation-integration.mjs](../tests/creation-integration.mjs) で、鏡と視点を同じフレーム内で別々に動かしても反射カメラが追従することを確認する。関連コード：[mirror_renderer.gd](../client-godot/mirror_renderer.gd)。確認日：2026-10-25。
 
-## 鏡の裏側で反射画像が白くなる
+## 鏡の裏側で反射が更新されない
 
 反射更新は鏡のローカルZ方向を表として距離を判定していた。裏側の視点では距離が負になって更新されず、面も裏側を描画しなかった。反射カメラの法線を視点側へ向け、距離の絶対値で更新を判定し、反射材質を両面描画にする。前後それぞれに色付きの物体を置く描画付き [creation-integration.mjs](../tests/creation-integration.mjs) で、両方向の反射テクスチャを確認する。以前の配布版には同時更新を4枚に制限する処理もあり、上限外の鏡は未描画になり得た。この制限は既に外している。関連コード：[mirror_renderer.gd](../client-godot/mirror_renderer.gd)。確認日：2026-10-26。
+
+## Debug.batを押し直しても古いEngineが残ると鏡が白い
+
+`Debug.bat`は`-Build`を渡すが、既存のEngineが動いていると`start-local.ps1`がビルド前に画面を再表示して終了していた。Godotの新しいソースだけを別途起動すると、Mirror形状の古いSnapshotには`Mirror`コンポーネントがなく、新しいGodotは反射を有効にできず、平面の素の色だけを表示する。実際のデバッグセッションでは3枚のMirrorがすべてコンポーネントなしで、保存ワールドは形式1だった。`-Build`を受けたら既存セッションを保存してEngineを停止し、ビルドしてから両方を起動する。保存ワールドのコピーを新しいEngineで開くと、3枚とも`Mirror.Enabled=true`に移行したことを確認した。関連コード：[start-local.ps1](../scripts/start-local.ps1)、[復元処理](../crates/core/src/replication.rs)。確認日：2026-10-26。
 
 ## 3D作成パネルの道具を形状カードに増やすと操作が隠れる
 
