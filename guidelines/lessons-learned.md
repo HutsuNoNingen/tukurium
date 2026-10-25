@@ -3,6 +3,15 @@
 確認日：2026-10-24。以下は再現・修正を確認した記録。
 現在の操作規則は [3Dパネルの実装指針](world-space-panels.md) を参照する。
 
+## ワークショップ作品のフィールド参照が配置後に古い個体を指す
+
+保存版には元のObjectRootのinstance IDを持つ`field_ref`が残る。ライブラリから配置するとObjectRootとRendererは新しいIDへ変わるが、Scriptの参照パラメータをそのままコピーしていたため、配置した色・回転などへのDrive/Writeが元の個体を探して失敗した。Scriptの経過時間も保存時の時計を引き継いでいた。
+
+単一オブジェクトの作品を配置するとき、参照先instance IDが保存版自身と一致するパラメータだけを新しいIDへ置き換える。外部への参照は勝手に付け替えない。Scriptの時計と一時Stateを配置時に初期化する。将来、子スロットを含む作品を保存できるようにする際は、作品内の全IDに対して対応表を使う。
+
+- 再現・確認：自身のColorへDriveするScript付き作品を配置し、参照先ID、Drive結果、保存復元を確認する。
+- コード：[lib.rs](../crates/core/src/lib.rs)。テスト：[tests.rs](../crates/core/src/tests.rs) の `placing_library_item_rebinds_its_own_field_references`。確認日：2026-10-25。
+
 ## グラフにノードを追加すると、移動済みノードが元の位置へ戻る
 
 GraphEdit上でノードをドラッグしてから別のノードを追加すると、表示を作り直す際に古いJSON上の座標を使い、移動済みノードが元の配置へ戻っていた。GraphNodeの`position_offset`はドラッグ中のローカル編集状態で、共有ソースへ保存する前にも追加・削除が起こる。

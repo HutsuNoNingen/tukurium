@@ -35,6 +35,53 @@ fn run(model: &mut WorldModel, command: WorldCommand) -> CommandOutcome {
 }
 
 #[test]
+fn placing_library_item_rebinds_its_own_field_references() {
+    use kokoverse_protocol::{ItemIdentity, ItemPermissions, ScriptClock, ScriptComponent, TypedReference};
+    let mut model = WorldModel::new();
+    model.set_media_time(42.0);
+    let mut object = model.snapshot().objects[0].clone();
+    let original = object.address.instance_id.clone();
+    let source = "return {name='Paint',fields={target={type='field_ref'}},drive=function(ctx) ctx:drive_field(ctx.self.Paint.target,{1,0,0,1}) end}";
+    let program = kokoverse_scripting::Program::compile(source).unwrap();
+    let reference = TypedReference::Field {
+        target: replication::REGISTRY.field_address(&object.address, "color").unwrap(),
+        field_id: "color".into(),
+    };
+    object.scripts.push(ScriptComponent {
+        id: Uuid::new_v4().to_string(),
+        revision: "0".into(),
+        enabled: true,
+        source: source.into(),
+        schema: program.schema,
+        parameters: std::collections::BTreeMap::from([("target".into(), serde_json::to_value(reference).unwrap())]),
+        state: Default::default(),
+        clock: ScriptClock { anchor: 8.0, elapsed: 15.0 },
+    });
+    let user = Uuid::new_v4().to_string();
+    let identity = ItemIdentity {
+        creator_id: user.clone(),
+        owner_id: user,
+        source_version: None,
+        permissions: ItemPermissions { modify: true, redistribute: true },
+        editors: vec![],
+    };
+    let commit = model.place_library_item(object, identity, [3.0, 1.0, 0.0]).unwrap();
+    let placed = &commit.upserts[0];
+    assert_eq!(placed.scripts[0].clock.anchor, 42.0);
+    assert_eq!(placed.scripts[0].clock.elapsed, 0.0);
+    let rebound: TypedReference = serde_json::from_value(placed.scripts[0].parameters["target"].clone()).unwrap();
+    assert_ne!(placed.address.instance_id, original);
+    assert!(matches!(rebound, TypedReference::Field { target, field_id }
+        if target.instance_id == placed.address.instance_id && target.local_id == 2 && field_id == "color"));
+    model.advance(std::time::Duration::ZERO);
+    let driven = model.drive_frame().objects.into_iter().find(|entry| entry.target == placed.address).unwrap();
+    assert_eq!(driven.values["color"], json!([1, 0, 0, 1]));
+    let mut restored = WorldModel::new();
+    restored.restore(model.snapshot()).unwrap();
+    assert_eq!(restored.snapshot(), model.snapshot());
+}
+
+#[test]
 fn empty_slots_replicate_duplicate_and_restore_without_mesh_renderers() {
     let mut host = WorldModel::new();
     let mut guest = WorldModel::new();

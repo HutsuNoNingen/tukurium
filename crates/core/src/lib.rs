@@ -404,8 +404,9 @@ impl WorldModel {
         position: [f64; 3],
     ) -> Result<WorldCommit, String> {
         let id = Uuid::new_v4().to_string();
+        let source_id = object.address.instance_id.clone();
         object.address.instance_id = id.clone();
-        if let Some(renderer) = &mut object.renderer { renderer.instance_id = id; }
+        if let Some(renderer) = &mut object.renderer { renderer.instance_id = id.clone(); }
         object.object_revision = "0".into();
         object.item_identity = Some(identity);
         object.world_position = position;
@@ -418,6 +419,21 @@ impl WorldModel {
             script.id = Uuid::new_v4().to_string();
             script.revision = "0".into();
             script.state.clear();
+            script.clock.anchor = self.world.resource::<MediaClock>().0;
+            script.clock.elapsed = 0.0;
+            for value in script.parameters.values_mut() {
+                if let Ok(mut reference) = serde_json::from_value::<kokoverse_protocol::TypedReference>(value.clone()) {
+                    let target = match &mut reference {
+                        kokoverse_protocol::TypedReference::Slot { target }
+                        | kokoverse_protocol::TypedReference::Component { target }
+                        | kokoverse_protocol::TypedReference::Field { target, .. } => target,
+                    };
+                    if target.instance_id == source_id {
+                        target.instance_id = id.clone();
+                        *value = serde_json::to_value(reference).unwrap();
+                    }
+                }
+            }
         }
         for field in &mut object.fields {
             field.revision = "0".into();
