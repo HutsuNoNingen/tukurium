@@ -49,8 +49,8 @@ pub fn pending_expired(waited: Duration) -> bool {
 }
 
 /// True when any pending request in the set has expired.
-pub fn any_pending_expired(waits: impl Iterator<Item = Duration>) -> bool {
-    waits.into_iter().any(pending_expired)
+pub fn any_pending_expired(mut waits: impl Iterator<Item = Duration>) -> bool {
+    waits.any(pending_expired)
 }
 
 /// True when a remote participant has not been seen within the window.

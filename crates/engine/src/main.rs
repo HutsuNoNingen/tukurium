@@ -753,12 +753,12 @@ impl Engine {
         }
         if envelope.body["kind"] == "chat_send" {
             if !state_rules::accepts_local(
-                self.synced,
-                self.service.is_some(),
-                self.managed_verified,
-                &envelope.authority_epoch,
-                &self.epoch,
-            ) {
+            self.synced,
+            self.service.is_some(),
+            self.managed_verified,
+            &envelope.authority_epoch,
+            &self.epoch,
+        ) {
                 self.reply(Origin::Local(id),json!({"kind":"chat_error","message":"Join the session before sending chat"}));
             } else if let Some(text) = envelope.body["text"].as_str() {
                 if self.host {
@@ -882,12 +882,12 @@ impl Engine {
             .unwrap_or("")
             .to_owned();
         if !state_rules::accepts_local(
-                self.synced,
-                self.service.is_some(),
-                self.managed_verified,
-                &envelope.authority_epoch,
-                &self.epoch,
-            ) {
+            self.synced,
+            self.service.is_some(),
+            self.managed_verified,
+            &envelope.authority_epoch,
+            &self.epoch,
+        ) {
             let e = self.envelope(json!({"kind":"result", "command_id":requested_id, "ok":false, "message":"Reconnect to the current host before editing"}));
             self.send(id, e);
             return;
