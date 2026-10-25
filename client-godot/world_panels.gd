@@ -52,7 +52,9 @@ func session_input(panel_id: String, target_id: String, field: String, action: S
 
 func receive(body: Dictionary) -> bool:
 	if body.get("kind") == "snapshot":
-		component_schemas = body.get("component_schemas", [])
+		# Schemas now arrive once per connection in the catalog
+		# message; a snapshot only replaces them if it carries them.
+		if body.has("component_schemas"): component_schemas = body["component_schemas"]
 		update_drive_sources(body.get("drive_frame", {}))
 	elif body.get("kind") == "drive_frame":
 		update_drive_sources(body.frame)

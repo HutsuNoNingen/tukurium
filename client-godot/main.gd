@@ -1213,10 +1213,15 @@ func accept_message(message: Dictionary) -> void:
 					avatars.erase(id)
 			people_label.text = "\n".join(names)
 			social_panels.update_participants(body.participants,self_id)
+		"catalog":
+			# Static session data, sent once at hello: component
+			# schemas for the panels and the script templates.
+			script_templates = body.get("script_templates", [])
+			world_panels.component_schemas = body.get("component_schemas", [])
 		"snapshot":
 			editable = body.editable
 			social_panels.set_messages(body.get("chat",[]))
-			script_templates = body.get("script_templates", [])
+			if body.has("script_templates"): script_templates = body["script_templates"]
 			script_statuses = body.get("script_statuses", [])
 			DisplayServer.window_set_title("tukurium · " + app_version + " — " + str(body.role).capitalize())
 			status_label.text = ("Host" if body.role == "host" else "Guest") + (" · Connected" if editable else " · Waiting for host")
