@@ -1,5 +1,5 @@
 extends Node
-## A local viewfinder for a shared Camera primitive. Rust owns the parked pose and photo objects.
+## A local viewfinder for a shared Camera component. Rust owns the parked pose and photo objects.
 const DESKTOP_WINDOW = preload("res://desktop_window.gd")
 const MAX_SHARED_IMAGE_BYTES := 192 * 1024
 
@@ -110,7 +110,7 @@ func setup(owner) -> void:
 	frame.hide()
 
 func is_camera(id: String) -> bool:
-	return app.objects.has(id) and app.objects[id].get("visual", {}).get("kind", "") == "primitive" and app.objects[id].visual.get("shape", "") == "camera"
+	return app.objects.has(id) and app.objects[id].get("camera") == true
 
 func field_revisions(object: Dictionary) -> Dictionary:
 	var result := {}
@@ -135,7 +135,7 @@ func read_pose() -> void:
 
 func open(id: String) -> void:
 	if not is_camera(id):
-		app.feedback.text = "カメラを選択してください。Edit → 新規作成 → Camera で作れます。"
+		app.feedback.text = "Camera コンポーネントが有効なSlotを選んでください。Edit → 新規作成 → Camera でも作れます。"
 		return
 	if active and target_id != id and changed:
 		status.text = "先に現在のカメラを配置するか、移動を戻してください。"

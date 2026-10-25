@@ -41,8 +41,8 @@ pub struct AttachmentRegistration {
 }
 
 fn remove_mesh(object: &mut ObjectView) -> Result<(), String> {
-    if object.panel.is_some() || object.playback.is_some() || !object.scripts.is_empty() {
-        return Err("Remove dependent panel, playback, or scripts first".into());
+    if object.panel.is_some() || object.playback.is_some() || object.mirror.is_some() || !object.scripts.is_empty() {
+        return Err("Remove dependent panel, playback, mirror, or scripts first".into());
     }
     object.renderer = None;
     object.visual = Visual::None;
@@ -53,6 +53,15 @@ fn remove_world_text(object: &mut ObjectView) -> Result<(), String> {
     object.world_text = None;
     Ok(())
 }
+fn remove_mirror(object: &mut ObjectView) -> Result<(), String> {
+    object.mirror = None;
+    Ok(())
+}
+fn remove_camera(object: &mut ObjectView) -> Result<(), String> {
+    object.camera = None;
+    Ok(())
+}
+fn boolean(v: &Value) -> Result<(), String> { valid(v.is_boolean()) }
 
 fn world_text(v: &Value) -> Result<(), String> {
     valid(v.as_str().is_some_and(|s| s.chars().count() <= 80 && s.len() <= 512))
@@ -67,7 +76,7 @@ fn field(
     access: FieldAccess,
 ) -> FieldRegistration {
     let script_write = access == FieldAccess::Edit
-        && matches!(id, "name" | "position" | "rotation" | "scale" | "color" | "world_text" | "world_text_color");
+        && matches!(id, "name" | "position" | "rotation" | "scale" | "color" | "world_text" | "world_text_color" | "mirror_enabled" | "camera_enabled");
     FieldRegistration {
         schema: FieldSchema {
             id: id.into(),
@@ -77,7 +86,7 @@ fn field(
             persistent: true,
             access,
             script_write,
-            script_drive: script_write && id != "name",
+            script_drive: script_write && !matches!(id, "name" | "mirror_enabled" | "camera_enabled"),
         },
         ui_order: order,
         validate,
@@ -200,6 +209,8 @@ pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
     attachments: vec![
         AttachmentRegistration { type_id: "MeshRenderer", remove: remove_mesh },
         AttachmentRegistration { type_id: "WorldText", remove: remove_world_text },
+        AttachmentRegistration { type_id: "Mirror", remove: remove_mirror },
+        AttachmentRegistration { type_id: "Camera", remove: remove_camera },
     ],
     components: vec![
         ComponentRegistration {
@@ -451,6 +462,24 @@ pub static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
                 }
             },
         },
+        ComponentRegistration {
+            type_id: "Mirror",
+            local_id: 12,
+            fields: vec![editable("mirror_enabled", "Enabled", "bool", 17, boolean)],
+            present: |o| o.mirror.is_some(),
+            project: |o| json!({"mirror_enabled":o.mirror.unwrap()}),
+            restore: |o, v| { o.mirror = Some(parse(&v["mirror_enabled"])?); Ok(()) },
+            apply: |w, e, _, v| w.get_mut::<Mirror>(e).unwrap().0 = v.as_bool().unwrap(),
+        },
+        ComponentRegistration {
+            type_id: "Camera",
+            local_id: 13,
+            fields: vec![editable("camera_enabled", "Enabled", "bool", 18, boolean)],
+            present: |o| o.camera.is_some(),
+            project: |o| json!({"camera_enabled":o.camera.unwrap()}),
+            restore: |o, v| { o.camera = Some(parse(&v["camera_enabled"])?); Ok(()) },
+            apply: |w, e, _, v| w.get_mut::<Camera>(e).unwrap().0 = v.as_bool().unwrap(),
+        },
     ],
 });
 
@@ -471,6 +500,9 @@ impl Registry {
             }
             if type_id == "WorldText" && object.panel.is_some() {
                 return Err("WorldText belongs on a world Slot, not a panel surface".into());
+            }
+            if type_id == "Mirror" && !matches!(object.visual, Visual::Primitive { shape: PrimitiveShape::Quad | PrimitiveShape::Mirror }) {
+                return Err("Mirror requires a Quad surface".into());
             }
             (component.restore)(object, values)?;
             for field in component.fields.iter().filter(|f| f.ui_order.is_some()) {
@@ -701,19 +733,27 @@ impl Registry {
         }
     }
     pub fn decode_world(&self, world: ReplicatedWorld) -> Result<Snapshot, String> {
-        if world.format_version != REPLICATION_VERSION {
+        if world.format_version != REPLICATION_VERSION && world.format_version != 1 {
             return Err("Unsupported world format version".into());
         }
         if world.objects.len() > crate::MAX_OBJECTS {
             return Err("Object limit exceeded".into());
         }
+        let legacy = world.format_version == 1;
+        let mut objects: Vec<ObjectView> = world.objects.into_iter().map(|o| self.decode_object(o)).collect::<Result<_, _>>()?;
+        if legacy {
+            for object in &mut objects {
+                let component = match object.visual {
+                    Visual::Primitive { shape: PrimitiveShape::Mirror } if object.mirror.is_none() => Some(("Mirror", json!({"mirror_enabled":true}))),
+                    Visual::Primitive { shape: PrimitiveShape::Camera } if object.camera.is_none() => Some(("Camera", json!({"camera_enabled":true}))),
+                    _ => None,
+                };
+                if let Some((type_id, values)) = component { self.change_component(object, type_id, Some(&values))?; }
+            }
+        }
         Ok(Snapshot {
             world_revision: world.world_revision,
-            objects: world
-                .objects
-                .into_iter()
-                .map(|o| self.decode_object(o))
-                .collect::<Result<_, _>>()?,
+            objects,
         })
     }
     pub fn encode_commit(&self, commit: &WorldCommit) -> ReplicationCommit {

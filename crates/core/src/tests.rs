@@ -259,6 +259,94 @@ fn primitives_replicate_and_restore_without_mesh_assets() {
 }
 
 #[test]
+fn mirror_and_camera_components_toggle_replicate_and_restore() {
+    use kokoverse_protocol::{PrimitiveShape, Visual};
+    let mut host = WorldModel::new();
+    let mut guest = WorldModel::new();
+    guest.restore(host.snapshot()).unwrap();
+    let mirror = run(&mut host, structure(StructuralOperation::ImportAsset {
+        name: "Mirror".into(), position: [0.0, 1.5, -3.0], rotation: [0.0, 0.0, 0.0, 1.0],
+        visual: Visual::Primitive {shape: PrimitiveShape::Mirror},
+    }));
+    let mirror_id = mirror.selected.unwrap();
+    guest.apply_commit(mirror.result.unwrap()).unwrap();
+    let camera = run(&mut host, structure(StructuralOperation::ImportAsset {
+        name: "Camera".into(), position: [1.0, 1.5, -3.0], rotation: [0.0, 0.0, 0.0, 1.0],
+        visual: Visual::Primitive {shape: PrimitiveShape::Camera},
+    }));
+    let camera_id = camera.selected.unwrap();
+    guest.apply_commit(camera.result.unwrap()).unwrap();
+    assert_eq!(host.snapshot(), guest.snapshot());
+    for (id, field_id) in [(&mirror_id, "mirror_enabled"), (&camera_id, "camera_enabled")] {
+        let before = host.snapshot().objects.into_iter().find(|o| &o.address == id).unwrap();
+        assert_eq!(before.fields.iter().find(|f| f.id == field_id).unwrap().value, json!(true));
+        let result = run(&mut host, WorldCommand::Edit { edit: Edit {
+            command_id: format!("disable-{field_id}"),
+            target: replication::REGISTRY.field_address(id, field_id).unwrap(),
+            field_id: field_id.into(), expected_revision: "0".into(), value: json!(false),
+        }});
+        guest.apply_commit(result.result.unwrap()).unwrap();
+    }
+    assert_eq!(host.snapshot(), guest.snapshot());
+    let snapshot = host.snapshot();
+    assert_eq!(snapshot.objects.iter().find(|o| o.address == mirror_id).unwrap().mirror, Some(false));
+    assert_eq!(snapshot.objects.iter().find(|o| o.address == camera_id).unwrap().camera, Some(false));
+    let wire = replication::REGISTRY.encode_world(&snapshot);
+    assert_eq!(wire.format_version, 2);
+    assert_eq!(replication::REGISTRY.decode_world(wire).unwrap(), snapshot);
+    let mut restored = WorldModel::new();
+    restored.restore(snapshot.clone()).unwrap();
+    assert_eq!(restored.snapshot(), snapshot);
+    let current = snapshot.objects.iter().find(|o| o.address == mirror_id).unwrap();
+    let removed = run(&mut host, structure(StructuralOperation::RemoveComponent {
+        target: mirror_id.clone(), type_id: "Mirror".into(), expected_revision: current.object_revision.clone(),
+    }));
+    guest.apply_commit(removed.result.unwrap()).unwrap();
+    assert_eq!(guest.snapshot(), host.snapshot());
+    assert!(host.snapshot().objects.iter().find(|o| o.address == mirror_id).unwrap().mirror.is_none());
+    let camera_object = host.snapshot().objects.into_iter().find(|o| o.address == camera_id).unwrap();
+    let removed = run(&mut host, structure(StructuralOperation::RemoveComponent {
+        target: camera_id.clone(), type_id: "Camera".into(), expected_revision: camera_object.object_revision,
+    }));
+    guest.apply_commit(removed.result.unwrap()).unwrap();
+    assert_eq!(guest.snapshot(), host.snapshot());
+    let saved = replication::REGISTRY.encode_world(&host.snapshot());
+    let reloaded = replication::REGISTRY.decode_world(saved).unwrap();
+    assert!(reloaded.objects.iter().find(|o| o.address == mirror_id).unwrap().mirror.is_none());
+    assert!(reloaded.objects.iter().find(|o| o.address == camera_id).unwrap().camera.is_none());
+}
+
+#[test]
+fn mirror_requires_quad_and_old_mirror_camera_items_gain_components() {
+    use kokoverse_protocol::{PrimitiveShape, Visual};
+    let mut host = WorldModel::new();
+    let box_id = host.snapshot().objects[0].address.clone();
+    let initial = host.snapshot().objects[0].object_revision.clone();
+    assert!(run(&mut host, structure(StructuralOperation::AddComponent {
+        target: box_id, type_id: "Mirror".into(), expected_revision: initial,
+        values: json!({"mirror_enabled":true}),
+    })).result.is_err());
+    let mut legacy = WorldModel::new();
+    for shape in [PrimitiveShape::Mirror, PrimitiveShape::Camera] {
+        run(&mut legacy, structure(StructuralOperation::ImportAsset {
+            name: format!("{shape:?}"), position: [0.0, 1.5, -3.0], rotation: [0.0, 0.0, 0.0, 1.0],
+            visual: Visual::Primitive {shape},
+        }));
+    }
+    let mut wire = replication::REGISTRY.encode_world(&legacy.snapshot());
+    wire.format_version = 1;
+    for object in &mut wire.objects {
+        object.components.retain(|c| c.type_id != "Mirror" && c.type_id != "Camera");
+    }
+    let migrated = replication::REGISTRY.decode_world(wire).unwrap();
+    assert_eq!(migrated.objects.iter().filter(|o| o.mirror == Some(true)).count(), 1);
+    assert_eq!(migrated.objects.iter().filter(|o| o.camera == Some(true)).count(), 1);
+    let mut restored = WorldModel::new();
+    restored.restore(migrated.clone()).unwrap();
+    assert_eq!(restored.snapshot(), migrated);
+}
+
+#[test]
 fn creation_panels_use_shared_surface_components_and_survive_restore() {
     use kokoverse_protocol::{PrimitiveShape, Visual};
     let mut host = WorldModel::new();

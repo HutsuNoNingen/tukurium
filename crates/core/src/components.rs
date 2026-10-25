@@ -53,6 +53,12 @@ pub struct CreationView(pub kokoverse_protocol::CreationView);
 #[derive(Component, Clone)]
 pub struct WorldText(pub kokoverse_protocol::WorldText);
 
+#[derive(Component, Clone, Copy)]
+pub struct Mirror(pub bool);
+
+#[derive(Component, Clone, Copy)]
+pub struct Camera(pub bool);
+
 #[derive(Component)]
 pub struct MeshRenderer {
     pub host: Address,

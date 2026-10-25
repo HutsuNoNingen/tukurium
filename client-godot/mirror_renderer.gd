@@ -1,5 +1,5 @@
 extends Node
-## Local planar reflections for shared Mirror primitives. Only the item's pose is world state.
+## Local planar reflections for shared Mirror components. Viewports stay local.
 const MIRROR_LAYER := 1 << 19
 var app
 var entries := {}
@@ -8,16 +8,28 @@ func setup(owner) -> void:
 	app = owner
 
 func is_mirror(object: Dictionary) -> bool:
-	return object.get("visual", {}).get("kind", "") == "primitive" and object.visual.get("shape", "") == "mirror"
+	return object.get("mirror") == true and object.get("visual", {}).get("kind", "") == "primitive" and object.visual.get("shape", "") in ["quad", "mirror"]
+
+func set_surface(node: MeshInstance3D, reflective: bool, shape: String) -> void:
+	if not is_instance_valid(node): return
+	var material: StandardMaterial3D = node.material_override
+	material.albedo_texture = null
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED if reflective else BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	material.cull_mode = BaseMaterial3D.CULL_BACK if reflective else (BaseMaterial3D.CULL_DISABLED if shape == "quad" else BaseMaterial3D.CULL_BACK)
+	material.uv1_scale = Vector3(-1,1,1) if reflective else Vector3.ONE
+	material.uv1_offset = Vector3(1,0,0) if reflective else Vector3.ZERO
+	node.layers = MIRROR_LAYER if reflective else 1
 
 func sync(objects: Dictionary, nodes: Dictionary) -> void:
 	for id in entries.keys():
 		if not objects.has(id) or not nodes.has(id) or not is_mirror(objects[id]) or entries[id].node != nodes[id]:
+			if objects.has(id): set_surface(entries[id].node, false, str(objects[id].get("visual",{}).get("shape","")))
 			entries[id].viewport.queue_free()
 			entries.erase(id)
 	for id in objects:
 		if not is_mirror(objects[id]) or not nodes.has(id) or entries.has(id): continue
 		var node: MeshInstance3D = nodes[id]
+		set_surface(node, true, str(objects[id].visual.shape))
 		var viewport := SubViewport.new()
 		viewport.size = Vector2i(512, 512)
 		viewport.world_3d = app.get_world_3d()
@@ -53,8 +65,9 @@ func update_reflection(entry: Dictionary, viewer: Camera3D) -> void:
 	var virtual_eye: Vector3 = viewer.global_position - normal * (2.0 * distance)
 	camera.global_position = virtual_eye
 	camera.look_at(virtual_eye + normal, up)
-	var width: float = 2.0 * node.global_basis.x.length()
-	var height: float = 2.0 * node.global_basis.y.length()
+	var surface: QuadMesh = node.mesh
+	var width: float = surface.size.x * node.global_basis.x.length()
+	var height: float = surface.size.y * node.global_basis.y.length()
 	if width <= 0.001 or height <= 0.001: return
 	var near_plane: float = distance + 0.02
 	var ratio: float = near_plane / distance

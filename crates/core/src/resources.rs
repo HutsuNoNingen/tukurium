@@ -135,6 +135,12 @@ pub(crate) fn insert_object(world: &mut World, object: ObjectView) {
     if let Some(world_text) = object.world_text.clone() {
         world.entity_mut(slot).insert(WorldText(world_text));
     }
+    if let Some(enabled) = object.mirror {
+        world.entity_mut(slot).insert(Mirror(enabled));
+    }
+    if let Some(enabled) = object.camera {
+        world.entity_mut(slot).insert(Camera(enabled));
+    }
     world
         .entity_mut(slot)
         .insert(ScriptComponents(object.scripts.clone()));

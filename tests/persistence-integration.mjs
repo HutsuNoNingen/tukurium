@@ -110,7 +110,7 @@ try {
   const stopped=await stopScript(restarted,base+6);
   assert.equal(stopped.exitCode,0,stopped.logs);assert.match(stopped.logs,/World saved/);
   await until(()=>restarted.exitCode!==null||restarted.signalCode!==null,'Stop did not terminate engine');
-  assert.equal(readWorld().format_version,1);
+  assert.equal(readWorld().format_version,2);
   assert.equal(readWorld().world_revision,shutdownExpected.world_revision,'Stop.bat must flush latest revision before killing the engine');
   console.log('PASS: automatic host saves; guest preserves its checkpoint; crash restart restores objects and asset bytes; Stop.bat flushes latest edits');
 

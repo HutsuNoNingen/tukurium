@@ -2,7 +2,7 @@ use crate::{Address, Edit};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const REPLICATION_VERSION: u32 = 1;
+pub const REPLICATION_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

@@ -199,6 +199,10 @@ pub struct ObjectView {
     pub creation: Option<CreationView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub world_text: Option<WorldText>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirror: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera: Option<bool>,
     pub fields: Vec<Field>,
 }
 

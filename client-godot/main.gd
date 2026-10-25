@@ -1345,11 +1345,6 @@ func create_render_node(object: Dictionary) -> MeshInstance3D:
 	mat.roughness = 0.45
 	if object.visual.get("kind") == "primitive" and object.visual.shape in ["grid","quad"]:
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	if object.visual.get("kind") == "primitive" and object.visual.shape == "mirror":
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.uv1_scale = Vector3(-1,1,1)
-		mat.uv1_offset = Vector3(1,0,0)
-		node.layers = MIRROR_RENDERER.MIRROR_LAYER
 	if image_panel:
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
@@ -1597,7 +1592,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not hit.is_empty() and hit.collider.has_meta("object_id"):
 			var hit_id := str(hit.collider.get_meta("object_id"))
 			select_object(hit_id)
-			if event.double_click and objects.has(hit_id) and objects[hit_id].get("visual",{}).get("shape","") == "camera":
+			if event.double_click and camera_tool.is_camera(hit_id):
 				camera_tool.open(hit_id)
 				get_viewport().set_input_as_handled()
 				return

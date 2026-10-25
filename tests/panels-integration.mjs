@@ -57,7 +57,7 @@ try {
   await until(()=>Math.abs(host.client.latest().snapshot.objects.find(o=>o.address.instance_id===panels[1].instance_id).world_position[0]-beforePinMove)>0.02,'Pinned panel did not follow the moving user');
   await delay(150);assert.equal((await edit(guest.client,panels[1],'panel_pin',null)).ok,true);
   const request_id=randomUUID();host.client.send({kind:'save_world',request_id});assert.equal((await host.client.wait(m=>m.kind==='save_result'&&m.request_id===request_id)).ok,true);
-  const expected=host.client.latest().snapshot;const stored=JSON.parse(readFileSync(saved));assert.equal(stored.format_version,1);assert.equal(stored.objects.filter(o=>o.components.some(c=>c.type_id==='WorldPanel')).length,2);assert.ok(!JSON.stringify(expected).includes('Shared draft'));
+  const expected=host.client.latest().snapshot;const stored=JSON.parse(readFileSync(saved));assert.equal(stored.format_version,2);assert.equal(stored.objects.filter(o=>o.components.some(c=>c.type_id==='WorldPanel')).length,2);assert.ok(!JSON.stringify(expected).includes('Shared draft'));
   start('target/release/kokoverse-engine.exe',['--role','host','--session',session,'--port',String(base+8),'--transport-port',String(base+9),'--save',saved]);
   const restored=await connect(base+8);await until(()=>restored.latest(),'Restored snapshot missing');assert.deepEqual(restored.latest().snapshot,expected);
   const object=guest.client.latest().snapshot.objects.find(o=>o.address.instance_id===target.instance_id);

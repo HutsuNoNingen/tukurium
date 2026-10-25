@@ -48,6 +48,8 @@ var reference_values: Dictionary = {}
 var component_shape_picker: OptionButton
 var add_mesh_button: Button
 var add_text_button: Button
+var add_mirror_button: Button
+var add_camera_button: Button
 var component_remove_buttons: Dictionary = {}
 var component_actions := VBoxContainer.new()
 
@@ -223,6 +225,8 @@ func build_fields() -> void:
 	component_shape_picker = null
 	add_mesh_button = null
 	add_text_button = null
+	add_mirror_button = null
+	add_camera_button = null
 	component_remove_buttons.clear()
 	building_field = {}
 	field_container = fields_box
@@ -265,7 +269,28 @@ func build_component_actions(object: Dictionary) -> void:
 	add_mesh_button = add_button(mesh_row, "Add Mesh", change_component.bind("MeshRenderer", true))
 	add_mesh_button.disabled = not manager.app.editable or object.get("renderer") != null
 	component_remove_buttons["MeshRenderer"] = add_button(mesh_row, "Remove Mesh", change_component.bind("MeshRenderer", false))
-	component_remove_buttons["MeshRenderer"].disabled = not manager.app.editable or object.get("renderer") == null or object.get("playback") != null
+	component_remove_buttons["MeshRenderer"].disabled = not manager.app.editable or object.get("renderer") == null or object.get("playback") != null or object.get("mirror") != null
+	var mirror_row := HBoxContainer.new()
+	component_actions.add_child(mirror_row)
+	var mirror_label := Label.new()
+	mirror_label.text = "Mirror"
+	mirror_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mirror_row.add_child(mirror_label)
+	var mirror_surface: bool = object.get("visual",{}).get("kind","") == "primitive" and object.visual.get("shape","") in ["quad","mirror"]
+	add_mirror_button = add_button(mirror_row, "Add", change_component.bind("Mirror", true))
+	add_mirror_button.disabled = not manager.app.editable or object.get("mirror") != null or not mirror_surface
+	component_remove_buttons["Mirror"] = add_button(mirror_row, "Remove", change_component.bind("Mirror", false))
+	component_remove_buttons["Mirror"].disabled = not manager.app.editable or object.get("mirror") == null
+	var camera_row := HBoxContainer.new()
+	component_actions.add_child(camera_row)
+	var camera_label := Label.new()
+	camera_label.text = "Camera"
+	camera_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	camera_row.add_child(camera_label)
+	add_camera_button = add_button(camera_row, "Add", change_component.bind("Camera", true))
+	add_camera_button.disabled = not manager.app.editable or object.get("camera") != null
+	component_remove_buttons["Camera"] = add_button(camera_row, "Remove", change_component.bind("Camera", false))
+	component_remove_buttons["Camera"].disabled = not manager.app.editable or object.get("camera") == null
 	var text_row := HBoxContainer.new()
 	component_actions.add_child(text_row)
 	var text_label := Label.new()
@@ -282,15 +307,21 @@ func change_component(type_id: String, add: bool) -> void:
 	var object: Dictionary = manager.app.objects[target_id]
 	if object.get("panel") != null: return
 	if type_id == "MeshRenderer":
-		if (object.get("renderer") != null) == add or (not add and object.get("playback") != null): return
+		if (object.get("renderer") != null) == add or (not add and (object.get("playback") != null or object.get("mirror") != null)): return
 	elif type_id == "WorldText":
 		if (object.get("world_text") != null) == add: return
+	elif type_id == "Mirror":
+		if (object.get("mirror") != null) == add: return
+	elif type_id == "Camera":
+		if (object.get("camera") != null) == add: return
 	else: return
 	var command: Dictionary = {"action":"add_component" if add else "remove_component", "target":manager.app.address_of(object), "type_id":type_id, "expected_revision":object.object_revision}
 	if add and type_id == "MeshRenderer":
 		command["values"] = {"color":[0.2,0.65,0.8,1.0], "visual":{"kind":"primitive", "shape":PRIMITIVES.SHAPES[component_shape_picker.selected]}}
-	elif add:
+	elif add and type_id == "WorldText":
 		command["values"] = {"world_text":"Text", "world_text_color":[1.0,1.0,1.0,1.0]}
+	elif add:
+		command["values"] = {"mirror_enabled":true} if type_id == "Mirror" else {"camera_enabled":true}
 	message.text = ""
 	manager.command({"kind":"structure", "command":command}, func(result):
 		if not result.ok: message.text = result.get("message", "Could not change component"))
@@ -337,6 +368,13 @@ func build_field(field: Dictionary) -> void:
 			"string":
 				heading(field.label)
 				line_field(field_container, field.id, "0")
+			"bool":
+				var check := CheckBox.new()
+				check.text = field.label
+				check.focus_mode = Control.FOCUS_NONE
+				field_container.add_child(check)
+				controls[field.id] = [check]
+				check.toggled.connect(func(_enabled): changed(field.id, check, true))
 			"vec3": vector_field(field.id, field.label, ["X", "Y", "Z"])
 			"quat": vector_field(field.id, field.label + " · degrees", ["X", "Y", "Z"])
 			"color": vector_field(field.id, field.label, ["R", "G", "B", "A"])
@@ -509,6 +547,7 @@ func fill_values() -> void:
 			parts[1].button_pressed = value != null and value.solid
 			for i in range(3): parts[i+2].text = String.num(float(value.half_extents[i]) if value != null else 0.5, 4)
 		elif data.value_type == "string": parts[0].text = str(value)
+		elif data.value_type == "bool": parts[0].button_pressed = value == true
 		elif data.value_type == "quat":
 			var angles := Quaternion(value[0],value[1],value[2],value[3]).get_euler()
 			for i in range(3): parts[i].text = String.num(rad_to_deg(angles[i]), 3)
@@ -556,6 +595,7 @@ func read_value(field: String) -> Dictionary:
 	var parts: Array = controls[field]
 	var type: String = manager.field_data(target_id, field).get("value_type", "")
 	if type == "string": return {"ok":not parts[0].text.strip_edges().is_empty(),"value":parts[0].text}
+	if type == "bool": return {"ok":true,"value":parts[0].button_pressed}
 	if type == "collider" and not parts[0].button_pressed: return {"ok":true,"value":null}
 	var values := []
 	for control in parts:

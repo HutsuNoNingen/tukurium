@@ -88,7 +88,7 @@ try {
   assert.deepEqual(late.client.latest().snapshot,host.client.latest().snapshot);
   const request_id=randomUUID();host.client.send({kind:'save_world',request_id});assert.equal((await host.client.wait(m=>m.kind==='save_result'&&m.request_id===request_id)).ok,true);
   const expected=host.client.latest().snapshot;
-  assert.equal(JSON.parse(readFileSync(saved)).format_version,1);
+  assert.equal(JSON.parse(readFileSync(saved)).format_version,2);
   start('target/release/kokoverse-engine.exe',['--role','host','--session',session,'--port',String(base+8),'--transport-port',String(base+9),'--save',saved,'--asset-dir',resolve(work,'restored-assets')]);
   const restored=await connect(base+8);await until(()=>restored.latest(),'Restored snapshot missing');
   assert.deepEqual(restored.latest().snapshot,expected);

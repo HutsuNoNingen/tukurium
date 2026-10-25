@@ -285,13 +285,44 @@ func run() -> void:
 	panel=surface.content
 	if not await until(func(): return panel.target_id==slot_id and panel.add_mesh_button!=null,"Inspector did not show Add Component"): quit(1); return
 	await process_frame
+	panel.component_shape_picker.select(PRIMITIVES.SHAPES.find("quad"))
 	await click_control(scene,surface,panel.add_mesh_button)
-	if not await until(func(): return scene.objects[slot_id].visual.kind=="primitive" and scene.render_nodes[slot_id].mesh!=null,"Renderer Component did not attach"):
+	if not await until(func(): return scene.objects[slot_id].get("visual",{}).get("shape","")=="quad" and scene.render_nodes[slot_id].mesh!=null,"Quad Renderer Component did not attach"):
 		push_error("Inspector status="+panel.message.text+" selected="+scene.selected_id); quit(1); return
+	if not await until(func(): return panel.add_mirror_button!=null and not panel.add_mirror_button.disabled,"Inspector did not allow Mirror on Quad"): quit(1); return
+	await click_control(scene,surface,panel.add_mirror_button)
+	if not await until(func(): return scene.objects[slot_id].get("mirror")==true and scene.mirror_renderer.entries.has(slot_id) and panel.controls.has("mirror_enabled"),"Mirror Component did not attach"): quit(1); return
+	panel.scroll.ensure_control_visible(panel.controls.mirror_enabled[0])
+	await process_frame
+	await click_control(scene,surface,panel.controls.mirror_enabled[0])
+	if not await until(func(): return scene.objects[slot_id].get("mirror")==false and not scene.mirror_renderer.entries.has(slot_id),"Mirror Enabled did not turn off"): quit(1); return
+	if scene.render_nodes[slot_id].layers!=1 or scene.render_nodes[slot_id].material_override.albedo_texture!=null:
+		push_error("Disabled Mirror kept its reflection texture"); quit(1); return
+	panel.scroll.ensure_control_visible(panel.controls.mirror_enabled[0])
+	await process_frame
+	await click_control(scene,surface,panel.controls.mirror_enabled[0])
+	if not await until(func(): return scene.objects[slot_id].get("mirror")==true and scene.mirror_renderer.entries.has(slot_id),"Mirror Enabled did not turn on"): quit(1); return
+	if scene.render_nodes[slot_id].layers!=scene.mirror_renderer.MIRROR_LAYER:
+		push_error("Enabled Mirror did not restore its reflection surface"); quit(1); return
+	await click_control(scene,surface,panel.component_remove_buttons["Mirror"])
+	if not await until(func(): return scene.objects[slot_id].get("mirror")==null and not scene.mirror_renderer.entries.has(slot_id),"Mirror Component did not detach"): quit(1); return
 	if not await until(func(): return panel.component_remove_buttons.has("MeshRenderer"),"Inspector did not show Remove MeshRenderer"): quit(1); return
 	await process_frame
 	await click_control(scene,surface,panel.component_remove_buttons["MeshRenderer"])
 	if not await until(func(): return scene.objects[slot_id].visual.kind=="none" and scene.render_nodes[slot_id].mesh==null,"Renderer Component did not detach"): quit(1); return
+	if not await until(func(): return panel.add_camera_button!=null and not panel.add_camera_button.disabled,"Inspector did not allow Camera on Slot"): quit(1); return
+	await click_control(scene,surface,panel.add_camera_button)
+	if not await until(func(): return scene.objects[slot_id].get("camera")==true and scene.camera_tool.is_camera(slot_id) and panel.controls.has("camera_enabled"),"Camera Component did not attach"): quit(1); return
+	panel.scroll.ensure_control_visible(panel.controls.camera_enabled[0])
+	await process_frame
+	await click_control(scene,surface,panel.controls.camera_enabled[0])
+	if not await until(func(): return scene.objects[slot_id].get("camera")==false and not scene.camera_tool.is_camera(slot_id),"Camera Enabled did not turn off"): quit(1); return
+	panel.scroll.ensure_control_visible(panel.controls.camera_enabled[0])
+	await process_frame
+	await click_control(scene,surface,panel.controls.camera_enabled[0])
+	if not await until(func(): return scene.objects[slot_id].get("camera")==true and scene.camera_tool.is_camera(slot_id),"Camera Enabled did not turn on"): quit(1); return
+	await click_control(scene,surface,panel.component_remove_buttons["Camera"])
+	if not await until(func(): return scene.objects[slot_id].get("camera")==null,"Camera Component did not detach"): quit(1); return
 	if not await until(func(): return panel.add_text_button!=null,"Inspector did not show Add WorldText"): quit(1); return
 	await process_frame
 	await click_control(scene,surface,panel.add_text_button)

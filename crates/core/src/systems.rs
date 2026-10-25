@@ -104,6 +104,8 @@ type SnapshotRoot<'a> = (
     Option<&'a InspectorView>,
     Option<&'a CreationView>,
     Option<&'a WorldText>,
+    Option<&'a Mirror>,
+    Option<&'a Camera>,
 );
 
 /// Resolve stable addresses and validate against state committed by the preceding command.
@@ -280,6 +282,15 @@ pub(crate) fn validate_commands(
                             if meshes.iter().map(|m|image_size(&m.visual)).sum::<usize>() + image_size(&visual) > crate::MAX_IMAGE_WORLD { return Err("World image budget exceeded; remove an image first".into()); }
                             let mut object = new_object(name, position, [1.0;4]);
                             object.visual = visual;
+                            let preset = match object.visual {
+                                kokoverse_protocol::Visual::Primitive { shape: kokoverse_protocol::PrimitiveShape::Mirror } => Some("Mirror"),
+                                kokoverse_protocol::Visual::Primitive { shape: kokoverse_protocol::PrimitiveShape::Camera } => Some("Camera"),
+                                _ => None,
+                            };
+                            if let Some(type_id) = preset {
+                                let values = if type_id == "Mirror" { serde_json::json!({"mirror_enabled":true}) } else { serde_json::json!({"camera_enabled":true}) };
+                                crate::replication::REGISTRY.change_component(&mut object, type_id, Some(&values))?;
+                            }
                             object.world_rotation = rotation;
                             crate::set_default_collider(&mut object);
                             crate::initialize_playback(&mut object,clock.0);
@@ -541,6 +552,8 @@ pub(crate) fn extract_snapshot(
         inspector,
         creation,
         world_text,
+        mirror,
+        camera,
     ) in &roots
     {
         let mesh = root.renderer.as_ref().map(|address| meshes.get(index.0[address]).expect("registered renderer"));
@@ -561,6 +574,8 @@ pub(crate) fn extract_snapshot(
             inspector: inspector.map(|i| i.0.clone()),
             creation: creation.map(|c| c.0.clone()),
             world_text: world_text.map(|t| t.0.clone()),
+            mirror: mirror.map(|m| m.0),
+            camera: camera.map(|c| c.0),
             fields: vec![
                 crate::field(
                     "name",
@@ -615,6 +630,12 @@ pub(crate) fn extract_snapshot(
         if let Some(text) = &object.world_text {
             object.fields.push(crate::field("world_text", "Text", "string", serde_json::json!(text.text), revisions));
             object.fields.push(crate::field("world_text_color", "Text color", "color", serde_json::json!(text.color), revisions));
+        }
+        if let Some(enabled) = object.mirror {
+            object.fields.push(crate::field("mirror_enabled", "Enabled", "bool", serde_json::json!(enabled), revisions));
+        }
+        if let Some(enabled) = object.camera {
+            object.fields.push(crate::field("camera_enabled", "Enabled", "bool", serde_json::json!(enabled), revisions));
         }
         objects.push(object);
     }

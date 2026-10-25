@@ -730,6 +730,8 @@ pub(crate) fn new_object(name: String, position: [f64; 3], color: [f64; 4]) -> O
         inspector: None,
         creation: None,
         world_text: None,
+        mirror: None,
+        camera: None,
         fields: vec![
             field("name", "Name", "string", json!(name), &Revisions::default()),
             field("parent", "Parent", "address", Value::Null, &Revisions::default()),
@@ -863,6 +865,9 @@ pub(crate) fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
     for object in &snapshot.objects {
         validate_visual(&object.visual)?;
         panels::validate_object(object)?;
+        if object.mirror.is_some() && !matches!(object.visual, kokoverse_protocol::Visual::Primitive { shape: kokoverse_protocol::PrimitiveShape::Quad | kokoverse_protocol::PrimitiveShape::Mirror }) {
+            return Err("Mirror requires a Quad surface".into());
+        }
         if let kokoverse_protocol::Visual::Image {
             data_url,
             width,
@@ -936,6 +941,10 @@ pub(crate) fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
                     || (f.id == "world_text_color" && serde_json::from_value::<[f64; 4]>(f.value.clone()).ok() != Some(text.color)) {
                     return Err("WorldText does not match component fields".into());
                 }
+            }
+            if (f.id == "mirror_enabled" && f.value.as_bool() != object.mirror)
+                || (f.id == "camera_enabled" && f.value.as_bool() != object.camera) {
+                return Err("Function component does not match its field".into());
             }
         }
     }
