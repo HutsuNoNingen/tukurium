@@ -38,12 +38,16 @@ impl Supervisor {
         // Start thread!
         bus.log(format!("run {} args {:?}", program, args));
 
-        let mut cmd = match process::Command::new(program)
-            .args(args)
-            .stdin(process::Stdio::null())
-            .stdout(process::Stdio::piped())
-            .stderr(process::Stdio::piped())
-            .spawn()
+        let mut cmd = match process::Command::new(if cfg!(windows) {
+            format!("{}.exe", program)
+        } else {
+            program
+        })
+        .args(args)
+        .stdin(process::Stdio::null())
+        .stdout(process::Stdio::piped())
+        .stderr(process::Stdio::piped())
+        .spawn()
         {
             Ok(v) => v,
             Err(err) => {

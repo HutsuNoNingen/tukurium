@@ -6,13 +6,13 @@ pub fn start_processes_from_config(supervisor: &mut Supervisor) {
 
     supervisor.spawn(
         "relay",
-        "./.tools/kokosync-relay",
+        ".tools/kokosync-relay",
         vec!["--http", "127.0.0.1:48000", "--quic", "127.0.0.1:48001"],
     );
 
     supervisor.spawn(
         "asset-server",
-        "./target/debug/kokoverse-asset-server",
+        "target/debug/kokoverse-asset-server",
         vec![
             "--listen",
             "127.0.0.1:8787",
@@ -25,7 +25,7 @@ pub fn start_processes_from_config(supervisor: &mut Supervisor) {
 
     supervisor.spawn(
         "engine",
-        "./target/debug/kokoverse-engine",
+        "target/debug/kokoverse-engine",
         vec![
             "--server",
             "http://127.0.0.1:8787",
@@ -40,7 +40,11 @@ pub fn start_processes_from_config(supervisor: &mut Supervisor) {
             "--asset-dir",
             &format!(".run/local/{}/assets", profile_name).to_string(),
             "--adapter",
-            &format!("{}", "./.tools/kokosync-adapter").to_string(),
+            if cfg!(windows) {
+                "./.tools/kokosync-adapter.exe"
+            } else {
+                "./.tools/kokosync-adapter"
+            },
             "--session",
             &format!("{}", session_name).to_string(),
         ],
@@ -48,7 +52,11 @@ pub fn start_processes_from_config(supervisor: &mut Supervisor) {
 
     supervisor.spawn(
         "gui",
-        "godot",
+        if cfg!(windows) {
+            ".tools/godot/Godot_v4.7.2-stable_win64"
+        } else {
+            "godot"
+        },
         vec![
             "--path",
             "client-godot",
