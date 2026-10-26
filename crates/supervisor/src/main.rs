@@ -21,16 +21,19 @@ fn main() {
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "-ServerAddress" => {
-                    online_server = Some(args.next().expect("ERROR: expected address after -ServerAddress"));
-                },
+                    online_server = Some(
+                        args.next()
+                            .expect("ERROR: expected address after -ServerAddress"),
+                    );
+                }
                 "-Online" => {
                     if online_server == None {
                         online_server = Some(DEFAULT_SERVER.to_string());
                     }
-                },
+                }
                 _ => {
                     eprintln!("ERROR: invalid argument: \"{}\"", arg);
-                },
+                }
             }
         }
     }

@@ -54,7 +54,7 @@ pub fn start_processes_from_config(supervisor: &mut Supervisor, online_address: 
                     &format!("{}", session_name).to_string(),
                 ],
             );
-        },
+        }
 
         // Online
         Some(server_address) => {
@@ -71,7 +71,11 @@ pub fn start_processes_from_config(supervisor: &mut Supervisor, online_address: 
                     "--transport-port",
                     "47001",
                     "--profile",
-                    &format!(".run/Kokoverse/servers/{}/profiles/{}/profile.dat", server_name_hash, profile_name).to_string(),
+                    &format!(
+                        ".run/Kokoverse/servers/{}/profiles/{}/profile.dat",
+                        server_name_hash, profile_name
+                    )
+                    .to_string(),
                     "--data-dir",
                     &format!(".run/online/{}", profile_name).to_string(),
                     "--asset-dir",
@@ -86,7 +90,7 @@ pub fn start_processes_from_config(supervisor: &mut Supervisor, online_address: 
                     &format!("{}", session_name).to_string(),
                 ],
             );
-        },
+        }
     }
 
     supervisor.spawn(
