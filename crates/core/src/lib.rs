@@ -80,10 +80,10 @@ impl WorldModel {
         world.init_resource::<grabbing::GrabState>();
         world.init_resource::<scripting::ScriptRuntime>();
         world.init_resource::<drives::DriveRuntime>();
-        world.insert_resource(SnapshotCache(Snapshot {
+        world.insert_resource(SnapshotCache(std::sync::Arc::new(Snapshot {
             world_revision: "0".into(),
             objects: vec![],
-        }));
+        })));
         let mut schedule = Schedule::default();
         schedule.add_systems(
             (
@@ -391,7 +391,7 @@ impl WorldModel {
     }
 
     pub fn snapshot(&self) -> Snapshot {
-        self.world.resource::<SnapshotCache>().0.clone()
+        self.world.resource::<SnapshotCache>().0.as_ref().clone()
     }
     pub fn world_revision(&self) -> &str {
         &self.world.resource::<SnapshotCache>().0.world_revision
@@ -635,7 +635,8 @@ impl WorldModel {
         session_chat::replace(&mut replacement.world,self.chat_messages());
         replacement.world.resource_mut::<WorldRevision>().0 =
             snapshot.world_revision.parse().unwrap();
-        replacement.world.resource_mut::<SnapshotCache>().0 = snapshot.clone();
+        replacement.world.resource_mut::<SnapshotCache>().0 =
+            std::sync::Arc::new(snapshot.clone());
         for object in snapshot.objects {
             insert_object(&mut replacement.world, object);
         }
