@@ -1,0 +1,56 @@
+use std::sync::{Arc};
+use std::sync::mpsc;
+
+pub enum EventBody {
+    Log(String),
+    Dead,
+}
+pub struct Event {
+    pub sender: String,
+    pub body: EventBody,
+}
+
+#[derive(Clone)]
+pub struct EventBusHandle {
+    pub sender: Arc<mpsc::Sender<Event>>,
+    pub task_name: String,
+}
+impl EventBusHandle {
+    pub fn log(&self, msg: String) {
+        // If it fails, don't panic
+        _ = self.sender.send(Event {
+            sender: self.task_name.clone(),
+            body: EventBody::Log(msg),
+        });
+    }
+
+    pub fn fatal_error(&self, msg: String) {
+        // If it fails, don't panic
+        _ = self.sender.send(Event {
+            sender: self.task_name.clone(),
+            body: EventBody::Log(format!("FATAL ERROR: {}", msg)),
+        });
+        _ = self.sender.send(Event {
+            sender: self.task_name.clone(),
+            body: EventBody::Dead,
+        });
+    }
+    pub fn announce_dead(&self) {
+        _ = self.sender.send(Event {
+            sender: self.task_name.clone(),
+            body: EventBody::Dead,
+        });
+    }
+}
+
+pub fn run_bus_reader_until_dead(bus_reader: &mpsc::Receiver<Event>) {
+    while let Ok(event) = bus_reader.recv() {
+        match event.body {
+            EventBody::Log(s) => println!("msg: {}: {}", event.sender, s),
+            EventBody::Dead => {
+                println!("dead: {}", event.sender);
+                return;
+            }
+        }
+    }
+}
