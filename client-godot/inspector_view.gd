@@ -27,6 +27,9 @@ var scroll_pending := -1.0
 var scroll_inflight := false
 var scroll_due := 0
 var remote_fields: Dictionary = {}
+var drive_render_signature: Array = []
+var sessions_signature: Array = []
+var driven_values_signature: Dictionary = {}
 var target_change_pending := false
 var pending_target: Variant = null
 var close_when_ready := false
@@ -221,6 +224,9 @@ func build_fields() -> void:
 	controls.clear()
 	drive_labels.clear()
 	drive_buttons.clear()
+	drive_render_signature.clear()
+	sessions_signature.clear()
+	driven_values_signature.clear()
 	reference_chips.clear()
 	reference_values.clear()
 	for child in component_actions.get_children():
@@ -473,17 +479,42 @@ func apply_dropped_value(field: String, value: Variant) -> void:
 	changed(field,controls[field][0],true)
 
 func refresh_drives(stop_driven_edits: bool = true) -> void:
+	# Compose what each field's drive UI should show and write only
+	# the controls whose rendered state actually changed. The label
+	# depends on the driver's enabled flag and the field's shared
+	# base value, both of which change on edits — not per frame — so
+	# steady-state ticks now do no control writes at all. The
+	# signature holds the format_text inputs (source + values); a
+	# locale change re-renders through AppLanguage's bindings and
+	# needs no signature change.
+	var previous: Dictionary = {}
+	for entry in drive_render_signature: previous[entry[0]] = entry
+	var rendered: Array = []
 	for field in drive_labels:
 		var driver: Dictionary = manager.field_driver(target_id, field)
-		drive_labels[field].visible = not driver.is_empty()
-		drive_buttons[field].visible = not driver.is_empty()
-		if driver.is_empty(): continue
+		if driver.is_empty():
+			rendered.append([field, false, "", [], "", []])
+			continue
 		var data: Dictionary = manager.field_data(target_id, field)
-		AppLanguage.format_text(drive_labels[field], "Local Drive · running\nShared base: %s" if driver.enabled else "Local Drive · paused\nShared base: %s", [value_text(data.value, data.value_type)])
-		AppLanguage.format_text(drive_buttons[field], "Open %s →", [driver.schema.name])
+		rendered.append([field, true,
+			"Local Drive · running\nShared base: %s" if driver.enabled else "Local Drive · paused\nShared base: %s", [value_text(data.value, data.value_type)],
+			"Open %s →", [driver.schema.name]])
+		# A driven field's shared draft is meaningless; release it.
+		# These are cheap flag writes, kept unconditional as before —
+		# only the control writes below are signature-gated.
 		if stop_driven_edits and edits.has(field):
 			edits[field].dirty = false
 			edits[field].release = true
+	for entry in rendered:
+		var field: String = entry[0]
+		var prev: Array = previous.get(field, [])
+		if entry == prev: continue
+		drive_labels[field].visible = entry[1]
+		drive_buttons[field].visible = entry[1]
+		if not entry[1]: continue
+		AppLanguage.format_text(drive_labels[field], entry[2], entry[3])
+		AppLanguage.format_text(drive_buttons[field], entry[4], entry[5])
+	drive_render_signature = rendered
 
 func playback(action: String) -> void:
 	var field: Dictionary = manager.field_data(target_id, "playback")
@@ -564,10 +595,28 @@ func fill_reference_values() -> void:
 		var value: Variant = manager.field_data(target_id,field).get("value")
 		reference_values[field].text = tr("World") if value == null else str(manager.field_data(value.instance_id,"name").get("value",tr("Deleted Slot")))
 
+## The edit session another participant holds on this field, if any.
+## Derived from the current session list on every call, so callers
+## never act on a stale copy.
+func remote_session(field: String) -> Dictionary:
+	var remote: Dictionary = {}
+	for session in manager.sessions:
+		var context: Variant = session.get("context")
+		var same_context: bool = context == null if desktop else context != null and context.source.instance_id == panel_id
+		if session.target.instance_id == target_id and session.field_id == field and (session.client_id != input_client_id or not same_context):
+			remote = session
+	return remote
+
 func fill_values() -> void:
 	fill_reference_values()
 	for field in controls:
 		if edits.has(field): continue
+		# A field under a remote edit session displays that editor's
+		# draft, not the shared value. refresh() fills before
+		# refresh_sessions() runs, and the session render is gated on
+		# its signature — if filling stomped the draft here, nothing
+		# would reapply it while the session state stays unchanged.
+		if not remote_session(field).is_empty(): continue
 		var data: Dictionary = manager.field_data(target_id, field)
 		if data.is_empty(): continue
 		var value: Variant = manager.app.driven_objects.get(target_id, {}).get(field, data.value)
@@ -654,10 +703,17 @@ func edit_result(result: Dictionary, field: String) -> void:
 func tick() -> void:
 	script_view.tick()
 	refresh_drives()
+	# Driven values reach the input fields only when the target's
+	# driven values actually changed; a running Drive changes them
+	# per frame (fill as before), a paused or absent one leaves the
+	# fields — and the user's caret — alone.
 	if not drive_labels.is_empty():
-		filling = true
-		fill_values()
-		filling = false
+		var driven: Dictionary = manager.app.driven_objects.get(target_id, {})
+		if driven != driven_values_signature:
+			driven_values_signature = driven.duplicate(true)
+			filling = true
+			fill_values()
+			filling = false
 	if not manager.app.editable: return
 	var now := Time.get_ticks_msec()
 	if scroll_pending >= 0 and not scroll_inflight and now >= scroll_due:
@@ -733,15 +789,29 @@ func disconnected() -> void:
 	refresh_sessions()
 
 func refresh_sessions() -> void:
+	# Gate on the session-derived state this function renders: for
+	# each field, whether it is read-only and the remote draft (if
+	# any) down to its text/caret/selection. When none of that
+	# changed since the last run, every control write below would
+	# repeat the current state — including re-setting the remote
+	# draft's text and caret every frame — so skip the run.
+	var signature: Array = []
+	for field in controls:
+		var remote: Dictionary = remote_session(field)
+		var readonly: bool = not manager.app.editable or not remote.is_empty() or not manager.field_driver(target_id, field).is_empty()
+		var display_name := ""
+		if not remote.is_empty():
+			var owner: String = str(remote.owner)
+			display_name = str(manager.app.participant_names.get("local" if owner.begins_with("local-") else owner, "Another user"))
+		var draft: Dictionary = remote.get("draft", {})
+		signature.append([field, readonly, str(remote.get("owner", "")), display_name,
+			str(draft.get("text", "")), int(draft.get("caret", 0)), draft.get("selection", []), str(draft.get("part", ""))])
+	if signature == sessions_signature: return
+	sessions_signature = signature
 	var previously_remote := not remote_fields.is_empty()
 	remote_fields.clear()
 	for field in controls:
-		var remote: Dictionary = {}
-		for session in manager.sessions:
-			var context: Variant = session.get("context")
-			var same_context: bool = context == null if desktop else context != null and context.source.instance_id == panel_id
-			if session.target.instance_id == target_id and session.field_id == field and (session.client_id != input_client_id or not same_context):
-				remote = session
+		var remote: Dictionary = remote_session(field)
 		var readonly: bool = not manager.app.editable or not remote.is_empty() or not manager.field_driver(target_id, field).is_empty()
 		for control in controls[field]:
 			if control is LineEdit: control.editable = not readonly

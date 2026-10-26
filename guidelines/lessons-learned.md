@@ -410,3 +410,10 @@ PlanarMotionの1フレームでPositionとVelocityを同時に確定するとき
 
 - 再現・確認：[motion.rs](../crates/core/src/motion.rs) の反射・ゲストへのコミット適用・保存復元テストと、`cargo test -p kokoverse-core`で確認する。
 - コード：[systems.rs](../crates/core/src/systems.rs) の`MotionFrame`適用処理。確認日：2026-10-26。
+
+## 描画の署名ゲートは「後段が直す前提」の前段処理と組み合わせない
+
+インスペクタの表示更新を署名ゲートで省略するとき、前段（snapshot の `fill_values()`）が他者の下書き表示を共有値で上書きしても、後段（`refresh_sessions()`）は署名不変で再適用を省略し、下書き・カレットが失われたままになる。ゲートを入れる場合は、ゲートされる側が直していた表示を前段が触らないことまで含めて設計する。今回の修正では `fill_values()` がリモート編集中のFieldを対象から外し、判定はキャッシュ済みの `remote_fields` ではなく現在のセッション一覧からその場で導出する（対象切替直後の陳腐化を避けるため）。
+
+- 再現・確認：リモート編集中に snapshot が届く順序を [panel_observer_smoke.gd](../client-godot/panel_observer_smoke.gd) が決定的に踏む（下書き表示を確認した直後に `world_panels.sync()` を呼び、状態が保たれることを同期的に再確認する）。[panels-integration.mjs](../tests/panels-integration.mjs) `--rendered` で確認する。
+- コード：[inspector_view.gd](../client-godot/inspector_view.gd) の `fill_values()` / `remote_session()` / `refresh_sessions()`。確認日：2026-10-26。

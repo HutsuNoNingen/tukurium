@@ -8,6 +8,7 @@ func run() -> void:
 	root.add_child(scene)
 	var saw_draft := false
 	var saw_commit := false
+	var refreshed_mid_edit := false
 	var selected := ""
 	for _i in range(1000):
 		await create_timer(0.01).timeout
@@ -23,6 +24,16 @@ func run() -> void:
 			var line: LineEdit = view.controls.name[0]
 			if line.editable or line.text != session.draft.text or line.caret_column != session.draft.caret:
 				push_error("Remote draft/caret/read-only state differ"); quit(1); return
+			if not refreshed_mid_edit:
+				refreshed_mid_edit = true
+				# A snapshot arriving mid-edit re-runs the render path
+				# (fill_values before refresh_sessions). It must leave
+				# the remote draft, caret and read-only state in place;
+				# check synchronously so the sequence cannot be missed
+				# between polls.
+				scene.world_panels.sync()
+				if line.editable or line.text != session.draft.text or line.caret_column != session.draft.caret:
+					push_error("Snapshot during remote edit stomped the draft"); quit(1); return
 			saw_draft = true
 		for object in scene.objects.values():
 			for field in object.fields:
