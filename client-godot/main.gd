@@ -133,12 +133,14 @@ var avatar_restore_started := false
 const SERVICE_PANEL = preload("res://service_panel.gd")
 var service_panel = SERVICE_PANEL.new()
 var app_version := "開発版"
+var engine_role := ""
 
 func _ready() -> void:
 	if FileAccess.file_exists("res://version.txt"):
 		var packaged_version := FileAccess.get_file_as_string("res://version.txt").strip_edges()
 		if not packaged_version.is_empty(): app_version = packaged_version
-	DisplayServer.window_set_title("tukurium · " + app_version)
+	AppLanguage.language_changed.connect(refresh_localized_chrome)
+	refresh_localized_chrome()
 	# Space belongs to gameplay/text entry, not BaseButton's default UI accept.
 	for event in InputMap.action_get_events("ui_accept"):
 		if event is InputEventKey and (event.keycode == KEY_SPACE or event.physical_keycode == KEY_SPACE):
@@ -162,6 +164,7 @@ func _ready() -> void:
 	build_ui()
 	add_child(service_panel)
 	service_panel.setup(self)
+	refresh_localized_chrome()
 	add_child(asset_status)
 	asset_status.setup(self)
 	add_child(asset_importer)
@@ -176,6 +179,17 @@ func _ready() -> void:
 	mirror_renderer.setup(self)
 	set_view_mode(1, false)
 	connect_engine()
+
+func refresh_localized_chrome() -> void:
+	var version := tr("開発版") if app_version == "開発版" else app_version
+	var role := "" if engine_role.is_empty() else " — " + tr(engine_role.capitalize())
+	DisplayServer.window_set_title("tukurium · " + version + role)
+	if is_instance_valid(service_panel.version_label): service_panel.version_label.text=version
+	if is_instance_valid(people_label):
+		var names: PackedStringArray=[]
+		for id in participant_names:
+			names.append(str(participant_names[id])+(tr(" (you)") if id==self_id else ""))
+		people_label.text="\n".join(names)
 
 func build_world() -> void:
 	var environment := WorldEnvironment.new()
@@ -393,6 +407,8 @@ func build_ui() -> void:
 	reset_avatar.pressed.connect(func(): asset_importer.reset_avatar_texture())
 	avatar_actions.add_child(reset_avatar)
 	people_label = label("Connecting…", 13, Color("9cb5c2"))
+	people_label.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
+	AppLanguage.format_text(people_label,"Connecting…")
 	people_label.max_lines_visible = 4
 	people.add_child(people_label)
 	var inspector_panel := panel(root, -340, 112, -24, 708)
@@ -408,6 +424,7 @@ func build_ui() -> void:
 	inspector_scroll.add_child(inspector)
 	inspector.add_child(label("INSPECTOR", 12, Color("8ca7b6")))
 	object_label = label("Shared cube", 22)
+	object_label.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
 	inspector.add_child(object_label)
 	revision_label = label("Waiting for world…", 12, Color("8ca7b6"))
 	inspector.add_child(revision_label)
@@ -763,7 +780,7 @@ func confirm_delete() -> void:
 	var target: Dictionary = current.duplicate(true)
 	var dialog := ConfirmationDialog.new()
 	dialog.title = "Delete object"
-	dialog.dialog_text = "Delete “%s” for everyone in this world?" % fields.name.value
+	AppLanguage.format_text(dialog,"Delete “%s” for everyone in this world?",[fields.name.value],"dialog_text")
 	dialog.ok_button_text = "Delete"
 	dialog.confirmed.connect(func(): submit_structure("delete", target); dialog.queue_free())
 	dialog.canceled.connect(dialog.queue_free)
@@ -1102,7 +1119,7 @@ func accept_message(message: Dictionary) -> void:
 	if message.get("protocol_version") != 3:
 		var got: Variant = message.get("protocol_version")
 		received.clear()
-		disconnect_engine("Engine protocol mismatch (expected 3, got %s). Please update tukurium." % str(got))
+		disconnect_engine(tr("Engine protocol mismatch (expected 3, got %s). Please update tukurium.") % str(got))
 		return
 	var service_body: Dictionary = message.get("body",{})
 	if service_body.get("kind") == "engine_shutdown":
@@ -1206,7 +1223,7 @@ func accept_message(message: Dictionary) -> void:
 						player_position = player_target_position
 						player_initialized = true
 					if not nickname.has_focus(): nickname.text = person.name
-				names.append(person.name + (" (you)" if id == self_id else ""))
+				names.append(person.name + (tr(" (you)") if id == self_id else ""))
 			for id in avatars.keys():
 				if not visible.has(id):
 					avatars[id].queue_free()
@@ -1223,8 +1240,9 @@ func accept_message(message: Dictionary) -> void:
 			social_panels.set_messages(body.get("chat",[]))
 			if body.has("script_templates"): script_templates = body["script_templates"]
 			script_statuses = body.get("script_statuses", [])
-			DisplayServer.window_set_title("tukurium · " + app_version + " — " + str(body.role).capitalize())
-			status_label.text = ("Host" if body.role == "host" else "Guest") + (" · Connected" if editable else " · Waiting for host")
+			engine_role=str(body.role)
+			refresh_localized_chrome()
+			AppLanguage.format_text(status_label,("Host" if body.role == "host" else "Guest")+(" · Connected" if editable else " · Waiting for host"))
 			apply_snapshot(body.snapshot)
 			apply_drive_frame(body.get("drive_frame", {}))
 			script_editor.refresh()
@@ -1318,6 +1336,7 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 				label=node.get_node("WorldText")
 			else:
 				label=Label3D.new()
+				label.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
 				label.name="WorldText"
 				label.font_size=64
 				label.pixel_size=0.005
@@ -1346,7 +1365,7 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 	if not objects.has(selected_id):
 		selected_id = "" if objects.is_empty() else str(objects.keys()[0])
 		dirty.clear()
-	revision_label.text = "World revision " + snapshot.world_revision + " · ObjectRoot"
+	AppLanguage.format_text(revision_label,"World revision %s · ObjectRoot",[snapshot.world_revision])
 	asset_status.refresh_badges()
 	update_selected()
 	rebuild_tree()
@@ -1436,14 +1455,14 @@ func update_selected() -> void:
 	fields.clear()
 	selection_outline.visible = not current.is_empty() and current.get("visual", {}).get("kind") != "none"
 	if current.is_empty():
-		object_label.text = "No object selected"
+		AppLanguage.format_text(object_label,"No object selected")
 		name_input.text = ""
 		return
 	for field in current.fields: fields[field.id] = field
 	cube = render_nodes[selected_id]
 	material = cube.material_override
 	update_selection_outline()
-	object_label.text = fields.name.value
+	AppLanguage.format_text(object_label,"%s",[fields.name.value])
 	refresh_fields()
 
 func rebuild_tree() -> void:
@@ -1466,6 +1485,7 @@ func rebuild_tree() -> void:
 		for field in object.fields:
 			if field.id == "name": name = field.value
 		button.text = "◇  " + name
+		button.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
 		button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.custom_minimum_size = Vector2(180, 36)
@@ -1473,7 +1493,7 @@ func rebuild_tree() -> void:
 		button.button_pressed = id == selected_id
 		button.pressed.connect(select_object.bind(id))
 		tree_objects.add_child(button)
-	object_count.text = "%d / 128 objects" % objects.size()
+	AppLanguage.format_text(object_count,"%d / 128 objects",[objects.size()])
 
 func focus_selected() -> void:
 	if current.is_empty(): return

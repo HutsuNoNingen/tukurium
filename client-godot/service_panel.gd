@@ -139,9 +139,9 @@ func setup(scene) -> void:
 	app=scene
 	layer=20
 	body_font=SystemFont.new()
-	body_font.font_names=PackedStringArray(["Yu Gothic UI","Meiryo","Segoe UI"])
+	body_font.font_names=PackedStringArray(["Yu Gothic UI","Meiryo","Malgun Gothic","Segoe UI"])
 	title_font=SystemFont.new()
-	title_font.font_names=PackedStringArray(["Yu Gothic","Meiryo","Segoe UI"])
+	title_font.font_names=PackedStringArray(["Yu Gothic","Meiryo","Malgun Gothic","Segoe UI"])
 	title_font.font_weight=700
 	open_button=button(self,"ホーム / ライブラリ",show_panel)
 	open_button.position=Vector2(280,112)
@@ -210,9 +210,10 @@ func setup(scene) -> void:
 			heading=title
 			subtitle=description
 			version_label=text(app.app_version,12,MUTED)
+			version_label.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
 			version_label.mouse_filter=Control.MOUSE_FILTER_IGNORE
 			version_label.name="AppVersion"
-			version_label.tooltip_text="このアプリの配布バージョン"
+			AppLanguage.format_text(version_label,"このアプリの配布バージョン",[],"tooltip_text")
 			top.add_child(version_label)
 		var close_button := button(top,"閉じる",func(): close_page(key))
 		if key=="sessions":
@@ -445,7 +446,7 @@ func receive_state(body: Dictionary) -> void:
 	login_button.disabled=not current_session.is_empty()
 	save_button.disabled=app.current.is_empty() or current_session.is_empty()
 	if not current_user.is_empty():
-		identity.text="HN  "+str(current_user.name)
+		AppLanguage.format_text(identity,"HN  %s",[str(current_user.name)])
 		name_input.text=current_user.name
 		login_button.text="HNを切り替える"
 		if not auto_login:
@@ -500,8 +501,12 @@ func refresh_sessions() -> void:
 			var contents := row(card)
 			var labels := column(contents,3)
 			labels.size_flags_horizontal=Control.SIZE_EXPAND_FILL
-			labels.add_child(text(record.name,17,INK,true))
-			labels.add_child(text("ホスト  "+str(record.owner_name),12,MUTED))
+			var session_title := text(record.name,17,INK,true)
+			session_title.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
+			labels.add_child(session_title)
+			var host_label := text("",12,MUTED)
+			AppLanguage.format_text(host_label,"ホスト  %s",[str(record.owner_name)])
+			labels.add_child(host_label)
 			var here: bool=current_session.get("id","")==record.id
 			button(contents,"ワールドへ" if here else "参加",func():
 				if here: close_page("sessions")
@@ -529,7 +534,7 @@ func refresh_library() -> void:
 		if generation!=library_generation: return
 		clear_list(library)
 		library_total=int(data.get("total",0))
-		library_page.text=page_label(library_offset,10,library_total)
+		set_page_label(library_page,library_offset,10,library_total)
 		for record in data.get("entries",[]): item_card(library,record,"library")
 		if data.get("entries",[]).is_empty(): empty_state(library,"保存した作品がありません","ワールドのアイテムを保存するか、ワークショップから取得してください。")
 		update_columns.call_deferred()
@@ -543,14 +548,18 @@ func refresh_workshop() -> void:
 		if generation!=workshop_generation: return
 		clear_list(workshop)
 		workshop_total=int(data.get("total",0))
-		workshop_page.text=page_label(workshop_offset,12,workshop_total)
+		set_page_label(workshop_page,workshop_offset,12,workshop_total)
 		for record in data.get("entries",[]): item_card(workshop,record,"workshop")
 		if data.get("entries",[]).is_empty(): empty_state(workshop,"作品が見つかりません","マイライブラリから作品を公開できます。検索中なら、検索語を変えてください。")
 		update_columns.call_deferred()
 	,Callable(),"workshop")
 
 func page_label(offset: int, count: int, total: int) -> String:
-	return "0 件" if total==0 else "%d–%d / %d 件" % [offset+1,mini(offset+count,total),total]
+	return tr("0 件") if total==0 else tr("%d–%d / %d 件") % [offset+1,mini(offset+count,total),total]
+
+func set_page_label(target: Label, offset: int, count: int, total: int) -> void:
+	if total==0: target.text="0 件"
+	else: AppLanguage.format_text(target,"%d–%d / %d 件",[offset+1,mini(offset+count,total),total])
 
 func preview_node(parent: Node, data, kind: String, height: int) -> void:
 	var area := PanelContainer.new()
@@ -577,11 +586,13 @@ func item_card(parent: GridContainer, record: Dictionary, kind: String) -> void:
 	card.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	var contents := column(card,7)
 	preview_node(contents,record.get("thumbnail"),str(record.get("kind","cube")),110)
-	var title := text(str(record.get("title",record.get("name","Untitled"))),15,INK,true)
+	var title := text(str(record.get("title",record.get("name",tr("Untitled")))),15,INK,true)
+	title.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
 	title.text_overrun_behavior=TextServer.OVERRUN_TRIM_ELLIPSIS
 	title.tooltip_text=title.text
 	contents.add_child(title)
-	var by := text("by "+str(record.get("publisher_name",record.get("creator_name",""))),12,MUTED)
+	var by := text("",12,MUTED)
+	AppLanguage.format_text(by,"by %s",[str(record.get("publisher_name",record.get("creator_name","")))])
 	by.text_overrun_behavior=TextServer.OVERRUN_TRIM_ELLIPSIS
 	contents.add_child(by)
 	var note := ""
@@ -617,15 +628,27 @@ func render_detail(data: Dictionary, record: Dictionary, kind: String) -> void:
 	var target_box: VBoxContainer=detail_boxes[kind]
 	clear_list(target_box)
 	preview_node(target_box,data.get("thumbnail"),str(data.get("kind",record.get("kind","cube"))),158)
-	var title: String=str(record.get("name",data.get("title",data.get("name","作品"))))
-	target_box.add_child(paragraph(title,21,INK))
+	var title: String=str(record.get("name",data.get("title",data.get("name",tr("作品")))))
+	var title_label := paragraph(title,21,INK)
+	title_label.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
+	target_box.add_child(title_label)
 	var creator: String=str(data.get("creator_name",record.get("creator_name","")))
-	target_box.add_child(paragraph("作者  "+creator,13))
-	if kind=="workshop" and data.get("publisher_name",creator)!=creator: target_box.add_child(paragraph("公開者  "+str(data.publisher_name),12))
+	var creator_label := paragraph("",13)
+	AppLanguage.format_text(creator_label,"作者  %s",[creator])
+	target_box.add_child(creator_label)
+	if kind=="workshop" and data.get("publisher_name",creator)!=creator:
+		var publisher_label := paragraph("",12)
+		AppLanguage.format_text(publisher_label,"公開者  %s",[str(data.publisher_name)])
+		target_box.add_child(publisher_label)
 	var type_name := kind_label(str(record.get("kind",data.get("kind","cube"))))
 	var scripts := int(data.get("script_count",data.get("object",{}).get("scripts",[]).size()))
-	target_box.add_child(text(type_name+"  ·  ロジック %d 件" % scripts,12,MUTED))
-	if kind=="workshop" and not str(data.get("description","")).is_empty(): target_box.add_child(paragraph(data.description,13,INK))
+	var type_label := text("",12,MUTED)
+	AppLanguage.format_text(type_label,type_name+"  ·  ロジック %d 件",[scripts])
+	target_box.add_child(type_label)
+	if kind=="workshop" and not str(data.get("description","")).is_empty():
+		var description_label := paragraph(data.description,13,INK)
+		description_label.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
+		target_box.add_child(description_label)
 	rule(target_box)
 	if kind=="workshop":
 		var in_library: bool=data.get("in_library",false)
@@ -642,7 +665,9 @@ func render_detail(data: Dictionary, record: Dictionary, kind: String) -> void:
 			button(target_box,"マイライブラリを開く",func(): switch_page("library"))
 		if data.get("can_manage",false): button(target_box,"公開を停止…",func(): confirm_unpublish(data))
 	else:
-		target_box.add_child(text("保存  "+Time.get_datetime_string_from_unix_time(int(data.saved_at)).replace("T"," "),11,MUTED))
+		var saved_label := text("",11,MUTED)
+		AppLanguage.format_text(saved_label,"保存  %s",[Time.get_datetime_string_from_unix_time(int(data.saved_at)).replace("T"," ")])
+		target_box.add_child(saved_label)
 		var place := button(target_box,"ワールドに配置",func():
 			var p: Vector3=app.player_position+Vector3(0,1,-2)
 			call_service("place_item",{"version_id":record.version_id,"position":[p.x,p.y,p.z]},func(_v): close_all())
@@ -806,8 +831,8 @@ func choose_world() -> void:
 	dialog.use_native_dialog=true
 	dialog.access=FileDialog.ACCESS_FILESYSTEM
 	dialog.file_mode=FileDialog.FILE_MODE_OPEN_FILE
-	dialog.filters=PackedStringArray(["*.json ; Saved tukurium world"])
+	dialog.filters=PackedStringArray([tr("*.json ; Saved tukurium world")])
 	app.add_child(dialog)
-	dialog.file_selected.connect(func(path): load_world=path; world_choice.text="開始ワールド: "+path.get_file(); dialog.queue_free())
+	dialog.file_selected.connect(func(path): load_world=path; AppLanguage.format_text(world_choice,"開始ワールド: %s",[path.get_file()]); dialog.queue_free())
 	dialog.canceled.connect(dialog.queue_free)
 	dialog.popup_centered_ratio(0.7)

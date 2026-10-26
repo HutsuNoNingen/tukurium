@@ -18,26 +18,36 @@ pub(crate) struct Bounds {
 }
 impl Bounds {
     pub(crate) fn intersects(&self, other: &Self) -> bool {
+        // Same separating-axis test as before, but the candidate
+        // axes are tested on the fly instead of being collected into
+        // a heap Vec on every pair check (contacts run this for every
+        // sensor x object pair each step). The per-axis arithmetic is
+        // unchanged, and a conjunction's result does not depend on
+        // evaluation order, so the outcome is identical.
         let basis = |rotation: DQuat| [rotation * DVec3::X, rotation * DVec3::Y, rotation * DVec3::Z];
         let a = basis(self.rotation);
         let b = basis(other.rotation);
-        let mut axes = Vec::from(a);
-        axes.extend(b);
-        for left in a {
-            for right in b {
-                let axis = left.cross(right);
-                if axis.length_squared() > 1e-12 { axes.push(axis.normalize()); }
-            }
-        }
         let distance = DVec3::from_array(other.center) - DVec3::from_array(self.center);
-        axes.into_iter().all(|axis| {
+        let separated = |axis: DVec3| {
             let radius = |half: DVec3, basis: [DVec3; 3]| {
                 half.x * basis[0].dot(axis).abs()
                     + half.y * basis[1].dot(axis).abs()
                     + half.z * basis[2].dot(axis).abs()
             };
-            distance.dot(axis).abs() <= radius(self.half, a) + radius(other.half, b) + 1e-9
-        })
+            distance.dot(axis).abs() > radius(self.half, a) + radius(other.half, b) + 1e-9
+        };
+        if a.iter().chain(b.iter()).any(|&axis| separated(axis)) {
+            return false;
+        }
+        for left in a {
+            for right in b {
+                let axis = left.cross(right);
+                if axis.length_squared() > 1e-12 && separated(axis.normalize()) {
+                    return false;
+                }
+            }
+        }
+        true
     }
     pub fn frame(&self) -> DAffine3 {
         DAffine3::from_scale_rotation_translation(
@@ -64,20 +74,31 @@ impl Bounds {
         )
         .map(|(t, n)| (t, (self.rotation * DVec3::from_array(n)).to_array()))
     }
-    fn axes(&self) -> Vec<DVec3> {
+    /// The separating axes for the character sweep/penetration
+    /// tests: 3 world axes, 3 rotated axes, and up to 9 cross
+    /// products. Previously allocated a Vec on every call (several
+    /// times per collider per step); now returned as a fixed-size
+    /// stack buffer plus its live length, with identical contents
+    /// and order.
+    fn axes(&self) -> ([DVec3; 15], usize) {
         let world = [DVec3::X, DVec3::Y, DVec3::Z];
         let oriented = world.map(|a| self.rotation * a);
-        let mut axes = Vec::from(world);
-        axes.extend(oriented);
+        let mut axes = [DVec3::ZERO; 15];
+        let mut len = 0;
+        for axis in world.into_iter().chain(oriented) {
+            axes[len] = axis;
+            len += 1;
+        }
         for a in world {
             for b in oriented {
                 let c = a.cross(b);
                 if c.length_squared() > 1e-12 {
-                    axes.push(c.normalize());
+                    axes[len] = c.normalize();
+                    len += 1;
                 }
             }
         }
-        axes
+        (axes, len)
     }
     fn radius(&self, axis: DVec3) -> f64 {
         let character = DVec3::new(RADIUS, HEIGHT * 0.5, RADIUS);
@@ -90,7 +111,8 @@ impl Bounds {
         let mut enter: f64 = 0.0;
         let mut exit: f64 = 1.0;
         let mut normal = DVec3::ZERO;
-        for axis in self.axes() {
+        let (axes, axes_len) = self.axes();
+        for axis in axes[..axes_len].iter().copied() {
             let distance = relative.dot(axis);
             let speed = movement.dot(axis);
             let radius = self.radius(axis);
@@ -122,7 +144,8 @@ impl Bounds {
         let relative = DVec3::from_array(position) + DVec3::Y * (HEIGHT * 0.5)
             - DVec3::from_array(self.center);
         let mut best: Option<DVec3> = None;
-        for axis in self.axes() {
+        let (axes, axes_len) = self.axes();
+        for axis in axes[..axes_len].iter().copied() {
             let distance = relative.dot(axis);
             let depth = self.radius(axis) - distance.abs();
             if depth <= 1e-9 {
@@ -469,6 +492,164 @@ mod tests {
         );
         assert_eq!(m.snapshot().world_revision, "0");
     }
+    // --- Equivalence references: the pre-change implementations,
+    // kept verbatim so the optimized versions can be checked
+    // against them on generated inputs. ---
+    fn reference_axes(rotation: DQuat) -> Vec<DVec3> {
+        let world = [DVec3::X, DVec3::Y, DVec3::Z];
+        let oriented = world.map(|a| rotation * a);
+        let mut axes = Vec::from(world);
+        axes.extend(oriented);
+        for a in world {
+            for b in oriented {
+                let c = a.cross(b);
+                if c.length_squared() > 1e-12 {
+                    axes.push(c.normalize());
+                }
+            }
+        }
+        axes
+    }
+    fn reference_intersects(me: &Bounds, other: &Bounds) -> bool {
+        let basis = |rotation: DQuat| [rotation * DVec3::X, rotation * DVec3::Y, rotation * DVec3::Z];
+        let a = basis(me.rotation);
+        let b = basis(other.rotation);
+        let mut axes = Vec::from(a);
+        axes.extend(b);
+        for left in a {
+            for right in b {
+                let axis = left.cross(right);
+                if axis.length_squared() > 1e-12 { axes.push(axis.normalize()); }
+            }
+        }
+        let distance = DVec3::from_array(other.center) - DVec3::from_array(me.center);
+        axes.into_iter().all(|axis| {
+            let radius = |half: DVec3, basis: [DVec3; 3]| {
+                half.x * basis[0].dot(axis).abs()
+                    + half.y * basis[1].dot(axis).abs()
+                    + half.z * basis[2].dot(axis).abs()
+            };
+            distance.dot(axis).abs() <= radius(me.half, a) + radius(other.half, b) + 1e-9
+        })
+    }
+    fn reference_sweep(bounds: &Bounds, position: [f64; 3], delta: [f64; 3]) -> Option<(f64, DVec3)> {
+        let relative = DVec3::from_array(position) + DVec3::Y * (HEIGHT * 0.5)
+            - DVec3::from_array(bounds.center);
+        let movement = DVec3::from_array(delta);
+        let mut enter: f64 = 0.0;
+        let mut exit: f64 = 1.0;
+        let mut normal = DVec3::ZERO;
+        for axis in reference_axes(bounds.rotation) {
+            let distance = relative.dot(axis);
+            let speed = movement.dot(axis);
+            let radius = bounds.radius(axis);
+            if speed.abs() < 1e-12 {
+                if distance.abs() >= radius - 1e-9 {
+                    return None;
+                }
+            } else {
+                let a = (-radius - distance) / speed;
+                let b = (radius - distance) / speed;
+                let near = a.min(b);
+                exit = exit.min(a.max(b));
+                if near >= enter {
+                    enter = near;
+                    normal = -speed.signum() * axis;
+                }
+                if enter > exit {
+                    return None;
+                }
+            }
+        }
+        if exit < 0.0 || enter > 1.0 || normal == DVec3::ZERO {
+            None
+        } else {
+            Some((enter, normal))
+        }
+    }
+    fn reference_penetration(bounds: &Bounds, position: [f64; 3]) -> Option<DVec3> {
+        let relative = DVec3::from_array(position) + DVec3::Y * (HEIGHT * 0.5)
+            - DVec3::from_array(bounds.center);
+        let mut best: Option<DVec3> = None;
+        for axis in reference_axes(bounds.rotation) {
+            let distance = relative.dot(axis);
+            let depth = bounds.radius(axis) - distance.abs();
+            if depth <= 1e-9 {
+                return None;
+            }
+            let normal = if distance < 0.0 { -axis } else { axis };
+            let push = normal * (depth + SKIN);
+            if position[1] + push.y < -SKIN {
+                continue;
+            }
+            if best.is_none_or(|b| push.length_squared() < b.length_squared()) {
+                best = Some(push);
+            }
+        }
+        best
+    }
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> f64 {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((self.0 >> 11) as f64) / (1u64 << 53) as f64
+        }
+        fn range(&mut self, lo: f64, hi: f64) -> f64 {
+            lo + (hi - lo) * self.next()
+        }
+        fn rotation(&mut self) -> DQuat {
+            DQuat::from_euler(
+                glam::EulerRot::YXZ,
+                self.range(-3.2, 3.2),
+                self.range(-3.2, 3.2),
+                self.range(-3.2, 3.2),
+            )
+        }
+        fn bounds(&mut self) -> Bounds {
+            Bounds {
+                address: Address::default(),
+                center: [self.range(-3.0, 3.0), self.range(0.0, 3.0), self.range(-3.0, 3.0)],
+                rotation: self.rotation(),
+                scale: [1.0, 1.0, 1.0],
+                half: DVec3::new(self.range(0.1, 1.5), self.range(0.1, 1.5), self.range(0.1, 1.5)),
+                solid: true,
+            }
+        }
+    }
+
+    #[test]
+    fn collision_queries_match_the_allocating_reference_implementations() {
+        let mut rng = Rng(0x5eed_cafe);
+        // Axis-aligned rotations included: cross products vanish
+        // there, which is where the two constructions could drift.
+        let mut rotations = vec![DQuat::IDENTITY, DQuat::from_rotation_y(std::f64::consts::FRAC_PI_2)];
+        for _ in 0..200 {
+            rotations.push(rng.rotation());
+        }
+        for rotation in &rotations {
+            let bounds = Bounds {
+                address: Address::default(),
+                center: [0.0; 3],
+                rotation: *rotation,
+                scale: [1.0; 3],
+                half: DVec3::splat(0.5),
+                solid: true,
+            };
+            let (axes, len) = bounds.axes();
+            assert_eq!(&axes[..len], &reference_axes(*rotation)[..]);
+        }
+        for _ in 0..600 {
+            let a = rng.bounds();
+            let b = rng.bounds();
+            assert_eq!(a.intersects(&b), reference_intersects(&a, &b));
+            assert_eq!(b.intersects(&a), reference_intersects(&b, &a));
+            let position = [rng.range(-3.0, 3.0), rng.range(0.0, 3.0), rng.range(-3.0, 3.0)];
+            let delta = [rng.range(-2.0, 2.0), rng.range(-1.0, 1.0), rng.range(-2.0, 2.0)];
+            assert_eq!(a.sweep(position, delta), reference_sweep(&a, position, delta));
+            assert_eq!(a.penetration(position), reference_penetration(&a, position));
+        }
+    }
+
     #[test]
     fn standing_character_rides_moved_platform_and_falls_when_deleted() {
         let mut m = model([0.0, 0.75, 0.0], [0.0, 1.5, 0.0]);

@@ -176,10 +176,19 @@ pub(crate) fn prepare_frame(world: &mut World) {
     runtime.capture_owners.retain(|id, _| alive.contains(id));
     runtime.last_capture_at.retain(|id, _| alive.contains(id));
     let started = Instant::now();
+    // Serialized size of every object's script array (the storage
+    // budget's starting point). An empty array always serializes to
+    // "[]" (2 bytes), so it needs no allocation to measure.
     let mut stored_bytes: usize = snapshot
         .objects
         .iter()
-        .map(|o| serde_json::to_vec(&o.scripts).unwrap().len())
+        .map(|o| {
+            if o.scripts.is_empty() {
+                2
+            } else {
+                serde_json::to_vec(&o.scripts).unwrap().len()
+            }
+        })
         .sum();
     let mut objects: Vec<_> = snapshot
         .objects

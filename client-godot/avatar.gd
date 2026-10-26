@@ -14,6 +14,7 @@ func _ready() -> void:
 	else:
 		build_simple_avatar()
 	name_label.position.y = 1.9
+	name_label.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
 	name_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	name_label.font_size = 48
 	name_label.pixel_size = 0.004

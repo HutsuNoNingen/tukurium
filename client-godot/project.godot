@@ -6,6 +6,12 @@ run/main_scene="res://main.tscn"
 config/icon="res://assets/branding/mascot.png"
 boot_splash/image="res://assets/branding/logo.png"
 
+[autoload]
+AppLanguage="*res://app_language.gd"
+
+[internationalization]
+locale/fallback="ja"
+
 [display]
 window/size/viewport_width=1280
 window/size/viewport_height=800

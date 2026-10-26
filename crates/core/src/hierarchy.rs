@@ -67,16 +67,31 @@ pub(crate) fn identity() -> GlobalTransform {
     }
 }
 
+/// Address → object lookup built once per validation pass.
+/// Walking parent chains against this index keeps whole-snapshot
+/// validation near O(N + total chain length) instead of rescanning
+/// the object list for every hop of every chain.
+pub(crate) type ObjectIndex<'a> = HashMap<&'a Address, &'a ObjectView>;
+
+pub(crate) fn object_index(snapshot: &Snapshot) -> ObjectIndex<'_> {
+    snapshot.objects.iter().map(|o| (&o.address, o)).collect()
+}
+
 pub(crate) fn parent_transform(
     snapshot: &Snapshot,
     parent: &Option<Address>,
 ) -> Result<GlobalTransform, String> {
+    parent_transform_indexed(&object_index(snapshot), parent)
+}
+
+fn parent_transform_indexed(
+    index: &ObjectIndex<'_>,
+    parent: &Option<Address>,
+) -> Result<GlobalTransform, String> {
     parent.as_ref().map_or(Ok(identity()), |p| {
-        snapshot
-            .objects
-            .iter()
-            .find(|o| &o.address == p)
-            .map(global_of)
+        index
+            .get(p)
+            .map(|object| global_of(object))
             .ok_or("Parent no longer exists".into())
     })
 }
@@ -86,16 +101,23 @@ pub(crate) fn validate_parent(
     target: &Address,
     parent: &Option<Address>,
 ) -> Result<(), String> {
+    validate_parent_indexed(&object_index(snapshot), target, parent)
+}
+
+fn validate_parent_indexed(
+    index: &ObjectIndex<'_>,
+    target: &Address,
+    parent: &Option<Address>,
+) -> Result<(), String> {
     let mut at = parent.clone();
     let mut seen = HashSet::new();
     while let Some(address) = at {
         if address == *target || !seen.insert(address.clone()) {
             return Err("A Slot cannot be parented under itself or its descendants".into());
         }
-        let object = snapshot
-            .objects
-            .iter()
-            .find(|o| o.address == address)
+        let object = index
+            .get(&address)
+            .copied()
             .ok_or("Parent no longer exists")?;
         at = object.parent.clone();
     }
@@ -103,10 +125,11 @@ pub(crate) fn validate_parent(
 }
 
 pub(crate) fn validate(snapshot: &Snapshot) -> Result<(), String> {
+    let index = object_index(snapshot);
     for object in &snapshot.objects {
-        validate_parent(snapshot, &object.address, &object.parent)?;
+        validate_parent_indexed(&index, &object.address, &object.parent)?;
         let expected = compose(
-            parent_transform(snapshot, &object.parent)?,
+            parent_transform_indexed(&index, &object.parent)?,
             local_of(object),
         );
         let close = |a: &[f64], b: &[f64]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-8);

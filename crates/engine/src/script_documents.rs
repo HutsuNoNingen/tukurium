@@ -1,5 +1,6 @@
 use super::{Engine, Origin};
-use kokoverse_core::script_documents::{Request, ScriptDocuments};
+use kokoverse_core::script_documents::{Request, ScriptDocuments, View};
+use kokoverse_protocol::Address;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -10,7 +11,17 @@ use std::{
 pub(super) struct Bridge {
     documents: ScriptDocuments,
     pending: HashMap<String, (u64, Instant)>,
+    /// The last document state broadcast per document. Requests that
+    /// change nothing (for example a cursor report that resolves to
+    /// the same anchor/head) otherwise rebroadcast the full document
+    /// to every UI and peer; identical states are already known to
+    /// all recipients, so the broadcast is skipped. The requester
+    /// still always receives its result. Bounded like the document
+    /// set itself; clearing only loses the deduplication.
+    last_broadcast: HashMap<(Address, String), View>,
 }
+
+const LAST_BROADCAST_LIMIT: usize = 256;
 impl Engine {
     pub(super) fn script_document_message(&mut self, origin: Origin, body: &Value) {
         if body["kind"] == "script_document_state" {
@@ -59,9 +70,17 @@ impl Engine {
             Instant::now(),
         ) {
             Ok(reply) => {
-                let update = json!({"kind":"script_document_state","document":reply.view});
-                self.ui(update.clone());
-                self.network(None, update);
+                let key = (reply.view.target.clone(), reply.view.script_id.clone());
+                if self.documents.last_broadcast.get(&key) != Some(&reply.view) {
+                    let update =
+                        json!({"kind":"script_document_state","document":reply.view});
+                    self.ui(update.clone());
+                    self.network(None, update);
+                    if self.documents.last_broadcast.len() >= LAST_BROADCAST_LIMIT {
+                        self.documents.last_broadcast.clear();
+                    }
+                    self.documents.last_broadcast.insert(key, reply.view.clone());
+                }
                 json!({"kind":"script_document_result","request_id":request.request_id,"ok":true,"document":reply.view,"inserted_ids":reply.inserted_ids})
             }
             Err(message) => {

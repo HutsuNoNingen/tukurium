@@ -263,7 +263,7 @@ func handle_input(event: InputEvent) -> bool:
 			return true
 	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN] and view.get_global_rect().has_point(event.position):
 		eye.fov = clampf(eye.fov + (-5.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 5.0), 25.0, 90.0)
-		status.text = "画角 %d°" % int(eye.fov)
+		AppLanguage.format_text(status,"画角 %d°",[int(eye.fov)])
 		return true
 	if event is InputEventMouseMotion and looking:
 		yaw -= event.relative.x * 0.003
@@ -347,7 +347,8 @@ func save_local() -> void:
 	var stamp := Time.get_datetime_string_from_system().replace(":", "-").replace("T", "-")
 	var path := photo_directory.path_join("tukurium-" + stamp + "-" + str(Time.get_ticks_usec()) + ".png")
 	error = captured_image.save_png(path)
-	status.text = "保存: " + path if error == OK else "写真を保存できませんでした。"
+	if error == OK: AppLanguage.format_text(status,"保存: %s",[path])
+	else: status.text = "写真を保存できませんでした。"
 
 func share_photo() -> void:
 	if captured_image == null or captured_image.is_empty() or busy or not app.editable: return

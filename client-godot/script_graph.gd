@@ -76,6 +76,7 @@ func _ready() -> void:
 	for kind in TYPES:
 		var category := "Event" if kind.begins_with("on_") else ("Flow" if kind in ["branch","sequence","write_field","drive_field","set_state","capture_camera"] else ("Value" if kind in ["number","public_number","bool","string","vec3","color","delta","time","world_time","contact_other_id","read_field","get_state"] else ("Convert" if kind in ["to_string","join","rotation_y"] else "Math / Logic")))
 		palette.add_item(category + " · " + kind.replace("_", " ").capitalize())
+		palette.set_item_metadata(palette.item_count - 1, palette.get_item_text(palette.item_count - 1).split(" · ", true, 1))
 	tools.add_child(palette)
 	var add := Button.new()
 	add.text = "+ Node"
@@ -146,6 +147,19 @@ func _ready() -> void:
 		menu_list.add_child(choice)
 		context_buttons[kind] = choice
 	context_panel.hide()
+	AppLanguage.language_changed.connect(refresh_language)
+	refresh_language()
+
+func refresh_language() -> void:
+	# Keep identifiers and authored graph values separate from display captions.
+	for index in palette.item_count:
+		var sources: PackedStringArray = palette.get_item_metadata(index)
+		palette.set_item_text(index, tr(sources[0]) + " · " + tr(sources[1]))
+	for child in canvas.get_children():
+		if child is GraphNode and child.has_meta("title_source"):
+			child.title = tr(str(child.get_meta("title_source"))) + "  ·  " + str(child.name)
+	filter_context_menu(context_search.text)
+	refresh_port_visuals()
 
 func open_context_menu(at_position: Vector2) -> void:
 	context_position = (at_position + canvas.scroll_offset) / canvas.zoom
@@ -160,7 +174,7 @@ func open_context_menu(at_position: Vector2) -> void:
 
 func filter_context_menu(query: String) -> void:
 	for kind in context_buttons:
-		context_buttons[kind].visible = query.is_empty() or str(kind).containsn(query) or str(context_buttons[kind].text).containsn(query)
+		context_buttons[kind].visible = query.is_empty() or str(kind).containsn(query) or str(context_buttons[kind].text).containsn(query) or tr(str(context_buttons[kind].text)).containsn(query)
 
 func capture_layout() -> void:
 	for item in data.nodes:
@@ -318,7 +332,7 @@ func update_caption(caption: Control, name: String, value_type: String) -> void:
 	var kind := caption.get_child(1) as Label
 	kind.text = TYPE_NAMES.get(value_type, "ANY")
 	kind.add_theme_color_override("font_color", COLORS.get(value_type, COLORS.any))
-	caption.tooltip_text = "%s · %s" % [name.capitalize(), kind.text.capitalize()]
+	caption.tooltip_text = "%s · %s" % [tr(name.capitalize()), tr(kind.text)]
 
 func port_caption(name: String, value_type: String, output: bool) -> Control:
 	var stack := VBoxContainer.new()
@@ -359,7 +373,7 @@ func add_node(kind: String, at_position: Vector2 = Vector2.INF) -> void:
 		message.text = "Maximum: 64 nodes."
 		return
 	if kind.begins_with("on_") and data.nodes.any(func(item): return item.kind == kind):
-		message.text = "Only one %s event is allowed." % kind
+		AppLanguage.format_text(message, "Only one %s event is allowed.", [kind])
 		return
 	var index := 1
 	while data.nodes.any(func(item): return item.id == "n%d" % index): index += 1
@@ -395,6 +409,7 @@ func redraw() -> void:
 		var node := GraphNode.new()
 		node.name = str(item.id)
 		node.title = str(item.kind).replace("_", " ").capitalize() + "  ·  " + str(item.id)
+		node.set_meta("title_source", node.title.trim_suffix("  ·  " + str(item.id)))
 		node.custom_minimum_size.x = 190
 		node.position_offset = Vector2(float(item.x),float(item.y))
 		node.resizable = false
@@ -450,6 +465,7 @@ func redraw() -> void:
 	canvas.zoom = zoom
 	canvas.scroll_offset = scroll
 	loading = false
+	refresh_language()
 	next_preview = 0
 
 func find_item(id: String) -> Dictionary:
@@ -472,7 +488,7 @@ func connect_ports(from: StringName, out_port: int, to: StringName, in_port: int
 	var output_type := shown_port_type(a, "out", str(out_def[0]), str(out_def[1]))
 	var input_type := connection_input_type(b, str(in_def[0]), str(in_def[1]))
 	if output_type != input_type and output_type != "any" and input_type != "any":
-		message.text = "%s cannot connect to %s. Choose a matching port." % [TYPE_NAMES.get(output_type, "ANY"), TYPE_NAMES.get(input_type, "ANY")]
+		AppLanguage.format_text(message, "%s cannot connect to %s. Choose a matching port.", [TYPE_NAMES.get(output_type, "ANY"), TYPE_NAMES.get(input_type, "ANY")])
 		return
 	var removed: Array = data.links.filter(func(link): return link.to == str(to) and link.input == in_def[0])
 	for link in removed:
@@ -590,5 +606,6 @@ func tick_preview() -> void:
 		var value := preview_input(id,"value",{},component)
 		var label: Label = display_labels[id]
 		var shown := "—" if not value.has("value") else (JSON.stringify(value.value) if value.value is Array or value.value is Dictionary else str(value.value))
+		label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 		label.text = shown.substr(0,80)
 		label.tooltip_text = shown

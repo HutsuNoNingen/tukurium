@@ -26,6 +26,8 @@ var sync_label: Label
 var fps_label: Label
 var engine_label: Label
 var mode_button: Button
+var language_selector: OptionButton
+var language_status: Label
 var ring_target := ""
 var next_status := 0
 
@@ -101,6 +103,7 @@ func setup(owner) -> void:
 	edit_mode_buttons.edit=button(edit_switch,"✎ Edit",func(): set_edit_mode(true))
 	row.add_child(VSeparator.new())
 	room_label=text("Workshop",14,MUTED)
+	room_label.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
 	room_label.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	room_label.text_overrun_behavior=TextServer.OVERRUN_TRIM_ELLIPSIS
 	row.add_child(room_label)
@@ -133,7 +136,7 @@ func _exit_tree() -> void:
 
 func build_menu() -> void:
 	root.add_child(menu)
-	menu.size=Vector2(530,400)
+	menu.size=Vector2(530,470)
 	menu.position=Vector2(128,118)
 	menu.minimum_window_size=Vector2(420,320)
 	menu.panel.add_theme_stylebox_override("panel",style(INK,22))
@@ -154,6 +157,21 @@ func build_menu() -> void:
 	settings.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	settings.add_theme_constant_override("separation",9)
 	column.add_child(settings)
+	settings.add_child(text("言語",13,MUTED))
+	language_selector=OptionButton.new()
+	language_selector.name="LanguageSelector"
+	language_selector.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
+	language_selector.add_item("日本語")
+	language_selector.add_item("한국어")
+	language_selector.custom_minimum_size.y=38
+	language_selector.select(AppLanguage.LOCALES.find(AppLanguage.locale))
+	language_selector.item_selected.connect(func(index):
+		var saved: bool=AppLanguage.set_locale(AppLanguage.LOCALES[index])
+		language_status.text="" if saved else tr("言語設定を保存できませんでした。"))
+	settings.add_child(language_selector)
+	language_status=text("",12,MUTED)
+	settings.add_child(language_status)
+	AppLanguage.language_changed.connect(func(): language_selector.select(AppLanguage.LOCALES.find(AppLanguage.locale)))
 	settings.add_child(text("表示名",13,MUTED))
 	app.nickname.reparent(settings)
 	app.nickname.custom_minimum_size.y=38

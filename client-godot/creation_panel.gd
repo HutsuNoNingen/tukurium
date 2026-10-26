@@ -33,6 +33,7 @@ func setup(controller, id: String) -> void:
 	style.set_content_margin_all(24)
 	add_theme_stylebox_override("panel",style)
 	build_ui()
+	AppLanguage.language_changed.connect(refresh_language)
 
 func build_ui() -> void:
 	var column := VBoxContainer.new()
@@ -169,7 +170,7 @@ func build_preview(parent: SubViewportContainer, shape: String) -> void:
 func show_selection(index: int) -> void:
 	selected=index
 	cards[index].button_pressed=true
-	create_button.text=PRIMITIVES.NAMES[index]+" を作成"
+	AppLanguage.format_text(create_button, "%s を作成", [tr(PRIMITIVES.NAMES[index])])
 
 func select_shape(index: int) -> void:
 	show_selection(index)
@@ -185,6 +186,11 @@ func refresh(object: Dictionary) -> void:
 	camera_button.disabled=busy or not app.editable
 	mirror_button.disabled=busy or not app.editable
 	create_button.disabled=busy or not app.editable
+
+func refresh_language() -> void:
+	# Re-resolve translated arguments after AppLanguage has refreshed its
+	# stored templates, so the bound shape name uses the new language too.
+	show_selection(selected)
 
 func finish_all() -> void:
 	pass

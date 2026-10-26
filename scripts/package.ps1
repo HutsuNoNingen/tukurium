@@ -52,6 +52,7 @@ try {
             Copy-Item -LiteralPath ($file.FullName + '.uid') -Destination (Join-Path $packageRoot 'client-godot')
         }
     }
+    Copy-Item -LiteralPath 'client-godot/locale' -Destination (Join-Path $packageRoot 'client-godot') -Recurse
     New-Item -ItemType Directory -Force -Path (Join-Path $packageRoot 'client-godot/assets/ui') | Out-Null
     Copy-Item -LiteralPath 'client-godot/assets/ui/selection-cursor.png','client-godot/assets/ui/selection-cursor.png.import' -Destination (Join-Path $packageRoot 'client-godot/assets/ui')
     Copy-Item -LiteralPath 'client-godot/assets/branding' -Destination (Join-Path $packageRoot 'client-godot/assets') -Recurse
@@ -118,6 +119,7 @@ User-imported world assets are NOT included in this archive.
     foreach ($file in @('Cargo.toml','Cargo.lock','README.md')) { Copy-Item -LiteralPath $file -Destination (Join-Path $packageRoot 'source') }
     New-Item -ItemType Directory -Path (Join-Path $packageRoot 'source/client-godot') -Force | Out-Null
     Get-ChildItem -LiteralPath (Join-Path $packageRoot 'client-godot') -File | Copy-Item -Destination (Join-Path $packageRoot 'source/client-godot')
+    Copy-Item -LiteralPath 'client-godot/locale' -Destination (Join-Path $packageRoot 'source/client-godot') -Recurse
     New-Item -ItemType Directory -Path (Join-Path $packageRoot 'source/client-godot/assets') -Force | Out-Null
     Copy-Item -LiteralPath 'client-godot/assets/oekaki' -Destination (Join-Path $packageRoot 'source/client-godot/assets') -Recurse
     Copy-Item -LiteralPath 'client-godot/assets/ui' -Destination (Join-Path $packageRoot 'source/client-godot/assets') -Recurse
