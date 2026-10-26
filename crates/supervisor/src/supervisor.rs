@@ -1,13 +1,17 @@
 use std::io::{self, BufRead};
 use std::process;
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 
 use crate::events::{Event, EventBody, EventBusHandle};
 
+pub struct Process {
+    child: Box<process::Child>,
+    name: String,
+}
 pub struct Supervisor {
-    processes: Vec<Mutex<process::Child>>,
+    processes: Vec<Process>,
     bus_writer: mpsc::Sender<Event>,
     bus_reader: mpsc::Receiver<Event>,
 }
@@ -22,7 +26,7 @@ impl Supervisor {
         }
     }
 
-    pub fn spawn(&mut self, task_name: &str, program: &str, args: Vec<&str>) {
+    pub fn spawn(&mut self, process_name: &str, program: &str, args: Vec<&str>) {
         // Take ownership
         let program = program.to_string();
         let args: Vec<String> = args.into_iter().map(|s| s.to_string()).collect();
@@ -30,7 +34,7 @@ impl Supervisor {
         // Create event bus handle
         let bus = EventBusHandle {
             sender: Arc::new(self.bus_writer.clone()),
-            task_name: task_name.to_string(),
+            process_name: process_name.to_string(),
         };
 
         // Start thread!
@@ -93,7 +97,10 @@ impl Supervisor {
         }
 
         // Add process to list
-        self.processes.push(Mutex::new(cmd));
+        self.processes.push(Process {
+            child: Box::new(cmd),
+            name: process_name.to_string(),
+        });
     }
 
     pub fn run_bus_reader_until_dead(&mut self) {
@@ -116,12 +123,10 @@ impl Supervisor {
         drop(self.bus_writer);
 
         // Kill everything
-        for cmd in processes.drain(0..) {
-            let mut cmd = cmd
-                .lock()
-                .expect("Could not lock process to kill and reap it");
+        for proc in processes.drain(0..) {
+            let mut cmd = *proc.child;
             let pid = cmd.id();
-            println!("ID = {}", pid);
+            println!("process {} ID = {}", proc.name, pid);
 
             if cfg!(unix) {
                 // On Unix-likes, Child.kill() does SIGKILL.
@@ -144,10 +149,10 @@ impl Supervisor {
 
             match cmd.wait() {
                 Ok(status) => {
-                    println!("process {} exit status = {:?}", pid, status);
+                    println!("process {} ({}) exit status = {:?}", proc.name, pid, status);
                 }
                 Err(err) => {
-                    eprintln!("ERROR: Could not reap process: {:?}", err);
+                    eprintln!("ERROR: Could not reap process {}: {:?}", proc.name, err);
                 }
             }
         }
