@@ -181,7 +181,7 @@ func refresh_roster() -> void:
 	if signature==roster_signature: return
 	roster_signature=signature
 	for child in player_rows.get_children(): child.queue_free()
-	count_label.text="%d人" % participants.size()
+	AppLanguage.format_text(count_label,"%d人",[participants.size()])
 	if participants.is_empty():
 		player_rows.add_child(label("まだ誰もいません",13,MUTED))
 		return
@@ -199,9 +199,12 @@ func add_player(person: Dictionary, distance: float, own: bool) -> void:
 	player_rows.add_child(row)
 	var initial := str(person.get("name","?"))
 	var avatar := label(initial.substr(0,1).to_upper(),15,ACCENT if own else TEXT)
+	avatar.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
 	avatar.custom_minimum_size.x=24
 	row.add_child(avatar)
-	var name := label(initial + ("  あなた" if own else ""),13)
+	var name := label(initial,13)
+	name.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
+	if own: AppLanguage.format_text(name,"%s  あなた",[initial])
 	name.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	name.text_overrun_behavior=TextServer.OVERRUN_TRIM_ELLIPSIS
 	row.add_child(name)
@@ -224,11 +227,13 @@ func set_messages(items: Array) -> void:
 		var heading := HBoxContainer.new()
 		body.add_child(heading)
 		var sender := label(str(item.get("sender_name","")),13,ACCENT)
+		sender.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
 		sender.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 		heading.add_child(sender)
 		var time := Time.get_datetime_dict_from_unix_time(int(item.get("at_millis",0))/1000)
 		heading.add_child(label("%02d:%02d" % [time.hour,time.minute],11,MUTED))
 		var content := label(str(item.get("text","")),13)
+		content.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
 		content.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
 		body.add_child(content)
 	_restore_scroll.call_deferred(follow,old_scroll)

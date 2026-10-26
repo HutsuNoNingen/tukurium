@@ -231,7 +231,9 @@ func graph_display() -> void:
 	var dirty: bool = projected != applied
 	editor.source_dirty = dirty
 	if not current.is_empty(): editor.base_revision = current.revision
-	editor.feedback.text = "Shared graph draft · %d editors · Apply graph to run/save" % int(graph_latest.editors) if dirty else "Shared graph · synchronized with applied code"
+	if dirty:
+		AppLanguage.format_text(editor.feedback, "Shared graph draft · %d editors · Apply graph to run/save", [int(graph_latest.editors)])
+	else: editor.feedback.text = "Shared graph · synchronized with applied code"
 	editor.refresh_buttons()
 
 func flush_graph() -> void:
@@ -457,6 +459,7 @@ func disconnected() -> void:
 func dispose() -> void:
 	generation += 1
 	if editor != null:
+		editor.dispose()
 		editor.action_guard = Callable()
 		editor.reload_guard = Callable()
 		editor.selection_guard = Callable()

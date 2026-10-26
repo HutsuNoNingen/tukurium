@@ -7,6 +7,7 @@ class SlotTree extends Tree:
 		if item == null or item.get_metadata(0) == null: return null
 		var id: String = item.get_metadata(0)
 		var preview := Label.new()
+		preview.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 		preview.text = item.get_text(0)
 		set_drag_preview(preview)
 		return {"kind":"kokoverse_reference","reference":{"kind":"slot","target":controller.manager.app.address_of(controller.manager.app.objects[id])}}
@@ -29,6 +30,7 @@ var child_text_button: Button
 func setup(view) -> void:
 	inspector = view
 	manager = view.manager
+	AppLanguage.language_changed.connect(refresh_language)
 	custom_minimum_size.x = 210
 	root_label.add_theme_font_size_override("font_size", 18)
 	root_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -42,6 +44,7 @@ func setup(view) -> void:
 	view.add_button(navigation,"Focus",func():
 		if manager.app.objects.has(view.target_id): set_root(manager.app.address_of(manager.app.objects[view.target_id])))
 	tree.controller = self
+	tree.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	tree.hide_root = false
 	tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	tree.add_theme_font_size_override("font_size", 20)
@@ -119,9 +122,9 @@ func refresh() -> void:
 		root.set_text(0,str(manager.field_data(address.instance_id,"name").get("value",address.instance_id)))
 		add_children(root,address.instance_id,0)
 	else:
-		root.set_text(0,"World")
+		root.set_text(0,tr("World"))
 		add_children(root,"",0)
-	root_label.text = "Root: " + root.get_text(0)
+	AppLanguage.format_text(root_label, "Root: %s", [root.get_text(0)])
 	filling = false
 
 func add_children(parent: TreeItem, parent_id: String, depth: int) -> void:
@@ -133,7 +136,11 @@ func add_children(parent: TreeItem, parent_id: String, depth: int) -> void:
 		var item := tree.create_item(parent)
 		item.set_metadata(0,id)
 		item.set_text(0,str(manager.field_data(id,"name").get("value",id)))
-		item.set_tooltip_text(0,"Drag onto another Slot to reparent; drop on World to detach")
+		item.set_tooltip_text(0,tr("Drag onto another Slot to reparent; drop on World to detach"))
 		item.collapsed = tree_state.get("collapsed",[]).has(manager.app.address_of(object))
 		if id == inspector.target_id: item.select(0)
 		add_children(item,id,depth+1)
+
+func refresh_language() -> void:
+	signature = []
+	refresh()

@@ -18,6 +18,9 @@ func _ready() -> void:
 	gui_input.connect(pointer_input)
 	resized.connect(func(): center = center.clamp(Vector2.ONE * (OUTER+16), size-Vector2.ONE*(OUTER+16)); queue_redraw())
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED: queue_redraw()
+
 func open(at: Vector2, name_text: String, can_edit: bool) -> void:
 	center = at.clamp(Vector2.ONE*(OUTER+16), size-Vector2.ONE*(OUTER+16))
 	target_name = name_text
@@ -63,7 +66,7 @@ func _draw() -> void:
 		draw_polyline(points+PackedVector2Array([points[0]]),Color("77dbce") if active else Color("39505c"),1.5,true)
 		var position := center+Vector2.from_angle(angle)*125
 		centered_text(ICONS[index],position+Vector2(0,-4),29,Color("8ce7db") if enabled else Color("69808c"))
-		centered_text(LABELS[index],position+Vector2(0,23),15,Color("edf5f8") if enabled else Color("69808c"))
+		centered_text(tr(LABELS[index]),position+Vector2(0,23),15,Color("edf5f8") if enabled else Color("69808c"))
 	draw_circle(center,INNER-5,Color("101b25"))
 	centered_text("tukurium",center+Vector2(0,-8),17,Color("90ddd4"))
 	centered_text(target_name.left(15),center+Vector2(0,15),12,Color("b1c1ca"))

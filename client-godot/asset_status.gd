@@ -57,25 +57,32 @@ func _run_queued_refresh() -> void:
 	refresh_queued = false
 	refresh()
 
+func _notification(what: int) -> void:
+	if what==NOTIFICATION_TRANSLATION_CHANGED and app!=null:
+		_queue_refresh()
+
 func name_for(key: String) -> String:
 	for object in app.objects.values():
 		if object.visual.get("asset_id","") == key:
 			for field in object.fields:
 				if field.id == "name": return str(field.value)
-	return "Asset " + key.left(8)
+	return tr("Asset %s") % key.left(8)
 
-func update(key: String, phase: String, completed: int = 0, total: int = 0, message: String = "", title: String = "") -> void:
+func update(key: String, phase: String, completed: int = 0, total: int = 0, message: String = "", title: String = "", message_args: Array = []) -> void:
 	var entry: Dictionary = entries.get(key,{})
-	entry.merge({"phase":phase,"completed":maxi(0,completed),"total":maxi(0,total),"message":message,"updated":Time.get_ticks_msec()},true)
+	entry.merge({"phase":phase,"completed":maxi(0,completed),"total":maxi(0,total),"message":message,"message_args":message_args.duplicate(),"updated":Time.get_ticks_msec()},true)
 	if not title.is_empty(): entry.title = title
 	entries[key] = entry
 	changed.emit(key,entry.duplicate())
 
 func description(entry: Dictionary) -> String:
-	var text: String = str(TITLES.get(entry.phase,entry.phase))
+	var text: String = tr(str(TITLES.get(entry.phase,entry.phase)))
 	if int(entry.total) > 0:
 		text += " · %d%% · %s / %s" % [mini(100,int(100.0*entry.completed/entry.total)),String.humanize_size(entry.completed),String.humanize_size(entry.total)]
-	if not str(entry.message).is_empty(): text += " · " + str(entry.message)
+	if not str(entry.message).is_empty():
+		var message := tr(str(entry.message))
+		if not entry.get("message_args",[]).is_empty(): message=message % entry.message_args
+		text += " · " + message
 	return text
 
 func refresh() -> void:
@@ -98,7 +105,8 @@ func refresh() -> void:
 			rows.remove_child(row_nodes[key].row)
 			row_nodes.erase(key)
 	panel.visible = not shown.is_empty()
-	heading.text = "ASSETS · THIS DEVICE" + (" · %d tasks" % visible_entries.size() if visible_entries.size()>3 else "")
+	heading.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
+	heading.text = tr("ASSETS · THIS DEVICE") + (tr(" · %d tasks") % visible_entries.size() if visible_entries.size()>3 else "")
 	for index in range(shown.size()):
 		var key: String = shown[index]
 		var entry: Dictionary = entries[key]
@@ -111,6 +119,7 @@ func refresh() -> void:
 			column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			row.add_child(column)
 			var label := Label.new()
+			label.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
 			label.custom_minimum_size.x = 300
 			label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			label.add_theme_font_size_override("font_size",13)
@@ -165,6 +174,7 @@ func refresh_badges() -> void:
 		wanted[object_id] = true
 		if not badges.has(object_id):
 			var badge := Label3D.new()
+			badge.auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
 			badge.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 			badge.font_size = 40
 			badge.pixel_size = 0.004
@@ -177,7 +187,7 @@ func refresh_badges() -> void:
 		var object_name: String = str(object_id)
 		for field in object.fields:
 			if field.id == "name": object_name = str(field.value)
-		badge.text = object_name.left(32)+"\n"+str(TITLES.get(state.phase,state.phase))
+		badge.text = object_name.left(32)+"\n"+tr(str(TITLES.get(state.phase,state.phase)))
 		if int(state.total)>0:
 			badge.text += "\n%d%% · %s / %s" % [mini(100,int(100.0*state.completed/state.total)),String.humanize_size(state.completed),String.humanize_size(state.total)]
 		badge.modulate = Color("ffaaa0") if state.phase == "error" else Color("a2ece7")
