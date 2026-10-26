@@ -12,6 +12,14 @@ use std::{
 
 pub const MAX_ASSET: usize = 128 * 1024 * 1024;
 const CHUNK: usize = 128 * 1024;
+/// Receive-side fairness/budget for in-flight asset transfers: at
+/// most 4 run at once (as before), one sender may hold at most 3 of
+/// the slots so a different sender can always start, and the sum of
+/// declared sizes in flight is capped at twice one maximum asset —
+/// one participant can no longer pin ~512 MiB of host memory or
+/// every slot until the timeout.
+const MAX_INCOMING_PER_SENDER: usize = 3;
+const MAX_INCOMING_DECLARED: usize = 2 * MAX_ASSET;
 struct Incoming {
     bytes: Vec<u8>,
     size: usize,
@@ -37,6 +45,27 @@ impl Assets {
             waiting: HashMap::new(),
             waiting_touched: HashMap::new(),
         })
+    }
+    /// Admission check for a NEW incoming transfer (re-offers of an
+    /// in-flight transfer are handled by the caller before this).
+    fn admit_offer(&self, from: &Origin, size: usize) -> Result<(), String> {
+        if self.incoming.len() >= 4 {
+            return Err("Too many simultaneous imports".into());
+        }
+        if self
+            .incoming
+            .keys()
+            .filter(|(origin, _)| origin == from)
+            .count()
+            >= MAX_INCOMING_PER_SENDER
+        {
+            return Err("Too many simultaneous imports from one sender".into());
+        }
+        let declared: usize = self.incoming.values().map(|i| i.size).sum();
+        if declared + size > MAX_INCOMING_DECLARED {
+            return Err("Too much asset data already in flight".into());
+        }
+        Ok(())
     }
     fn wait_for(&mut self, id: &str, waiter: Waiting) -> Result<bool, String> {
         if !self.waiting.contains_key(id) && self.waiting.len() >= 64 {
@@ -257,9 +286,7 @@ impl Engine {
                         self.asset_reply(from.clone(),json!({"kind":"asset_chunk_request","asset_id":id,"offset":incoming.bytes.len()}));
                         return Ok(());
                     }
-                    if self.assets.incoming.len() >= 4 && !self.assets.incoming.contains_key(&key) {
-                        return Err("Too many simultaneous imports".into());
-                    }
+                    self.assets.admit_offer(&from, size)?;
                     self.assets.incoming.insert(
                         key.clone(),
                         Incoming {
@@ -495,6 +522,37 @@ mod tests {
         }
         assert!(assets.wait_for("overflow", Waiting::Ready(1)).is_err());
         std::fs::remove_dir(root).unwrap();
+    }
+    #[test]
+    fn incoming_offer_admission_bounds_slots_per_sender_and_total_declared_size() {
+        let root = std::env::temp_dir().join(format!("kokoverse-admit-{}", uuid::Uuid::new_v4()));
+        let mut assets = Assets::new(root.clone()).unwrap();
+        let host = Origin::Peer("host".into());
+        let guest = Origin::Peer("guest".into());
+        let put = |assets: &mut Assets, from: &Origin, id: &str, size: usize| {
+            assets.incoming.insert(
+                (from.clone(), id.into()),
+                Incoming { bytes: Vec::new(), size, touched: Instant::now() },
+            );
+        };
+        // One sender may hold 3 of the 4 slots, never all of them.
+        put(&mut assets, &host, "a", 10);
+        put(&mut assets, &host, "b", 10);
+        put(&mut assets, &host, "c", 10);
+        assert!(assets.admit_offer(&host, 10).is_err());
+        assert!(assets.admit_offer(&guest, 10).is_ok());
+        // The global slot limit still applies.
+        put(&mut assets, &guest, "d", 10);
+        assert!(assets.admit_offer(&guest, 10).is_err());
+        assets.incoming.clear();
+        // Declared sizes in flight are capped at 2 x MAX_ASSET in
+        // total, across senders as well as from one.
+        put(&mut assets, &host, "big1", MAX_ASSET);
+        assert!(assets.admit_offer(&guest, MAX_ASSET).is_ok());
+        put(&mut assets, &guest, "big2", MAX_ASSET);
+        assert!(assets.admit_offer(&host, 20).is_err());
+        assert!(assets.admit_offer(&guest, 20).is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn glb_checks_reject_external_dependencies_and_truncated_chunks() {
