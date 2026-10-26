@@ -410,3 +410,10 @@ PlanarMotionの1フレームでPositionとVelocityを同時に確定するとき
 
 - 再現・確認：[motion.rs](../crates/core/src/motion.rs) の反射・ゲストへのコミット適用・保存復元テストと、`cargo test -p kokoverse-core`で確認する。
 - コード：[systems.rs](../crates/core/src/systems.rs) の`MotionFrame`適用処理。確認日：2026-10-26。
+
+## 別経路で届く静的データはビルドキーに含め、到着時に既存ビューを refresh する
+
+Component スキーマは catalog メッセージで接続時に一度だけ届くが、最初の snapshot が先に届くと、スキーマ空のままフィールドを構築したインスペクタが残る。catalog 側で代入だけしても既存ビューは再構築されず、ビューの再構築判定（対象とフィールドの署名）にもスキーマが含まれていないため、その後の refresh でも直らなかった。静的データを別経路で受け取る場合は、(1) ビューの再構築キーにその集合を含める、(2) 到着ハンドラから既存ビューの refresh を明示的に呼ぶ、の両方を行う。
+
+- 再現・確認：[panels_smoke.gd](../client-godot/panels_smoke.gd) がスキーマを空にしてフィールドが消えること、続いて catalog を本物のメッセージ入口（`accept_message`）から届けてフィールドが戻ることを確認する。[panels-integration.mjs](../tests/panels-integration.mjs) で確認する。
+- コード：[inspector_view.gd](../client-godot/inspector_view.gd) の再構築キー、[main.gd](../client-godot/main.gd) の catalog ハンドラ。確認日：2026-10-26。
