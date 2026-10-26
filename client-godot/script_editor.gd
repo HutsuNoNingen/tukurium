@@ -51,9 +51,11 @@ var list_signature := ""
 var queued_parameters: Dictionary = {}
 var flush_at := 0
 var last_error := ""
+var disposed := false
 
 func setup(owner, mount: Control = null) -> void:
 	app = owner
+	AppLanguage.language_changed.connect(language_changed)
 	var surface: Node = mount
 	if mount == null:
 		window = Window.new()
@@ -66,6 +68,7 @@ func setup(owner, mount: Control = null) -> void:
 	else:
 		mount.theme = Theme.new()
 		mount.theme.default_font_size = 16
+	surface.tree_exiting.connect(dispose, CONNECT_ONE_SHOT)
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for edge in ["left", "top", "right", "bottom"]: margin.add_theme_constant_override("margin_" + edge, 16)
@@ -87,7 +90,8 @@ func setup(owner, mount: Control = null) -> void:
 	component_count = Label.new()
 	sidebar.add_child(component_count)
 	scripts = ItemList.new()
-	scripts.tooltip_text = "Select a script to edit. Other running scripts keep running."
+	scripts.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	scripts.tooltip_text = tr("Select a script to edit. Other running scripts keep running.")
 	scripts.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scripts.custom_minimum_size.y = 140
 	scripts.add_theme_constant_override("v_separation", 12)
@@ -144,6 +148,7 @@ func setup(owner, mount: Control = null) -> void:
 	var toolbar := HBoxContainer.new()
 	editor.add_child(toolbar)
 	selected_title = Label.new()
+	selected_title.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	selected_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	selected_title.add_theme_font_size_override("font_size", 20)
 	toolbar.add_child(selected_title)
@@ -163,9 +168,10 @@ func setup(owner, mount: Control = null) -> void:
 	code_heading.text = "Source code · Apply to save"
 	editor.add_child(code_heading)
 	code = SCRIPT_CODE_EDIT.new()
+	code.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	code.manager = app.world_panels
 	code.field_dropped = choose_field_operation
-	code.tooltip_text = "Drop a field reference here, or carry one with Ctrl+RMB and click. Choose Read, Write or Drive."
+	code.tooltip_text = tr("Drop a field reference here, or carry one with Ctrl+RMB and click. Choose Read, Write or Drive.")
 	code.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	code.custom_minimum_size.y = 160
 	code.gutters_draw_line_numbers = true
@@ -206,6 +212,7 @@ func setup(owner, mount: Control = null) -> void:
 	for mode in ["Read", "Write", "Drive"]:
 		var choice := Button.new()
 		choice.text = mode
+		choice.set_meta("operation", mode)
 		choice.focus_mode = Control.FOCUS_NONE
 		choice.pressed.connect(insert_field_operation.bind(mode))
 		drop_choices.add_child(choice)
@@ -346,7 +353,7 @@ func request_removal() -> void:
 	var component := current_script()
 	if component.is_empty() or remove_button.disabled: return
 	removal = {"target":target,"script_id":component.id,"revision":component.revision}
-	remove_message.text = "Remove %s? Its code, parameters and saved state will be deleted." % component.schema.name
+	AppLanguage.format_text(remove_message, "Remove %s? Its code, parameters and saved state will be deleted.", [component.schema.name])
 	remove_confirmation.show()
 
 func cancel_removal() -> void:
@@ -372,7 +379,7 @@ func update_component(apply_code: bool, run: bool) -> void:
 	for field in component.schema.fields:
 		if field.value_type == "field_ref" and values.has(field.id) and values[field.id] != null and not valid_field_reference(values[field.id]):
 			queued_parameters.erase(field.id)
-			feedback.text = "Invalid field reference for %s was discarded. Apply again, then rebind the field." % field.id
+			AppLanguage.format_text(feedback, "Invalid field reference for %s was discarded. Apply again, then rebind the field.", [field.id])
 			return
 		if field.value_type == "field_ref" and values.has(field.id) and values[field.id] != null:
 			values[field.id] = canonical_field_reference(values[field.id])
@@ -384,7 +391,7 @@ func update_component(apply_code: bool, run: bool) -> void:
 func queue_parameter(id: String, value: Variant) -> void:
 	if filling or source_dirty: return
 	if value is Dictionary and not valid_field_reference(value):
-		feedback.text = "Invalid field reference for %s. Drag a field from an inspector or Clear this binding." % id
+		AppLanguage.format_text(feedback, "Invalid field reference for %s. Drag a field from an inspector or Clear this binding.", [id])
 		return
 	queued_parameters[id] = canonical_field_reference(value) if value is Dictionary else value
 	flush_at = Time.get_ticks_msec() + 180
@@ -425,8 +432,8 @@ func choose_field_operation(reference: Dictionary) -> void:
 		"script_drive":not field_schemas.is_empty() and field_schemas[0].get("script_drive",false)}
 	drop_choices.show()
 	for choice in drop_choices.get_children():
-		if choice is Button and choice.text in ["Write", "Drive"]:
-			choice.disabled = not bool(dropped_field.script_drive if choice.text == "Drive" else dropped_field.script_write)
+		if choice is Button and choice.get_meta("operation", "") in ["Write", "Drive"]:
+			choice.disabled = not bool(dropped_field.script_drive if choice.get_meta("operation") == "Drive" else dropped_field.script_write)
 	feedback.text = "Choose Read, Write or Drive. Apply code to save the reference and source together."
 
 func lua_literal(value: Variant) -> String:
@@ -547,9 +554,9 @@ func refresh() -> void:
 	object_title.text = "No object selected"
 	if not object.is_empty():
 		for field in object.fields:
-			if field.id == "name": object_title.text = "Object: " + str(field.value)
+			if field.id == "name": AppLanguage.format_text(object_title, "Object: %s", [str(field.value)])
 	var components: Array = object.get("scripts", [])
-	component_count.text = "Attached scripts · %d / 4" % components.size()
+	AppLanguage.format_text(component_count, "Attached scripts · %d / 4", [components.size()])
 	var signature := ""
 	for component in components: signature += component.id + component.schema.name + str(component.enabled) + script_error(component.id)
 	filling = true
@@ -557,10 +564,10 @@ func refresh() -> void:
 		list_signature = signature
 		scripts.clear()
 		if components.is_empty():
-			scripts.add_item("No scripts attached yet")
+			scripts.add_item(tr("No scripts attached yet"))
 			scripts.set_item_disabled(0, true)
 		for component in components:
-			scripts.add_item(component.schema.name + "  ·  " + execution_label(component))
+			scripts.add_item(component.schema.name + "  ·  " + tr(execution_label(component)))
 			scripts.set_item_tooltip(scripts.item_count - 1, script_error(component.id))
 			scripts.set_item_metadata(scripts.item_count - 1, component.id)
 		if not components.any(func(c): return c.id == selected):
@@ -571,12 +578,14 @@ func refresh() -> void:
 	var component := current_script()
 	if not removal.is_empty() and (removal.get("target") != target or removal.get("script_id") != component.get("id") or removal.get("revision") != component.get("revision")):
 		cancel_removal()
-	selected_title.text = str(component.get("schema", {}).get("name", "Select a script"))
-	run_status.text = "Add a blank script or node graph from the left." if component.is_empty() else execution_label(component) + (" · local Drive" if component.get("schema", {}).get("has_drive", false) else " · shared Write on host")
+	selected_title.text = str(component.get("schema", {}).get("name", tr("Select a script")))
+	if component.is_empty(): run_status.text = "Add a blank script or node graph from the left."
+	else:
+		AppLanguage.format_text(run_status, "%s · local Drive" if component.get("schema", {}).get("has_drive", false) else "%s · shared Write on host", [tr(execution_label(component))])
 	run_status.modulate = Color("ed9f93") if not script_error(selected).is_empty() else (Color("82d9d0") if component.get("enabled", false) else Color("d6bb87"))
 	if component.is_empty():
 		source_dirty = false
-		code.text = "Add a blank script or node graph to begin."
+		code.text = tr("Add a blank script or node graph to begin.")
 		code.show()
 		graph.hide()
 		clear_parameters()
@@ -603,7 +612,7 @@ func refresh() -> void:
 	for status in app.local_script_statuses + app.script_statuses:
 		if status.script_id == selected and status.get("error") is String and status.error != last_error:
 			last_error = status.error
-			feedback.text = "Script stopped: " + status.error
+			AppLanguage.format_text(feedback, "Script stopped: %s", [status.error])
 	filling = false
 	refresh_buttons()
 
@@ -619,6 +628,7 @@ func build_parameters(component: Dictionary) -> void:
 		var row: BoxContainer = VBoxContainer.new() if field.value_type == "field_ref" and window == null else HBoxContainer.new()
 		parameters.add_child(row)
 		var title := Label.new()
+		title.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 		title.text = field.label
 		if row is HBoxContainer: title.custom_minimum_size.x = 160
 		row.add_child(title)
@@ -632,7 +642,12 @@ func build_parameters(component: Dictionary) -> void:
 				var reference = REFERENCE_CHIP.new()
 				reference.manager = app.world_panels
 				reference.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-				reference.text = "Drop a field reference" if value == null else (str(app.world_panels.field_data(value.target.instance_id,"name").get("value","Deleted Slot")) + " · " + str(value.field_id) if valid_field_reference(value) else "Invalid reference · Clear or rebind")
+				if value == null:
+					reference.text = "Drop a field reference"
+				elif valid_field_reference(value):
+					reference.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+					reference.text = str(app.world_panels.field_data(value.target.instance_id,"name").get("value",tr("Deleted Slot"))) + " · " + str(value.field_id)
+				else: reference.text = "Invalid reference · Clear or rebind"
 				reference.payload = func(): return null if not valid_field_reference(value) else {"kind":"kokoverse_reference","reference":value}
 				reference.accepts = func(data): return data is Dictionary and data.get("kind") == "kokoverse_reference" and available_field_reference(data.get("reference"))
 				reference.received = func(data): queue_parameter(field.id,data.reference)
@@ -663,6 +678,7 @@ func build_parameters(component: Dictionary) -> void:
 				parameter_controls[field.id] = check
 			"string":
 				var input := LineEdit.new()
+				input.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 				input.text = value
 				input.max_length = 512
 				input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -688,6 +704,21 @@ func build_parameters(component: Dictionary) -> void:
 					spin.value_changed.connect(func(_v): queue_parameter(field.id, [values[0].value, values[1].value, values[2].value]))
 					row.add_child(spin)
 				parameter_controls[field.id] = values
+
+func language_changed() -> void:
+	# Only refresh the displayed list and status. Keep source drafts, focus,
+	# parameter controls and the graph canvas intact while changing language.
+	if disposed or not is_instance_valid(object_title) or not is_instance_valid(scripts) or not is_instance_valid(code): return
+	list_signature = ""
+	scripts.tooltip_text = tr("Select a script to edit. Other running scripts keep running.")
+	code.tooltip_text = tr("Drop a field reference here, or carry one with Ctrl+RMB and click. Choose Read, Write or Drive.")
+	refresh()
+
+func dispose() -> void:
+	if disposed: return
+	disposed = true
+	if AppLanguage.language_changed.is_connected(language_changed):
+		AppLanguage.language_changed.disconnect(language_changed)
 
 func refresh_buttons() -> void:
 	var ready: bool = app.editable and not external_readonly and pending_id.is_empty() and app.objects.has(target)

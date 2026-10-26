@@ -72,6 +72,7 @@ func setup(controller, id: String, in_desktop: bool = false) -> void:
 	add_theme_stylebox_override("panel", style)
 	build_layout()
 	connect_view()
+	AppLanguage.language_changed.connect(refresh_language)
 
 func build_layout() -> void:
 	var margin := MarginContainer.new()
@@ -100,6 +101,7 @@ func build_layout() -> void:
 	column.add_child(message)
 
 func connect_view() -> void:
+	target_picker.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	target_picker.item_selected.connect(func(index: int):
 		if filling or index >= picker_ids.size(): return
 		finish_all()
@@ -183,6 +185,7 @@ func heading(text: String) -> void:
 
 func line_field(parent: Node, field: String, part: String) -> LineEdit:
 	var line := LineEdit.new()
+	line.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	line.custom_minimum_size = Vector2(0, 30 if desktop else 44)
 	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	line.max_length = 80 if field in ["name", "world_text", "value_text"] else 32
@@ -258,7 +261,7 @@ func build_fields() -> void:
 		var row := HBoxContainer.new()
 		field_container.add_child(row)
 		var label := Label.new()
-		label.text = script.schema.name + (" · Running" if script.enabled else " · Paused")
+		AppLanguage.format_text(label, "%s · Running" if script.enabled else "%s · Paused", [script.schema.name])
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		label.add_theme_font_size_override("font_size", 21)
 		row.add_child(label)
@@ -304,7 +307,7 @@ func build_component_actions(object: Dictionary) -> void:
 
 func filter_component_catalog(query: String) -> void:
 	for type_id in component_catalog_buttons:
-		component_catalog_buttons[type_id].get_parent().visible = query.is_empty() or str(type_id).to_lower().contains(query.to_lower())
+		component_catalog_buttons[type_id].get_parent().visible = query.is_empty() or str(type_id).to_lower().contains(query.to_lower()) or tr(str(type_id)).to_lower().contains(query.to_lower())
 
 func mirror_surface(object: Dictionary) -> bool:
 	return object.get("visual",{}).get("kind","") == "primitive" and object.visual.get("shape","") in ["quad","mirror"]
@@ -365,7 +368,8 @@ func build_field(field: Dictionary) -> void:
 				heading(field.label)
 				var reference = REFERENCE_CHIP.new()
 				reference.manager = manager
-				reference.text = "World" if field.value == null else str(manager.field_data(field.value.instance_id,"name").get("value","Deleted Slot"))
+				reference.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+				reference.text = tr("World") if field.value == null else str(manager.field_data(field.value.instance_id,"name").get("value",tr("Deleted Slot")))
 				reference_values[field.id] = reference
 				reference.payload = func():
 					var value: Variant = manager.field_data(target_id,field.id).value
@@ -393,7 +397,9 @@ func build_field(field: Dictionary) -> void:
 				controls[field.id] = [check]
 				check.toggled.connect(func(_enabled): changed(field.id, check, true))
 			"vec3": vector_field(field.id, field.label, ["X", "Y", "Z"])
-			"quat": vector_field(field.id, field.label + " · degrees", ["X", "Y", "Z"])
+			"quat":
+				vector_field(field.id, "", ["X", "Y", "Z"])
+				AppLanguage.format_text(reference_chips[field.id], "%s · degrees", [tr(field.label)])
 			"vec4": vector_field(field.id, field.label, ["min X", "max X", "min Z", "max Z"])
 			"color": vector_field(field.id, field.label, ["R", "G", "B", "A"])
 			"collider":
@@ -418,7 +424,8 @@ func build_field(field: Dictionary) -> void:
 					add_button(row, "Pause", func(): playback("pause"))
 					add_button(row, "Restart", func(): playback("restart"))
 			_:
-				heading(field.label + " · " + JSON.stringify(field.value))
+				heading("")
+				AppLanguage.format_text(reference_chips[field.id], "%s · %s", [tr(field.label), JSON.stringify(field.value)])
 		if field.id in ["position", "rotation", "scale", "color", "world_text", "world_text_color", "value_number", "value_bool", "value_text"]:
 			var info := Label.new()
 			info.add_theme_font_size_override("font_size", 18)
@@ -471,24 +478,33 @@ func apply_dropped_value(field: String, value: Variant) -> void:
 	filling = false
 	changed(field,controls[field][0],true)
 
-func refresh_drives() -> void:
+func refresh_drives(stop_driven_edits: bool = true) -> void:
 	# Compose what each field's drive UI should show and write only
 	# the controls whose rendered state actually changed. The label
-	# text depends on the driver's enabled flag and the field's shared
+	# depends on the driver's enabled flag and the field's shared
 	# base value, both of which change on edits — not per frame — so
-	# steady-state ticks now do no control writes at all.
+	# steady-state ticks now do no control writes at all. The
+	# signature holds the format_text inputs (source + values); a
+	# locale change re-renders through AppLanguage's bindings and
+	# needs no signature change.
 	var previous: Dictionary = {}
 	for entry in drive_render_signature: previous[entry[0]] = entry
 	var rendered: Array = []
 	for field in drive_labels:
 		var driver: Dictionary = manager.field_driver(target_id, field)
 		if driver.is_empty():
-			rendered.append([field, false, "", ""])
+			rendered.append([field, false, "", [], "", []])
 			continue
 		var data: Dictionary = manager.field_data(target_id, field)
 		rendered.append([field, true,
-			"Local Drive · " + ("running" if driver.enabled else "paused") + "\nShared base: " + value_text(data.value, data.value_type),
-			"Open " + driver.schema.name + " →"])
+			"Local Drive · running\nShared base: %s" if driver.enabled else "Local Drive · paused\nShared base: %s", [value_text(data.value, data.value_type)],
+			"Open %s →", [driver.schema.name]])
+		# A driven field's shared draft is meaningless; release it.
+		# These are cheap flag writes, kept unconditional as before —
+		# only the control writes below are signature-gated.
+		if stop_driven_edits and edits.has(field):
+			edits[field].dirty = false
+			edits[field].release = true
 	for entry in rendered:
 		var field: String = entry[0]
 		var prev: Array = previous.get(field, [])
@@ -496,15 +512,8 @@ func refresh_drives() -> void:
 		drive_labels[field].visible = entry[1]
 		drive_buttons[field].visible = entry[1]
 		if not entry[1]: continue
-		drive_labels[field].text = entry[2]
-		drive_buttons[field].text = entry[3]
-		# A newly driven field's shared draft is meaningless; release
-		# it. (Previously this ran every frame; after the first frame
-		# the flags were already in this state, so gating on the
-		# transition preserves the outcome.)
-		if (prev.is_empty() or not prev[1]) and edits.has(field):
-			edits[field].dirty = false
-			edits[field].release = true
+		AppLanguage.format_text(drive_labels[field], entry[2], entry[3])
+		AppLanguage.format_text(drive_buttons[field], entry[4], entry[5])
 	drive_render_signature = rendered
 
 func playback(action: String) -> void:
@@ -528,7 +537,7 @@ func refresh(object: Dictionary) -> void:
 		picker_signature = picker_key
 		target_picker.clear()
 		picker_ids.clear()
-		target_picker.add_item("Choose object…")
+		target_picker.add_item(tr("Choose object…"))
 		picker_ids.append("")
 		for entry in entries:
 			target_picker.add_item(entry[1])
@@ -581,12 +590,33 @@ func restore_scroll(object: Dictionary) -> void:
 	if scroll_pending < 0 and not scroll_inflight:
 		scroll.scroll_vertical = int(float(object.inspector.scroll[1]) * maxf(0.0, bar.max_value - bar.page))
 
-func fill_values() -> void:
+func fill_reference_values() -> void:
 	for field in reference_values:
 		var value: Variant = manager.field_data(target_id,field).get("value")
-		reference_values[field].text = "World" if value == null else str(manager.field_data(value.instance_id,"name").get("value","Deleted Slot"))
+		reference_values[field].text = tr("World") if value == null else str(manager.field_data(value.instance_id,"name").get("value",tr("Deleted Slot")))
+
+## The edit session another participant holds on this field, if any.
+## Derived from the current session list on every call, so callers
+## never act on a stale copy.
+func remote_session(field: String) -> Dictionary:
+	var remote: Dictionary = {}
+	for session in manager.sessions:
+		var context: Variant = session.get("context")
+		var same_context: bool = context == null if desktop else context != null and context.source.instance_id == panel_id
+		if session.target.instance_id == target_id and session.field_id == field and (session.client_id != input_client_id or not same_context):
+			remote = session
+	return remote
+
+func fill_values() -> void:
+	fill_reference_values()
 	for field in controls:
 		if edits.has(field): continue
+		# A field under a remote edit session displays that editor's
+		# draft, not the shared value. refresh() fills before
+		# refresh_sessions() runs, and the session render is gated on
+		# its signature — if filling stomped the draft here, nothing
+		# would reapply it while the session state stays unchanged.
+		if not remote_session(field).is_empty(): continue
 		var data: Dictionary = manager.field_data(target_id, field)
 		if data.is_empty(): continue
 		var value: Variant = manager.app.driven_objects.get(target_id, {}).get(field, data.value)
@@ -767,12 +797,7 @@ func refresh_sessions() -> void:
 	# draft's text and caret every frame — so skip the run.
 	var signature: Array = []
 	for field in controls:
-		var remote: Dictionary = {}
-		for session in manager.sessions:
-			var context: Variant = session.get("context")
-			var same_context: bool = context == null if desktop else context != null and context.source.instance_id == panel_id
-			if session.target.instance_id == target_id and session.field_id == field and (session.client_id != input_client_id or not same_context):
-				remote = session
+		var remote: Dictionary = remote_session(field)
 		var readonly: bool = not manager.app.editable or not remote.is_empty() or not manager.field_driver(target_id, field).is_empty()
 		var display_name := ""
 		if not remote.is_empty():
@@ -786,12 +811,7 @@ func refresh_sessions() -> void:
 	var previously_remote := not remote_fields.is_empty()
 	remote_fields.clear()
 	for field in controls:
-		var remote: Dictionary = {}
-		for session in manager.sessions:
-			var context: Variant = session.get("context")
-			var same_context: bool = context == null if desktop else context != null and context.source.instance_id == panel_id
-			if session.target.instance_id == target_id and session.field_id == field and (session.client_id != input_client_id or not same_context):
-				remote = session
+		var remote: Dictionary = remote_session(field)
 		var readonly: bool = not manager.app.editable or not remote.is_empty() or not manager.field_driver(target_id, field).is_empty()
 		for control in controls[field]:
 			if control is LineEdit: control.editable = not readonly
@@ -800,7 +820,7 @@ func refresh_sessions() -> void:
 			remote_fields[field] = true
 			var owner: String = str(remote.owner)
 			var display_name: String = str(manager.app.participant_names.get("local" if owner.begins_with("local-") else owner, "Another user"))
-			message.text = "Editing: " + display_name + " · " + field
+			AppLanguage.format_text(message, "Editing: %s · %s", [display_name, field])
 			for control in controls[field]:
 				if control is LineEdit and str(control.get_meta("part")) == str(remote.draft.part):
 					filling = true
@@ -812,7 +832,7 @@ func refresh_sessions() -> void:
 		filling = true
 		fill_values()
 		filling = false
-		if message.text.begins_with("Editing:"): message.text = ""
+		if message.text.begins_with("Editing:") or message.text.begins_with(tr("Editing: ")): message.text = ""
 
 func on_scroll(_value: float) -> void:
 	if filling or panel_state.is_empty() or not manager.app.editable: return
@@ -820,6 +840,19 @@ func on_scroll(_value: float) -> void:
 	var ratio: float = float(scroll.scroll_vertical) / maxf(1.0, bar.max_value - bar.page)
 	scroll_pending = clampf(ratio,0.0,1.0)
 	scroll_due = Time.get_ticks_msec() + 80
+
+func refresh_language() -> void:
+	if target_picker.item_count > 0: target_picker.set_item_text(0, tr("Choose object…"))
+	if built:
+		for field in reference_chips:
+			var data: Dictionary = manager.field_data(target_id, field)
+			if data.get("value_type") == "quat":
+				AppLanguage.format_text(reference_chips[field], "%s · degrees", [tr(data.label)])
+		# Locale changes only affect reference placeholders, never field
+		# drafts, caret positions or controls that emit editing signals.
+		fill_reference_values()
+		refresh_drives(false)
+		if component_search != null: filter_component_catalog(component_search.text)
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and script_view != null:

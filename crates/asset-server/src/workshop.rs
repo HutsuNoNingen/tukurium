@@ -11,10 +11,40 @@ impl Default for License {
     fn default() -> Self { Self { save: true, modify: true, redistribute: true } }
 }
 
-pub(super) fn user_name(db: &Connection, uid: &str) -> Result<Value> {
-    Ok(all(db, "handles")?
-        .into_iter()
-        .chain(all(db, "users")?)
+/// Per-request lookup tables. `user_name` and `active_publication`
+/// used to rescan the whole `handles`/`users`/`publications` kinds on
+/// every call, so a library page with N entries cost N full scans.
+/// The cache loads each kind at most once per request and keeps the
+/// original search order (handles before users, both ORDER BY id;
+/// publications ORDER BY id), so the first match — and therefore the
+/// result — is identical to the repeated scans. One cache must not
+/// outlive the request/transaction it was created in.
+#[derive(Default)]
+pub(super) struct RequestCache {
+    people: Option<Vec<Value>>,
+    publications: Option<Vec<Value>>,
+}
+impl RequestCache {
+    fn people(&mut self, db: &Connection) -> Result<&[Value]> {
+        if self.people.is_none() {
+            let mut people = all(db, "handles")?;
+            people.extend(all(db, "users")?);
+            self.people = Some(people);
+        }
+        Ok(self.people.as_deref().unwrap())
+    }
+    fn publications(&mut self, db: &Connection) -> Result<&[Value]> {
+        if self.publications.is_none() {
+            self.publications = Some(all(db, "publications")?);
+        }
+        Ok(self.publications.as_deref().unwrap())
+    }
+}
+
+pub(super) fn user_name(db: &Connection, cache: &mut RequestCache, uid: &str) -> Result<Value> {
+    Ok(cache
+        .people(db)?
+        .iter()
         .find(|u| {
             u["id"] == uid
                 || u["aliases"]
@@ -27,15 +57,25 @@ pub(super) fn user_name(db: &Connection, uid: &str) -> Result<Value> {
 
 pub(super) fn active_publication(
     db: &Connection,
+    cache: &mut RequestCache,
     uid: &str,
     version: &str,
 ) -> Result<Option<Value>> {
-    Ok(all(db, "publications")?.into_iter().find(|p| {
-        p["publisher_id"] == uid && p["version_id"] == version && p["state"] == "published"
-    }))
+    Ok(cache
+        .publications(db)?
+        .iter()
+        .find(|p| {
+            p["publisher_id"] == uid && p["version_id"] == version && p["state"] == "published"
+        })
+        .cloned())
 }
 
-pub(super) fn library_entry(db: &Connection, mut entry: Value, uid: &str) -> Result<Value> {
+pub(super) fn library_entry(
+    db: &Connection,
+    cache: &mut RequestCache,
+    mut entry: Value,
+    uid: &str,
+) -> Result<Value> {
     let id = entry["version_id"].as_str().unwrap_or("");
     if let Some(version) = get(db, "versions", id)? {
         let id = id.to_owned();
@@ -44,11 +84,12 @@ pub(super) fn library_entry(db: &Connection, mut entry: Value, uid: &str) -> Res
         entry["script_count"] = json!(version["object"]["scripts"].as_array().map_or(0, Vec::len));
         entry["creator_name"] = user_name(
             db,
+            cache,
             version["object"]["item_identity"]["creator_id"]
                 .as_str()
                 .unwrap_or(""),
         )?;
-        entry["publication"] = active_publication(db, uid, &id)?
+        entry["publication"] = active_publication(db, cache, uid, &id)?
             .map(|p| p["id"].clone())
             .unwrap_or(Value::Null);
     }
@@ -129,14 +170,16 @@ pub(super) fn publish(db: &Connection, v: &Value, u: &Value) -> Result<Value> {
     let uid = u["id"].as_str().unwrap();
     let id = text(v, "version_id")?;
     let license = License::default();
-    if active_publication(db, uid, id)?.is_some() {
+    let mut cache = RequestCache::default();
+    if active_publication(db, &mut cache, uid, id)?.is_some() {
         return Err(Error(
             StatusCode::CONFLICT,
             "This saved version is already published."
                 .into(),
         ));
     }
-    if all(db, "publications")?
+    if cache
+        .publications(db)?
         .iter()
         .filter(|p| p["publisher_id"] == uid && p["state"] == "published")
         .count()
@@ -157,7 +200,7 @@ pub(super) fn publish(db: &Connection, v: &Value, u: &Value) -> Result<Value> {
         .as_str()
         .unwrap_or(uid);
     let publication_id = Uuid::new_v4().to_string();
-    let p = json!({"id":publication_id,"version_id":id,"publisher_id":uid,"publisher_name":u["name"],"creator_name":user_name(db,creator)?,"title":label(v,"title",80)?,"description":description,"license":license,"thumbnail":version["thumbnail"],"kind":version["object"]["visual"]["kind"],"script_count":version["object"]["scripts"].as_array().map_or(0,Vec::len),"saved_at":version["saved_at"],"published_at":now(),"state":"published","acquisitions":0});
+    let p = json!({"id":publication_id,"version_id":id,"publisher_id":uid,"publisher_name":u["name"],"creator_name":user_name(db,&mut cache,creator)?,"title":label(v,"title",80)?,"description":description,"license":license,"thumbnail":version["thumbnail"],"kind":version["object"]["visual"]["kind"],"script_count":version["object"]["scripts"].as_array().map_or(0,Vec::len),"saved_at":version["saved_at"],"published_at":now(),"state":"published","acquisitions":0});
     set(db, "publications", &publication_id, &p)?;
     view(db, p, uid)
 }
@@ -199,7 +242,7 @@ pub(super) fn acquire(db: &Connection, v: &Value, uid: &str) -> Result<Value> {
         set(db, "publications", id, &p)?;
     }
     Ok(
-        json!({"entry":library_entry(db,get(db,"entries",&format!("{uid}:{version}"))?.ok_or_else(missing)?,uid)?,"publication":view(db,p,uid)?}),
+        json!({"entry":library_entry(db,&mut RequestCache::default(),get(db,"entries",&format!("{uid}:{version}"))?.ok_or_else(missing)?,uid)?,"publication":view(db,p,uid)?}),
     )
 }
 

@@ -33,6 +33,7 @@ func _get_drag_data(_at: Vector2) -> Variant:
 	var data: Variant = source.call()
 	if data == null: return null
 	var preview := Label.new()
+	preview.auto_translate_mode = auto_translate_mode
 	preview.text = text
 	set_drag_preview(preview)
 	return data
