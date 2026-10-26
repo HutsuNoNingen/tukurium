@@ -55,7 +55,7 @@ pub fn start_processes_from_config(supervisor: &mut Supervisor) {
             "--",
             "--port=47000",
             &format!("--session={}", session_name).to_string(),
-            //"--close-with-engine",
+            "--close-with-engine",
         ],
     );
 }
