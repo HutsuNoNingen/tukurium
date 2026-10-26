@@ -19,10 +19,10 @@ func avatar_file() -> String:
 
 func choose_avatar_texture() -> void:
 	var dialog := FileDialog.new()
-	dialog.title = "Choose an Oekaki avatar texture"
+	dialog.title = tr("Choose an Oekaki avatar texture")
 	dialog.access = FileDialog.ACCESS_FILESYSTEM
 	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	dialog.filters = PackedStringArray(["*.png,*.jpg,*.jpeg,*.webp ; Avatar textures"])
+	dialog.filters = PackedStringArray([tr("*.png,*.jpg,*.jpeg,*.webp ; Avatar textures")])
 	dialog.use_native_dialog = true
 	dialog.file_selected.connect(func(path): queue_avatar_texture(path); dialog.queue_free())
 	dialog.canceled.connect(dialog.queue_free)
@@ -86,10 +86,10 @@ func configure(value: Node) -> void:
 
 func choose_files() -> void:
 	var dialog := FileDialog.new()
-	dialog.title = "Import images, models or videos"
+	dialog.title = tr("Import images, models or videos")
 	dialog.access = FileDialog.ACCESS_FILESYSTEM
 	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILES
-	dialog.filters = PackedStringArray(["*.png,*.jpg,*.jpeg,*.webp ; Images", "*.glb,*.fbx ; 3D models (up to 100 MiB)", "*.mp4,*.mov,*.webm,*.mkv,*.avi,*.ogv ; Videos (up to 100 MiB)"])
+	dialog.filters = PackedStringArray([tr("*.png,*.jpg,*.jpeg,*.webp ; Images"), tr("*.glb,*.fbx ; 3D models (up to 100 MiB)"), tr("*.mp4,*.mov,*.webm,*.mkv,*.avi,*.ogv ; Videos (up to 100 MiB)")])
 	dialog.use_native_dialog = true
 	dialog.files_selected.connect(func(paths): drop_files(paths); dialog.queue_free())
 	dialog.canceled.connect(dialog.queue_free)
@@ -111,7 +111,7 @@ func drop_files(paths: PackedStringArray) -> void:
 	if not hit.is_empty(): point = hit.position
 	for i in range(paths.size()):
 		enqueue_job({"path":paths[i],"point":point+editor.camera.global_basis.x*float(i)*2.2})
-	if not jobs.is_empty(): editor.feedback.text = "%d file(s) queued for import" % jobs.size()
+	if not jobs.is_empty(): AppLanguage.format_text(editor.feedback,"%d file(s) queued for import",[jobs.size()])
 
 func _process(delta: float) -> void:
 	expire_downloads()
@@ -132,15 +132,15 @@ func _process(delta: float) -> void:
 	if active.is_empty() and not jobs.is_empty() and editor.editable and not editor.pending and editor.hand_grab.is_empty() and not editor.gizmo_preview_active:
 		start_import(jobs.pop_front())
 
-func fail(message: String) -> void:
-	printerr("Asset import: "+message)
+func fail(message: String, values: Array = []) -> void:
+	printerr("Asset import: "+(message % values if not values.is_empty() else message))
 	if not active.is_empty():
 		if active.has("video_pid") and OS.is_process_running(active.video_pid): OS.kill(active.video_pid)
-		editor.asset_status.update(str(active.task),"error",0,0,message)
+		editor.asset_status.update(str(active.task),"error",0,0,message,"",values)
 		active.clear()
 		editor.pending = false
 		editor.pending_action = ""
-	editor.feedback.text = message
+	AppLanguage.format_text(editor.feedback,message,values)
 
 func start_import(job: Dictionary) -> void:
 	active = job
@@ -154,7 +154,7 @@ func start_import(job: Dictionary) -> void:
 	var extension: String = str(job.path).get_extension().to_lower()
 	if extension in ["png","jpg","jpeg","webp"]:
 		var img := Image.load_from_file(job.path)
-		if img == null or img.is_empty(): fail("Could not load image: " + str(job.path).get_file()); return
+		if img == null or img.is_empty(): fail("Could not load image: %s",[str(job.path).get_file()]); return
 		var size := maxi(img.get_width(),img.get_height())
 		if size > 1024: img.resize(maxi(1,img.get_width()*1024/size),maxi(1,img.get_height()*1024/size),Image.INTERPOLATE_LANCZOS)
 		var png := img.detect_alpha()
@@ -171,7 +171,7 @@ func start_import(job: Dictionary) -> void:
 		var file := FileAccess.open(job.path,FileAccess.READ)
 		if file == null: fail("Could not open model file."); return
 		if file.get_length() > MAX_SOURCE: fail("Model import limit is 100 MiB per file."); return
-		editor.feedback.text = "Importing " + extension.to_upper() + "…"
+		AppLanguage.format_text(editor.feedback,"Importing %s…",[extension.to_upper()])
 		import_status("converting" if extension == "fbx" else "preparing")
 		prepare_thread = Thread.new()
 		prepare_thread.start(prepare_model.bind(str(job.path),extension))
@@ -332,7 +332,7 @@ func commit_import(visual: Dictionary, half_height: float) -> void:
 	if visual.kind in ["image","video"]: rotation = Quaternion(Vector3.UP,editor.camera.rotation.y)
 	import_status("placing")
 	editor.requests.request({"kind":"structure","command":{"action":"import_asset","name":str(active.path).get_file().get_basename().substr(0,80),"position":[point.x,point.y,point.z],"rotation":[rotation.x,rotation.y,rotation.z,rotation.w],"visual":visual}}, on_import_result.bind(str(active.task)))
-	editor.feedback.text = "Placing " + str(active.path).get_file() + "…"
+	AppLanguage.format_text(editor.feedback,"Placing %s…",[str(active.path).get_file()])
 	transfer_age = 0.0
 
 func receive(body: Dictionary) -> void:
@@ -353,7 +353,7 @@ func receive(body: Dictionary) -> void:
 		editor.queue_message({"kind":"asset_chunk","asset_id":id,"offset":offset,"data":Marshalls.raw_to_base64(data.slice(offset,mini(offset+CHUNK,data.size())))})
 		transfer_age = 0.0
 		import_status("uploading_local",offset,data.size())
-		editor.feedback.text = "Sharing asset… %d%%" % int(100.0*offset/data.size())
+		AppLanguage.format_text(editor.feedback,"Sharing asset… %d%%",[int(100.0*offset/data.size())])
 	elif body.kind == "asset_ready" and active.get("asset_id","") == id:
 		if active.format == "png":
 			DirAccess.make_dir_recursive_absolute(avatar_file().get_base_dir())
@@ -461,7 +461,7 @@ func on_import_result(body: Dictionary, task: String) -> void:
 func finish_import() -> void:
 	if not active.get("placed",false) or not active.get("upload_complete",false): return
 	import_status("ready")
-	editor.feedback.text = "Imported " + str(active.path).get_file()
+	AppLanguage.format_text(editor.feedback,"Imported %s",[str(active.path).get_file()])
 	var selected: Dictionary = active.get("selected",{})
 	active.clear()
 	editor.pending = false
