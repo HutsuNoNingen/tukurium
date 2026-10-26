@@ -27,6 +27,7 @@ pub use resources::CommandOutcome;
 use resources::*;
 use serde_json::{Value, json};
 use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
 use uuid::Uuid;
 
 pub const MAX_OBJECTS: usize = 128;
@@ -1081,8 +1082,32 @@ pub fn validate_visual(visual: &kokoverse_protocol::Visual) -> Result<(), String
     }
 }
 
+/// Hex SHA-256 digests (the same digest scheme asset ids use) of image
+/// payloads whose full decode has already succeeded in this process.
+///
+/// Image payloads are immutable values: identical bytes always produce
+/// the identical validation result, so revalidating the same bytes —
+/// which happens for the whole world on every commit and restore — only
+/// needs the header checks below. A memo miss always falls through to
+/// the full decode, so the set of rejected payloads is unchanged; the
+/// first sight of any payload (creation, or a commit from a peer) is
+/// still fully decoded exactly once. The memo is bounded: when it fills
+/// up it is cleared and payloads are simply decoded again, so only
+/// performance is ever lost, never validation strength. The declared
+/// format is not part of the key because the header check (which runs
+/// on every call, before the memo lookup) already parses the payload
+/// with the format taken from the data URL prefix, and a payload that
+/// passes one format's header check cannot pass the other's.
+static VERIFIED_IMAGE_DIGESTS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+const VERIFIED_IMAGE_DIGEST_LIMIT: usize = 512;
+
+fn verified_image_digests() -> &'static Mutex<HashSet<String>> {
+    VERIFIED_IMAGE_DIGESTS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
 pub(crate) fn validate_image(data_url: &str) -> Result<kokoverse_protocol::Visual, String> {
     use base64::Engine;
+    use sha2::Digest;
     let (encoded, format) = if let Some(data) = data_url.strip_prefix("data:image/png;base64,") {
         (data, image::ImageFormat::Png)
     } else if let Some(data) = data_url.strip_prefix("data:image/jpeg;base64,") {
@@ -1106,7 +1131,20 @@ pub(crate) fn validate_image(data_url: &str) -> Result<kokoverse_protocol::Visua
     if width == 0 || height == 0 || width > 2048 || height > 2048 {
         return Err("Image dimensions must be at most 2048 × 2048".into());
     }
-    image::load_from_memory_with_format(&bytes, format).map_err(|_| "Invalid image data")?;
+    let digest = format!("{:x}", sha2::Sha256::digest(&bytes));
+    let already_verified = verified_image_digests()
+        .lock()
+        .map(|set| set.contains(&digest))
+        .unwrap_or(false);
+    if !already_verified {
+        image::load_from_memory_with_format(&bytes, format).map_err(|_| "Invalid image data")?;
+        if let Ok(mut set) = verified_image_digests().lock() {
+            if set.len() >= VERIFIED_IMAGE_DIGEST_LIMIT {
+                set.clear();
+            }
+            set.insert(digest);
+        }
+    }
     Ok(kokoverse_protocol::Visual::Image {
         data_url: data_url.into(),
         width,
