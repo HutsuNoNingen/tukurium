@@ -1,5 +1,5 @@
-use std::sync::{Arc};
 use std::sync::mpsc;
+use std::sync::Arc;
 
 pub enum EventBody {
     Log(String),

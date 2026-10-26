@@ -1,4 +1,4 @@
-use crate::supervise::{Supervisor};
+use crate::supervisor::Supervisor;
 
 pub fn start_processes_from_config(supervisor: &mut Supervisor) {
     let session_name = "demo2";
