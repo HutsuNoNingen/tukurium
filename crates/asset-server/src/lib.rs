@@ -102,6 +102,35 @@ fn set(db: &Connection, kind: &str, id: &str, value: &Value) -> Result<()> {
     db.execute("INSERT INTO records(kind,id,value) VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value",params![kind,id,value.to_string()])?;
     Ok(())
 }
+/// Records of `kind` whose top-level string field `field` equals
+/// `value`, filtered by SQLite instead of loading and parsing every
+/// record of the kind. `field` is interpolated into the JSON path and
+/// must be a trusted internal literal, never request input. Row order
+/// matches `all` (ORDER BY id), and the match semantics match the
+/// in-memory `record[field] == value` comparison for string fields:
+/// missing or non-string fields never match.
+fn find_by_field(db: &Connection, kind: &str, field: &str, value: &str) -> Result<Vec<Value>> {
+    let sql = format!(
+        "SELECT value FROM records WHERE kind=? AND json_extract(value,'$.{field}')=? ORDER BY id"
+    );
+    let mut s = db.prepare(&sql)?;
+    let rows = s.query_map(params![kind, value], |r| r.get::<_, String>(0))?;
+    rows.map(|r| serde_json::from_str(&r?).map_err(|_| bad("Invalid record")))
+        .collect()
+}
+
+/// Total stored asset bytes for one user, aggregated by SQLite.
+/// Matches summing `size` (missing/non-numeric sizes count as 0) over
+/// the user's `asset_owners` records.
+fn stored_asset_bytes(db: &Connection, uid: &str) -> Result<u64> {
+    let total: i64 = db.query_row(
+        "SELECT COALESCE(SUM(CAST(json_extract(value,'$.size') AS INTEGER)),0) \
+         FROM records WHERE kind='asset_owners' AND json_extract(value,'$.user_id')=?",
+        params![uid],
+        |r| r.get(0),
+    )?;
+    Ok(total.max(0) as u64)
+}
 fn all(db: &Connection, kind: &str) -> Result<Vec<Value>> {
     let mut s = db.prepare("SELECT value FROM records WHERE kind=? ORDER BY id")?;
     let rows = s.query_map([kind], |r| r.get::<_, String>(0))?;
@@ -443,12 +472,10 @@ async fn rpc(
                 .collect::<Vec<_>>()
         ),
         "create_session" => {
-            let active = all(&tx, "sessions")?
+            let active = find_by_field(&tx, "sessions", "owner_id", uid)?
                 .into_iter()
                 .filter(|x| {
-                    x["owner_id"] == uid
-                        && x["state"] != "ended"
-                        && x["heartbeat"].as_u64().unwrap_or(0) + 30 > now()
+                    x["state"] != "ended" && x["heartbeat"].as_u64().unwrap_or(0) + 30 > now()
                 })
                 .count();
             if active >= 3 {
@@ -508,17 +535,17 @@ async fn rpc(
         "library" => {
             let query = v["query"].as_str().unwrap_or("").to_lowercase();
             let offset = v["offset"].as_u64().unwrap_or(0).min(100000) as usize;
-            let rows: Vec<_> = all(&tx, "entries")?
+            let mut cache = workshop::RequestCache::default();
+            let rows: Vec<_> = find_by_field(&tx, "entries", "user_id", uid)?
                 .into_iter()
                 .filter(|e| {
-                    e["user_id"] == uid
-                        && e["name"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_lowercase()
-                            .contains(&query)
+                    e["name"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&query)
                 })
-                .map(|entry| workshop::library_entry(&tx, entry, uid))
+                .map(|entry| workshop::library_entry(&tx, &mut cache, entry, uid))
                 .collect::<Result<_>>()?;
             json!({"total":rows.len(),"entries":rows.into_iter().skip(offset).take(10).collect::<Vec<_>>()})
         }
@@ -527,16 +554,21 @@ async fn rpc(
             let id = text(&v, "version_id")?;
             let mut version = get(&tx, "versions", id)?.ok_or_else(missing)?;
             version["permissions"] = json!(prototype_permissions());
+            let mut cache = workshop::RequestCache::default();
             version["creator_name"] = workshop::user_name(
                 &tx,
+                &mut cache,
                 version["object"]["item_identity"]["creator_id"]
                     .as_str()
                     .unwrap_or(""),
             )?;
-            version["saved_by_name"] =
-                workshop::user_name(&tx, version["saved_by"].as_str().unwrap_or(""))?;
+            version["saved_by_name"] = workshop::user_name(
+                &tx,
+                &mut cache,
+                version["saved_by"].as_str().unwrap_or(""),
+            )?;
             version["publication"] =
-                workshop::active_publication(&tx, uid, id)?.unwrap_or(Value::Null);
+                workshop::active_publication(&tx, &mut cache, uid, id)?.unwrap_or(Value::Null);
             version
         }
         "workshop" => workshop::list(&tx, &v, uid)?,
@@ -801,11 +833,7 @@ async fn upload(
         .map_err(|_| bad("Asset validation failed"))??;
     let mut db = s.db.lock().unwrap();
     let tx = db.transaction()?;
-    let total: u64 = all(&tx, "asset_owners")?
-        .iter()
-        .filter(|r| r["user_id"] == uid)
-        .map(|r| r["size"].as_u64().unwrap_or(0))
-        .sum();
+    let total: u64 = stored_asset_bytes(&tx, &uid)?;
     let key = format!("{uid}:{id}");
     if get(&tx, "asset_owners", &key)?.is_none() && total + size as u64 > s.quota {
         return Err(Error(
@@ -1023,6 +1051,112 @@ mod hn_tests {
             .await
             .is_err()
         );
+        let root = s.root.clone();
+        drop(s);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[tokio::test]
+    async fn library_rpc_matches_full_scan_semantics_and_asset_bytes_match_memory_sum() {
+        let s = server();
+        let alice = register(
+            State(s.clone()),
+            HeaderMap::new(),
+            Json(json!({"name":"Alice"})),
+        )
+        .await
+        .unwrap()
+        .0;
+        let bob = register(State(s.clone()), HeaderMap::new(), Json(json!({"name":"Bob"})))
+            .await
+            .unwrap()
+            .0;
+        let (alice_id, bob_id) = (
+            alice["id"].as_str().unwrap().to_owned(),
+            bob["id"].as_str().unwrap().to_owned(),
+        );
+        {
+            let db = s.db.lock().unwrap();
+            // Versions whose creator is Bob; v3's creator id does not exist.
+            for (v, creator) in [("v1", bob_id.as_str()), ("v2", bob_id.as_str()), ("v3", "ghost")] {
+                set(&db,"versions",v,&json!({"id":v,"object":{"visual":{"kind":"image"},"scripts":[1],"item_identity":{"creator_id":creator}},"saved_by":alice_id})).unwrap();
+            }
+            // Alice's entries (ids chosen so ORDER BY id interleaves users),
+            // plus Bob's entry that must not appear in Alice's library.
+            for (id, name, version) in [
+                ("a1", "Cat", "v1"),
+                ("a2", "dog", "v2"),
+                ("a3", "Catalog", "v3"),
+                ("a4", "bird", "missing-version"),
+            ] {
+                set(&db,"entries",&format!("{alice_id}:{id}"),&json!({"id":format!("{alice_id}:{id}"),"user_id":alice_id,"version_id":version,"name":name})).unwrap();
+            }
+            set(&db,"entries",&format!("{bob_id}:b1"),&json!({"id":format!("{bob_id}:b1"),"user_id":bob_id,"version_id":"v1","name":"Cat"})).unwrap();
+            // Publications: Alice published v1; a removed one for v2; Bob published v1 too.
+            set(&db,"publications","p1",&json!({"id":"p1","publisher_id":alice_id,"version_id":"v1","state":"published"})).unwrap();
+            set(&db,"publications","p2",&json!({"id":"p2","publisher_id":alice_id,"version_id":"v2","state":"removed"})).unwrap();
+            set(&db,"publications","p3",&json!({"id":"p3","publisher_id":bob_id,"version_id":"v1","state":"published"})).unwrap();
+            // Asset ownership rows for the quota aggregate.
+            set(&db,"asset_owners",&format!("{alice_id}:x"),&json!({"user_id":alice_id,"size":100})).unwrap();
+            set(&db,"asset_owners",&format!("{alice_id}:y"),&json!({"user_id":alice_id,"size":23})).unwrap();
+            set(&db,"asset_owners",&format!("{bob_id}:x"),&json!({"user_id":bob_id,"size":999})).unwrap();
+            set(&db,"asset_owners",&format!("{alice_id}:z"),&json!({"user_id":alice_id})).unwrap();
+        }
+        let token = alice["token"].as_str().unwrap();
+        let call = |action: Value| {
+            let s = s.clone();
+            let headers = auth(token);
+            async move { rpc(State(s), headers, Json(action)).await.unwrap().0 }
+        };
+        // Expected output, computed with the pre-change algorithm:
+        // full scan in id order, in-memory filter, and a fresh lookup
+        // context for every entry.
+        let expected = |query: &str, offset: usize| {
+            let db = s.db.lock().unwrap();
+            let rows: Vec<_> = all(&db, "entries")
+                .unwrap()
+                .into_iter()
+                .filter(|e| {
+                    e["user_id"] == alice_id
+                        && e["name"]
+                            .as_str()
+                            .unwrap_or("")
+                            .to_lowercase()
+                            .contains(&query.to_lowercase())
+                })
+                .map(|entry| {
+                    workshop::library_entry(
+                        &db,
+                        &mut workshop::RequestCache::default(),
+                        entry,
+                        &alice_id,
+                    )
+                })
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            json!({"total":rows.len(),"entries":rows.into_iter().skip(offset).take(10).collect::<Vec<_>>()})
+        };
+        for (query, offset) in [("", 0), ("cat", 0), ("CAT", 0), ("", 2), ("zzz", 0)] {
+            let actual = call(json!({"action":"library","query":query,"offset":offset})).await;
+            assert_eq!(actual, expected(query, offset), "query={query} offset={offset}");
+        }
+        // The version action resolves both names and the publication
+        // through the same cached lookups.
+        let version = call(json!({"action":"version","version_id":"v1"})).await;
+        assert_eq!(version["creator_name"], json!("Bob"));
+        assert_eq!(version["saved_by_name"], json!("Alice"));
+        assert_eq!(version["publication"]["id"], json!("p1"));
+        // SQL aggregate equals the in-memory sum (missing size = 0).
+        {
+            let db = s.db.lock().unwrap();
+            let manual: u64 = all(&db, "asset_owners")
+                .unwrap()
+                .iter()
+                .filter(|r| r["user_id"] == alice_id)
+                .map(|r| r["size"].as_u64().unwrap_or(0))
+                .sum();
+            assert_eq!(stored_asset_bytes(&db, &alice_id).unwrap(), manual);
+            assert_eq!(manual, 123);
+        }
         let root = s.root.clone();
         drop(s);
         std::fs::remove_dir_all(root).unwrap();
