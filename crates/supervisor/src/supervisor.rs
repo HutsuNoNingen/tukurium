@@ -24,15 +24,13 @@ impl Supervisor {
 
     pub fn spawn(&mut self, task_name: &str, program: &str, args: Vec<&str>) {
         // Take ownership
-        let bus_writer = self.bus_writer.clone();
-        let task_name = task_name.to_string();
         let program = program.to_string();
         let args: Vec<String> = args.into_iter().map(|s| s.to_string()).collect();
 
         // Create event bus handle
         let bus = EventBusHandle {
-            sender: Arc::new(bus_writer),
-            task_name: task_name,
+            sender: Arc::new(self.bus_writer.clone()),
+            task_name: task_name.to_string(),
         };
 
         // Start thread!
@@ -110,9 +108,15 @@ impl Supervisor {
         }
     }
 
-    pub fn reap_processes(&mut self) {
+    pub fn reap_processes(self) {
+        // Remove the cloneable bus_writer
+        // Otherwise this part will hang, waiting for a bus_writer that will never be read
+        let mut processes = self.processes;
+        let bus_reader = self.bus_reader;
+        drop(self.bus_writer);
+
         // Kill everything
-        for cmd in self.processes.drain(0..) {
+        for cmd in processes.drain(0..) {
             let mut cmd = cmd
                 .lock()
                 .expect("Could not lock process to kill and reap it");
@@ -122,11 +126,14 @@ impl Supervisor {
             if cfg!(unix) {
                 // On Unix-likes, Child.kill() does SIGKILL.
                 // This means that it can't clean anything up.
-                // So here, we do SIGTERM instead.
+                // So here, we do SIGINT instead.
+                //
+                // Normally you're supposed to use SIGTERM,
+                // but tokio requires OS-specific things to handle stuff that isn't SIGINT.
                 unsafe {
                     _ = libc::kill(
                         pid.try_into().expect("Could not kill process"),
-                        libc::SIGTERM,
+                        libc::SIGINT,
                     );
                 }
             } else {
@@ -147,12 +154,17 @@ impl Supervisor {
 
         // All *direct* processes are now dead.
         // But some processes spawn child processes in an annoying way.
-        // So we can only drain until there's nothing left to read.
-        // The indirect processes can be reaped when this supervisor shuts down.
+        // Specifically, via tokio::process::Command().
+        //
+        // stdout and stderr are inherited from our direct child.
+        // For some reason, if we do SIGTERM or SIGKILL, the indirect child's stdout/stderr are not closed.
+        // The reason SIGINT works is because tokio can handle it properly.
+        //
+        // TODO: Confirm Windows behaviour.
 
         // Drain bus
-        println!("Draining the event bus until it's empty (no blocking)...");
-        while let Ok(event) = self.bus_reader.try_recv() {
+        println!("Draining the event bus until it's empty..");
+        while let Ok(event) = bus_reader.recv() {
             match event.body {
                 EventBody::Log(s) => println!("msg: {}: {}", event.sender, s),
                 EventBody::Dead => {
