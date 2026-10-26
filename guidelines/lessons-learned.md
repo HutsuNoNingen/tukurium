@@ -107,6 +107,51 @@ GraphEdit上でノードをドラッグしてから別のノードを追加す�
 - 再現・確認：ノードを移動し、空白の右クリックからDisplayを追加しても既存位置が変わらないこと。2Dウィンドウと、カーソルを解放した3Dパネルで右クリックが届くこと。
 - コード：[script_graph.gd](../client-godot/script_graph.gd)、[world_panels.gd](../client-godot/world_panels.gd)。テスト：[script_smoke.gd](../client-godot/script_smoke.gd)、[shared_script_smoke.gd](../client-godot/shared_script_smoke.gd)を描画付き統合テストで実行。確認日：2026-10-25。
 
+## ノードの多出力では接続元のポート名も評価に渡す
+
+初期の値ノードは出力が一つだけだったため、RustのコンパイラとGodotのDisplayプレビューは接続元ノードのIDだけを評価していた。Vec3 SplitのようにX/Y/Zを別々に返すノードを追加すると、ノードIDだけではどの成分を読むか決められない。
+
+接続の`from`と`out`を両方とも値の評価へ渡す。型の表示・接続検証・コンパイル・プレビューが同じ出力名を使うようにし、複数の出力を同じグラフ内で利用して検証する。Godotのプレビューは表示用の計算であり、共有データやDriveの正本にはしない。
+
+- 再現・確認：`[1,2,3]`を分解してZ/X/Yの順で組み直し、Displayと実行結果が`[3,1,2]`になること。`cargo test -p kokoverse-scripting --locked`と[ugc-integration.mjs](../tests/ugc-integration.mjs)の`--rendered`で、異なる出力の利用、GodotからのApply、同期、複製、保存復元を確認する。
+- コード：[graph.rs](../crates/scripting/src/graph.rs)、[script_graph.gd](../client-godot/script_graph.gd)、[math_nodes_smoke.gd](../client-godot/math_nodes_smoke.gd)。確認日：2026-10-26。
+
+## 表示しないControlも親へ追加して寿命を揃える
+
+GraphNodeの入出力行で、出力がないときにも右側のplaceholderとしてControlを作っていたが、出力のある行だけ親へ追加していた。親のないControlはノードを作り直しても解放されず、多数のredraw後にCanvasItem / ObjectDBの終了時警告が出た。
+
+placeholderも行の子として追加し、左右のControlをGraphNodeと同じ寿命にする。見えない部品でも生成したら親へ所属させるか明示的に解放する。
+
+- 再現・確認：[math_nodes_smoke.gd](../client-godot/math_nodes_smoke.gd)のpreview-onlyで多数の構成を切り替え、描画付きUGC統合でノード追加・削除・再描画を行う。
+- コード：[script_graph.gd](../client-godot/script_graph.gd)の`redraw()`。確認日：2026-10-26。
+
+## 構造化ループはスコープと呼び出し全体の予算を検証する
+
+反復を実装するためにグラフの循環接続を許すと、既存の型・循環・展開量の検証を迂回する経路が増える。For Range / WhileはBodyとDoneを持つ構造としてコンパイルし、接続グラフ自体のDAG検証を維持する。
+
+ForのIndexはそのBody内、Break / Continueは最も内側のBody内だけに制限する。反復回数をループごとだけで数えるとネストで処理量が増えるため、同じコールバックの全ループで64回のカウンターを共有する。カウンターは呼び出しごとに作り直し、再利用する純粋関数テーブルや共有Componentへ置かない。上限・型・値の違反はコールバック全体の提案を破棄して、部分的な共有WriteやStateを残さない。
+
+- 再現・確認：昇順・降順・空範囲、状態で終了するWhile、ネストしたBreak / Continue、Indexのスコープ外参照、64回超過のロールバック、次の呼び出しでの予算リセットを[graph.rs](../crates/scripting/src/graph.rs)と[control.rs](../crates/scripting/src/control.rs)のテストで確認する。描画付きUGC統合では計算・色・for合計10・while終了13・Doneを同期・複製・保存復元する。
+- コード：[control.rs](../crates/scripting/src/control.rs)、[lib.rs](../crates/scripting/src/lib.rs)、[graph.rs](../crates/scripting/src/graph.rs)。確認日：2026-10-26。
+
+## スクリプトの実行予算はコンパイル準備の後に開始する
+
+`lua.load(source).eval()`の前に5msの実行タイマーを開始すると、ネイティブ側のコンパイル準備にかかった時間も最初のVM割り込みで判定される。短い正常なグラフでも`Script execution budget exceeded`になり、同じテストバイナリの再実行では通る例があった。これだけでOSや他プロセスを原因とは断定しない。
+
+先に`into_function()`でコードを準備し、その後で予算をリセットしてモジュール本体を呼ぶ。モジュール初期化の無限ループと各コールバックに実行時間・割り込み回数制限を適用する。時間の測り方は下記のWindows CPU時計とwatchdogに従う。ネイティブコンパイラをVM割り込みで中断できるわけではないため、ソース長・グラフ展開量・VMメモリの上限も維持する。
+
+- 再現・確認：正常なグラフのコンパイル・数学演算と、モジュール初期化やコールバックの無限ループ拒否を同じscriptingテストで確認する。`cargo test --workspace --locked -- --test-threads=1`で関連する接触・Drive・操作イベントも確認する。
+- コード：[lib.rs](../crates/scripting/src/lib.rs)の`Program::compile()`と`Budget`。確認日：2026-10-26。
+
+## 呼び出し前の待機とCPU実行時間を区別する
+
+前回の実行期限のまま次の関数取得やctx準備でLuaへ入ると、従来の時計では20ms待っただけで正常な初回・再呼び出しが失敗する。Luaの`__index`も実行され得るためフックを外さず、準備開始時と実コールバック直前に新しい予算を設定する。同じProgramの並列呼び出しは、VMへ触れる前から直列化し、実行中の別呼び出しの予算をリセットしない。回帰テストはWindowsの100mswatchdogも超える120ms待機で確認する。
+
+また描画付き統合で、64回の反復・書き込み上限内にある正常な計算が経過時間の期限で失敗した。経過時間だけではスレッドが動かなかった時間も計上する。Windowsでは現在スレッドのCPU時間5msを目安にし、100msの経過時間watchdogを併用する。CPU時計の失敗・逆行・スレッド変更は元の開始時刻からの経過時間5msへ戻し、その実行中はfallbackを解除しない。Windows以外は従来の経過時間5msを使う。これは協調的な予算であり、100nsというAPIの単位を計測分解能や厳密な停止保証と解釈しない。
+
+- 再現・確認：待機後の正常な呼び出しと悪意ある`__index`の停止を[lib.rs](../crates/scripting/src/lib.rs)、CPU1ms・待機50ms、CPU5ms超過、100mswatchdog、時計異常とリセットを[execution_clock.rs](../crates/scripting/src/execution_clock.rs)の決定的なサンプルテストで確認する。描画付き[ugc-integration.mjs](../tests/ugc-integration.mjs)で計算と構造化ループを確認する。
+- API根拠：[GetThreadTimes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getthreadtimes)・[GetCurrentThread](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentthread)。5msのCPU目安と100msのwatchdogはtukuriumの方針。確認日：2026-10-27。
+
 ## パネルを開くと歩けなくなる
 
 最初の新規作成パネルは3Dに描画していたが、表示中はHUD全体を入力停止の対象にしていた。

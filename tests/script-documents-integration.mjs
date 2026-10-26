@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 const root=resolve(import.meta.dirname,'..'),session=`script-docs-${randomUUID()}`;
 const base=52000+Math.floor(Math.random()*700),work=resolve(root,'.run',session),saved=resolve(work,'world.json');
 const relay=process.argv.find(arg=>arg.startsWith('--relay='))?.slice(8);
+const windowArgs=process.argv.includes('--offscreen')?['--position','20000,20000','--single-window','--max-fps','60']:[];
 mkdirSync(work,{recursive:true});const children=[],sockets=[];
 function start(file,args){const child=spawn(resolve(root,file),args,{cwd:root,windowsHide:true,stdio:['ignore','pipe','pipe']});child.logs='';child.stdout.on('data',d=>child.logs+=d);child.stderr.on('data',d=>child.logs+=d);children.push(child);return child;}
 async function until(test,message,ms=15000){const end=Date.now()+ms;while(Date.now()<end){const value=test();if(value)return value;await delay(20);}throw Error(message);}
@@ -102,7 +103,7 @@ try {
   assert.equal((await command(host.client,{action:'remove',script_id:appliedGraph.id,expected_revision:appliedGraph.revision},target)).ok,true);
   await until(()=>host.client.latest().snapshot.objects[0].scripts.length===1,'Graph cleanup not replicated');
   execFileSync(process.execPath,[resolve(root,'scripts/publish-workshop-examples.mjs'),'--prepare'],{cwd:root});
-  const godot=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(process.argv.includes('--rendered')?['--rendering-method','gl_compatibility']:['--headless']),'--path','client-godot','--script','res://shared_script_smoke.gd','--',`--port=${host.port}`,`--session=${session}`,`--graph-fixture=${resolve(root,'.run/workshop-examples/graphs.json')}`,...(process.argv.includes('--rendered')?[`--screenshot=${resolve(work,'shared-script.png')}`]:[])]);
+  const godot=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(process.argv.includes('--rendered')?['--rendering-method','gl_compatibility',...windowArgs]:['--headless']),'--log-file',resolve(work,'shared-script.log'),'--path','client-godot','--script','res://shared_script_smoke.gd','--',`--port=${host.port}`,`--session=${session}`,`--graph-fixture=${resolve(root,'.run/workshop-examples/graphs.json')}`,...(process.argv.includes('--rendered')?[`--screenshot=${resolve(work,'shared-script.png')}`]:[])]);
   await until(()=>godot.exitCode!==null,'Shared script UI timed out',60000);
   assert.equal(godot.exitCode,0,godot.logs);assert.doesNotMatch(godot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(godot.logs,/SHARED SCRIPT SMOKE PASS/);
   console.log('PASS: host world-panel drafts, Field reference binding, and workshop graph number edit');
