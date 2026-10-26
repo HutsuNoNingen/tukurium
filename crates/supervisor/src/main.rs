@@ -2,8 +2,8 @@ mod config;
 mod events;
 mod supervisor;
 
-use crate::config::{start_processes_from_config};
-use crate::supervisor::{Supervisor};
+use crate::config::start_processes_from_config;
+use crate::supervisor::Supervisor;
 
 fn main() {
     println!("やっほー");
