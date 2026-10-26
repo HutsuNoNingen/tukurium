@@ -115,22 +115,19 @@ impl Supervisor {
             let pid = cmd.id();
             println!("ID = {}", pid);
 
-            // On Unix-likes, Child.kill() does SIGKILL.
-            // This means that it can't clean anything up.
-            // So here, we do SIGTERM instead.
-            #[cfg(unix)]
-            {
+            if cfg!(unix) {
+                // On Unix-likes, Child.kill() does SIGKILL.
+                // This means that it can't clean anything up.
+                // So here, we do SIGTERM instead.
                 unsafe {
                     _ = libc::kill(
                         pid.try_into().expect("Could not kill process"),
                         libc::SIGTERM,
                     );
                 }
-            }
-            // On Windows... is there a nice way to clean this up?
-            // Child.kill() probably does TerminateProcess().
-            #[cfg(not(unix))]
-            {
+            } else {
+                // On Windows... is there a nice way to clean this up?
+                // Child.kill() probably does TerminateProcess().
                 cmd.kill().expect("Could not kill process");
             }
 
