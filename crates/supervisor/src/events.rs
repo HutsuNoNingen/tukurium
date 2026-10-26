@@ -42,15 +42,3 @@ impl EventBusHandle {
         });
     }
 }
-
-pub fn run_bus_reader_until_dead(bus_reader: &mpsc::Receiver<Event>) {
-    while let Ok(event) = bus_reader.recv() {
-        match event.body {
-            EventBody::Log(s) => println!("msg: {}: {}", event.sender, s),
-            EventBody::Dead => {
-                println!("dead: {}", event.sender);
-                return;
-            }
-        }
-    }
-}

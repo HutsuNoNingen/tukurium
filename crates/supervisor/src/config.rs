@@ -1,25 +1,16 @@
-use std::process;
-use std::sync::{Mutex};
-use std::sync::mpsc;
+use crate::supervise::{Supervisor};
 
-use crate::events::{Event};
-use crate::supervise::supervise;
-
-pub fn start_processes_from_config(processes: &mut Vec<Mutex<process::Child>>, bus_writer: &mpsc::Sender<Event>) {
+pub fn start_processes_from_config(supervisor: &mut Supervisor) {
     let session_name = "demo2";
     let profile_name = "default";
 
-    supervise(
-        processes,
-        bus_writer,
+    supervisor.spawn(
         "relay",
         "./.tools/kokosync-relay",
         vec!["--http", "127.0.0.1:48000", "--quic", "127.0.0.1:48001"],
     );
 
-    supervise(
-        processes,
-        bus_writer,
+    supervisor.spawn(
         "asset-server",
         "./target/debug/kokoverse-asset-server",
         vec![
@@ -32,9 +23,7 @@ pub fn start_processes_from_config(processes: &mut Vec<Mutex<process::Child>>, b
         ],
     );
 
-    supervise(
-        processes,
-        bus_writer,
+    supervisor.spawn(
         "engine",
         "./target/debug/kokoverse-engine",
         vec![
@@ -57,9 +46,7 @@ pub fn start_processes_from_config(processes: &mut Vec<Mutex<process::Child>>, b
         ],
     );
 
-    supervise(
-        processes,
-        bus_writer,
+    supervisor.spawn(
         "gui",
         "godot",
         vec![
