@@ -8,9 +8,13 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
 };
+use execution_clock::Deadline;
 mod graph;
+mod math;
+mod control;
+mod operations;
+mod execution_clock;
 
 pub const MAX_SOURCE: usize = 8 * 1024;
 pub const MAX_SCRIPTS_PER_OBJECT: usize = 4;
@@ -45,19 +49,21 @@ pub struct Output {
 
 struct Budget {
     calls: AtomicUsize,
-    deadline: Mutex<Instant>,
+    deadline: Mutex<Deadline>,
 }
 impl Budget {
     fn reset(&self) {
         self.calls.store(0, Ordering::Relaxed);
-        *self.deadline.lock().unwrap() = Instant::now() + Duration::from_millis(5);
+        *self.deadline.lock().unwrap() = Deadline::start();
     }
 }
 
 pub struct Program {
     lua: Lua,
     module: Table,
+    math_helpers: Table,
     budget: Arc<Budget>,
+    invocation: Mutex<()>,
     pub schema: ScriptSchema,
 }
 
@@ -252,25 +258,33 @@ impl Program {
                 lua.globals().set(key, LuaValue::Nil)?;
             }
             lua.sandbox(true)?;
+            // Pure helper closures are shared by this Program's invocations.
+            let math_helpers = lua.create_table()?;
+            math::install(&lua, &math_helpers)?;
+            operations::install(&lua, &math_helpers)?;
+            control::install(&lua, &math_helpers)?;
+            math_helpers.set_readonly(true);
             let budget = Arc::new(Budget {
                 calls: AtomicUsize::new(0),
-                deadline: Mutex::new(Instant::now()),
+                deadline: Mutex::new(Deadline::start()),
             });
             let hook = budget.clone();
             lua.set_interrupt(move |_| {
-                if hook.calls.fetch_add(1, Ordering::Relaxed) >= 2000
-                    || Instant::now() >= *hook.deadline.lock().unwrap()
-                {
-                    return Err(error("Script execution budget exceeded"));
+                if hook.calls.fetch_add(1, Ordering::Relaxed) >= 2000 {
+                    return Err(error("Script execution budget exceeded (interrupt limit)"));
+                }
+                if let Some(limit) = hook.deadline.lock().unwrap().exceeded() {
+                    return Err(error(format!("Script execution budget exceeded ({})", limit.label())));
                 }
                 Ok(VmState::Continue)
             });
-            budget.reset();
-            let module: Table = lua
+            let initialize = lua
                 .load(source)
                 .set_name("UGC")
                 .set_mode(ChunkMode::Text)
-                .eval()?;
+                .into_function()?;
+            budget.reset();
+            let module: Table = initialize.call(())?;
             let name: String = module.get("name")?;
             if !identifier(&name)
                 || ["Transform", "Renderer", "Collider", "State"].contains(&name.as_str())
@@ -337,7 +351,9 @@ impl Program {
             Ok(Self {
                 lua,
                 module,
+                math_helpers,
                 budget,
+                invocation: Mutex::new(()),
                 schema: ScriptSchema {
                     name,
                     fields,
@@ -398,6 +414,14 @@ impl Program {
         other: Option<&Address>,
     ) -> Result<Output, String> {
         let run = || -> mlua::Result<Output> {
+            // mlua serializes individual VM accesses; keep this entire invocation
+            // together so a second thread cannot reset the running call's budget.
+            let _invocation = self.invocation.lock()
+                .map_err(|_| error("Script invocation lock is poisoned"))?;
+            // Host-side lookup/preparation can enter Lua (for example __index).
+            // Give that phase a fresh bounded budget instead of a previous call's
+            // expired deadline, then reset again for the actual user callback.
+            self.budget.reset();
             let color: [f64; 4] = object.fields.iter().find(|f| f.id == "color")
                 .map(|field| serde_json::from_value(field.value.clone()))
                 .transpose()
@@ -424,7 +448,8 @@ impl Program {
                 Event::ContactEnd => "on_contact_end",
                 Event::Drive => "drive",
             };
-            let Some(function) = self.module.get::<Option<Function>>(handler)? else {
+            let Some(function) = self.module.get::<Option<Function>>(handler)
+                .map_err(|err| error(format!("Script handler lookup failed: {err}")))? else {
                 return Ok(output.lock().unwrap().clone());
             };
             let ctx = self.context(
@@ -435,7 +460,7 @@ impl Program {
                 world_time,
                 readable_fields,
                 other,
-            )?;
+            ).map_err(|err| error(format!("Script context preparation failed: {err}")))?;
             self.budget.reset();
             function.call::<()>((ctx, dt))?;
             let result = output.lock().unwrap().clone();
@@ -457,6 +482,11 @@ impl Program {
     ) -> mlua::Result<Table> {
         let lua = &self.lua;
         let ctx = lua.create_table()?;
+        for binding in self.math_helpers.pairs::<String, Function>() {
+            let (name, function) = binding?;
+            ctx.set(name, function)?;
+        }
+        control::install_context(lua, &ctx)?;
         let readable_fields = readable_fields.clone();
         ctx.set(
             "read",
@@ -793,6 +823,7 @@ pub const COUNTDOWN_CAMERA_NODES: &str = include_str!("../templates/countdown_ca
 mod tests {
     use super::*;
     use kokoverse_protocol::{ScriptClock, ScriptComponent};
+    use std::time::Duration;
     #[test]
     fn schema_defaults_and_invalid_values_are_checked() {
         let p = Program::compile(ROTATOR).unwrap();
@@ -848,5 +879,171 @@ mod tests {
                 component.state = result.state;
             }
         }
+    }
+
+    fn run_math_script(body: &str) -> Result<Output, String> {
+        let source = format!("return {{name='MathScript',update=function(ctx) {body} end}}");
+        let program = Program::compile(&source)?;
+        let component = ScriptComponent {
+            id: "1".into(), revision: "0".into(), enabled: true, source,
+            schema: program.schema.clone(), parameters: BTreeMap::new(),
+            state: BTreeMap::from([("saved".into(), json!(7))]), clock: ScriptClock::default(),
+        };
+        let object: ObjectView = serde_json::from_value(json!({
+            "address":{"instance_id":"00000000-0000-0000-0000-000000000001","local_id":1},
+            "object_revision":"0","world_position":[0,0,0],"fields":[],"scripts":[component.clone()]
+        })).unwrap();
+        let result = program.run(&object, &component, Event::Update, 0.05);
+        // A failed callback returns no proposal, and never modifies saved input state.
+        assert_eq!(component.state, BTreeMap::from([("saved".into(), json!(7))]));
+        result
+    }
+
+    #[test]
+    fn direct_luau_uses_the_same_pure_math_helpers() {
+        let output = run_math_script(r#"
+            local vector = ctx:vec3_make(1,2,3)
+            local sum = ctx:vec3_add(vector,{4,5,6})
+            ctx:set_state('sum',sum)
+            ctx:set_state('difference',ctx:vec3_subtract(sum,vector))
+            ctx:set_state('scaled',ctx:vec3_scale(vector,2))
+            ctx:set_state('dot',ctx:vec3_dot(vector,{4,5,6}))
+            ctx:set_state('cross',ctx:vec3_cross(vector,{4,5,6}))
+            ctx:set_state('length',ctx:vec3_length({3,4,0}))
+            ctx:set_state('normalized',ctx:vec3_normalize({0,3,4}))
+            ctx:set_state('distance',ctx:vec3_distance(vector,{4,6,3}))
+            ctx:set_state('interpolated',ctx:vec3_lerp(vector,{4,6,3},0.25))
+            ctx:set_state('split',{ctx:vec3_x(vector),ctx:vec3_y(vector),ctx:vec3_z(vector)})
+            ctx:set_state('scalar',ctx:lerp(2,10,0.25)+ctx:clamp(2,0,1))
+            ctx:set_state('unary',{ctx:abs(-3),ctx:floor(-1.2),ctx:sin(math.pi/2),ctx:cos(math.pi)})
+        "#).unwrap();
+        assert_eq!(output.state["sum"], json!([5.0,7.0,9.0]));
+        assert_eq!(output.state["difference"], json!([4.0,5.0,6.0]));
+        assert_eq!(output.state["scaled"], json!([2.0,4.0,6.0]));
+        assert_eq!(output.state["dot"].as_f64(), Some(32.0));
+        assert_eq!(output.state["cross"], json!([-3.0,6.0,-3.0]));
+        assert_eq!(output.state["length"].as_f64(), Some(5.0));
+        assert_eq!(output.state["normalized"], json!([0.0,0.6,0.8]));
+        assert_eq!(output.state["distance"].as_f64(), Some(5.0));
+        assert_eq!(output.state["interpolated"], json!([1.75,3.0,3.0]));
+        assert_eq!(output.state["split"], json!([1.0,2.0,3.0]));
+        assert_eq!(output.state["scalar"].as_f64(), Some(5.0));
+        assert_eq!(output.state["unary"], json!([3.0,-2.0,1.0,-1.0]));
+        assert_eq!(output.position, [0.0;3]);
+    }
+
+    #[test]
+    fn invalid_math_discards_callback_proposal_and_keeps_mutation_bounds() {
+        for name in ["abs", "floor", "sin", "cos"] {
+            for value in ["'3'", "0/0", "math.huge"] {
+                let body = format!("ctx:set_state('saved',8); ctx:{name}({value})");
+                assert!(run_math_script(&body).is_err(), "accepted {body}");
+            }
+        }
+        for body in [
+            "ctx:set_state('saved',8); ctx:vec3_scale({1,2,3},math.huge)",
+            "ctx:write(ctx.self,'position',{1,2,3}); ctx:clamp(0,2,1)",
+            "ctx:write(ctx.self,'position',ctx:vec3_make(1001,0,0))",
+            "ctx:write(ctx.self,'scale',ctx:vec3_make(0,1,1))",
+            "ctx:set_state('saved',ctx:vec3_dot({1e8,0,0},{1e8,0,0}))",
+        ] {
+            assert!(run_math_script(body).is_err(), "accepted {body}");
+        }
+    }
+
+    #[test]
+    fn repeated_callbacks_keep_math_results_local_to_each_invocation() {
+        let source = "return {name='RepeatedMath',update=function(ctx) ctx:set_state('value',ctx:vec3_add(ctx:vec3_make(ctx.world_time,2,3),{1,0,0})) end}";
+        let program = Program::compile(source).unwrap();
+        let component = ScriptComponent {
+            id: "1".into(), revision: "0".into(), enabled: true, source: source.into(),
+            schema: program.schema.clone(), parameters: BTreeMap::new(),
+            state: BTreeMap::new(), clock: ScriptClock::default(),
+        };
+        let object: ObjectView = serde_json::from_value(json!({
+            "address":{"instance_id":"00000000-0000-0000-0000-000000000001","local_id":1},
+            "object_revision":"0","world_position":[0,0,0],"fields":[],"scripts":[component.clone()]
+        })).unwrap();
+        for time in 0..64 {
+            let output = program.run_at(&object,&component,Event::Update,0.05,f64::from(time)).unwrap();
+            assert_eq!(output.state["value"],json!([f64::from(time)+1.0,2.0,3.0]));
+        }
+        assert!(component.state.is_empty());
+    }
+
+    #[test]
+    fn first_and_later_callbacks_get_fresh_budgets_after_idle_time() {
+        for source in [
+            "return {name='Idle',update=function(ctx) ctx:set_state('calls',ctx:get_state('calls',0)+1) end}",
+            "local update=function(ctx) ctx:set_state('calls',ctx:get_state('calls',0)+1) end; return setmetatable({name='IdleGetter'},{__index=function(_,key) if key=='update' then return update end end})",
+        ] {
+            let program = Program::compile(source).unwrap();
+            let mut component = ScriptComponent {
+                id: "1".into(), revision: "0".into(), enabled: true, source: source.into(),
+                schema: program.schema.clone(), parameters: BTreeMap::new(),
+                state: BTreeMap::new(), clock: ScriptClock::default(),
+            };
+            let object: ObjectView = serde_json::from_value(json!({
+                "address":{"instance_id":"00000000-0000-0000-0000-000000000001","local_id":1},
+                "object_revision":"0","world_position":[0,0,0],"fields":[],"scripts":[component.clone()]
+            })).unwrap();
+            for expected in 1..=2 {
+                // Expire both the 5ms fallback and Windows' 100ms watchdog;
+                // this tests freshness after idle, not callback speed.
+                std::thread::sleep(Duration::from_millis(120));
+                let output = program.run(&object,&component,Event::Update,0.05).unwrap();
+                assert_eq!(output.state["calls"],json!(expected));
+                component.state = output.state;
+            }
+        }
+    }
+
+    #[test]
+    fn handler_metamethods_remain_execution_budgeted() {
+        let source = "local armed=false; local update=function() armed=true end; return setmetatable({name='GetterGuard'},{__index=function(_,key) if key=='update' then if armed then while true do end end; return update end end})";
+        let program = Program::compile(source).unwrap();
+        let component = ScriptComponent {
+            id: "1".into(), revision: "0".into(), enabled: true, source: source.into(),
+            schema: program.schema.clone(), parameters: BTreeMap::new(),
+            state: BTreeMap::new(), clock: ScriptClock::default(),
+        };
+        let object: ObjectView = serde_json::from_value(json!({
+            "address":{"instance_id":"00000000-0000-0000-0000-000000000001","local_id":1},
+            "object_revision":"0","world_position":[0,0,0],"fields":[],"scripts":[component.clone()]
+        })).unwrap();
+        program.run(&object,&component,Event::Update,0.05).unwrap();
+        let error = program.run(&object,&component,Event::Update,0.05).unwrap_err();
+        assert!(error.contains("handler lookup") && error.contains("budget"),"{error}");
+    }
+
+    #[test]
+    fn concurrent_invocations_keep_their_context_and_budget_owner() {
+        let source = "return {name='Parallel',update=function(ctx) ctx:set_state('frame',ctx.world_time); ctx:set_state('vector',ctx:vec3_make(ctx.world_time,2,3)) end}";
+        let program = Program::compile(source).unwrap();
+        let component = ScriptComponent {
+            id: "1".into(), revision: "0".into(), enabled: true, source: source.into(),
+            schema: program.schema.clone(), parameters: BTreeMap::new(),
+            state: BTreeMap::new(), clock: ScriptClock::default(),
+        };
+        let object: ObjectView = serde_json::from_value(json!({
+            "address":{"instance_id":"00000000-0000-0000-0000-000000000001","local_id":1},
+            "object_revision":"0","world_position":[0,0,0],"fields":[],"scripts":[component.clone()]
+        })).unwrap();
+        let barrier = std::sync::Barrier::new(4);
+        std::thread::scope(|scope| {
+            for thread in 0..4 {
+                let (program,component,object,barrier) = (&program,&component,&object,&barrier);
+                scope.spawn(move || {
+                    barrier.wait();
+                    for frame in 0..8 {
+                        let time = f64::from(thread * 8 + frame);
+                        let output = program.run_at(object,component,Event::Update,0.05,time).unwrap();
+                        assert_eq!(output.state["frame"].as_f64(),Some(time));
+                        assert_eq!(output.state["vector"],json!([time,2.0,3.0]));
+                    }
+                });
+            }
+        });
+        assert!(component.state.is_empty());
     }
 }

@@ -54,6 +54,17 @@ fn spec(kind: &str) -> Option<Spec> {
             inputs: &[("flow", "flow")],
             outputs: &[("first", "flow"), ("second", "flow")],
         },
+        "for_range" => Spec {
+            inputs: &[("flow", "flow"), ("start", "number"), ("end", "number"), ("step", "number")],
+            outputs: &[("body", "flow"), ("done", "flow"), ("index", "number")],
+        },
+        "while_loop" => Spec {
+            inputs: &[("flow", "flow"), ("test", "bool")],
+            outputs: &[("body", "flow"), ("done", "flow")],
+        },
+        "break_loop" | "continue_loop" => Spec {
+            inputs: &[("flow", "flow")], outputs: &[],
+        },
         "write_field" | "drive_field" => Spec {
             inputs: &[("flow", "flow"), ("value", "any")],
             outputs: &[("next", "flow")],
@@ -125,9 +136,103 @@ fn spec(kind: &str) -> Option<Spec> {
             inputs: &[("a", "bool")],
             outputs: &[("value", "bool")],
         },
-        "ceil" => Spec {
+        "ceil" | "abs" | "floor" | "sin" | "cos" | "negate" | "sqrt" | "round"
+        | "sign" | "tan" | "asin" | "acos" | "log" | "exp" => Spec {
             inputs: &[("value", "number")],
             outputs: &[("value", "number")],
+        },
+        "power" => Spec {
+            inputs: &[("a", "number"), ("b", "number")], outputs: &[("value", "number")],
+        },
+        "atan2" => Spec {
+            inputs: &[("y", "number"), ("x", "number")], outputs: &[("value", "number")],
+        },
+        "remap" => Spec {
+            inputs: &[("value", "number"), ("in_min", "number"), ("in_max", "number"), ("out_min", "number"), ("out_max", "number")],
+            outputs: &[("value", "number")],
+        },
+        "smoothstep" => Spec {
+            inputs: &[("edge0", "number"), ("edge1", "number"), ("value", "number")], outputs: &[("value", "number")],
+        },
+        "ping_pong" => Spec {
+            inputs: &[("value", "number"), ("length", "number")], outputs: &[("value", "number")],
+        },
+        "less_equal" | "greater_equal" => Spec {
+            inputs: &[("a", "number"), ("b", "number")], outputs: &[("value", "bool")],
+        },
+        "not_equal" => Spec {
+            inputs: &[("a", "any"), ("b", "any")], outputs: &[("value", "bool")],
+        },
+        "xor" => Spec {
+            inputs: &[("a", "bool"), ("b", "bool")], outputs: &[("value", "bool")],
+        },
+        "parse_number" => Spec { inputs: &[("text", "string")], outputs: &[("value", "number")] },
+        "number_to_bool" => Spec { inputs: &[("value", "number")], outputs: &[("value", "bool")] },
+        "bool_to_number" => Spec { inputs: &[("value", "bool")], outputs: &[("value", "number")] },
+        "string_length" => Spec { inputs: &[("text", "string")], outputs: &[("value", "number")] },
+        "string_contains" | "string_starts_with" | "string_ends_with" => Spec {
+            inputs: &[("text", "string"), ("part", "string")], outputs: &[("value", "bool")],
+        },
+        "string_slice" => Spec {
+            inputs: &[("text", "string"), ("start", "number"), ("count", "number")], outputs: &[("value", "string")],
+        },
+        "vec3_angle" => Spec {
+            inputs: &[("a", "vec3"), ("b", "vec3")], outputs: &[("value", "number")],
+        },
+        "vec3_reflect" => Spec {
+            inputs: &[("value", "vec3"), ("normal", "vec3")], outputs: &[("value", "vec3")],
+        },
+        "vec3_move_towards" => Spec {
+            inputs: &[("a", "vec3"), ("b", "vec3"), ("max_delta", "number")], outputs: &[("value", "vec3")],
+        },
+        "color_make" => Spec {
+            inputs: &[("r", "number"), ("g", "number"), ("b", "number"), ("a", "number")], outputs: &[("value", "color")],
+        },
+        "color_split" => Spec {
+            inputs: &[("value", "color")], outputs: &[("r", "number"), ("g", "number"), ("b", "number"), ("a", "number")],
+        },
+        "color_lerp" => Spec {
+            inputs: &[("a", "color"), ("b", "color"), ("t", "number")], outputs: &[("value", "color")],
+        },
+        "clamp" => Spec {
+            inputs: &[("value", "number"), ("min", "number"), ("max", "number")],
+            outputs: &[("value", "number")],
+        },
+        "lerp" => Spec {
+            inputs: &[("a", "number"), ("b", "number"), ("t", "number")],
+            outputs: &[("value", "number")],
+        },
+        "vec3_make" => Spec {
+            inputs: &[("x", "number"), ("y", "number"), ("z", "number")],
+            outputs: &[("value", "vec3")],
+        },
+        "vec3_split" => Spec {
+            inputs: &[("value", "vec3")],
+            outputs: &[("x", "number"), ("y", "number"), ("z", "number")],
+        },
+        "vec3_add" | "vec3_subtract" | "vec3_cross" => Spec {
+            inputs: &[("a", "vec3"), ("b", "vec3")],
+            outputs: &[("value", "vec3")],
+        },
+        "vec3_scale" => Spec {
+            inputs: &[("value", "vec3"), ("factor", "number")],
+            outputs: &[("value", "vec3")],
+        },
+        "vec3_dot" | "vec3_distance" => Spec {
+            inputs: &[("a", "vec3"), ("b", "vec3")],
+            outputs: &[("value", "number")],
+        },
+        "vec3_length" => Spec {
+            inputs: &[("value", "vec3")],
+            outputs: &[("value", "number")],
+        },
+        "vec3_normalize" => Spec {
+            inputs: &[("value", "vec3")],
+            outputs: &[("value", "vec3")],
+        },
+        "vec3_lerp" => Spec {
+            inputs: &[("a", "vec3"), ("b", "vec3"), ("t", "number")],
+            outputs: &[("value", "vec3")],
         },
         "select" => Spec {
             inputs: &[("test", "bool"), ("yes", "any"), ("no", "any")],
@@ -220,15 +325,15 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    fn input(&self, id: &str, port: &str, stack: &mut HashSet<String>) -> Result<String, String> {
-        let (from, _) = self
+    fn input(&self, id: &str, port: &str, stack: &mut HashSet<String>, scope: &[&str]) -> Result<String, String> {
+        let (from, output) = self
             .incoming
             .get(&(id, port))
             .ok_or_else(|| format!("Missing input {port} on {id}"))?;
-        self.value(from, stack)
+        self.value(from, output, stack, scope)
     }
 
-    fn value(&self, id: &str, stack: &mut HashSet<String>) -> Result<String, String> {
+    fn value(&self, id: &str, output: &str, stack: &mut HashSet<String>, scope: &[&str]) -> Result<String, String> {
         self.visit()?;
         if !stack.insert(id.to_owned()) {
             return Err("Value cycle in graph".into());
@@ -243,11 +348,17 @@ impl Compiler<'_> {
             "contact_other_id" => "(ctx.other and ctx.other.instance_id or '')".into(),
             "read_field" => format!("ctx:read(ctx.self.{}.ref_{})", self.graph.name, id),
             "get_state" => format!("ctx:get_state({}, 0)", lua_string(state_key(node)?)),
-            "display" => self.input(id, "value", stack)?,
+            "for_range" => {
+                if output != "index" || !scope.contains(&id) {
+                    return Err("For Range index is only available inside its loop body".into());
+                }
+                format!("_loop_index_{id}")
+            }
+            "display" => self.input(id, "value", stack, scope)?,
             "add" | "subtract" | "multiply" | "divide" | "modulo" | "less" | "greater"
-            | "equal" | "and" | "or" | "min" | "max" => {
-                let a = self.input(id, "a", stack)?;
-                let b = self.input(id, "b", stack)?;
+            | "and" | "or" | "min" | "max" => {
+                let a = self.input(id, "a", stack, scope)?;
+                let b = self.input(id, "b", stack, scope)?;
                 let op = match node.kind.as_str() {
                     "add" => "+",
                     "subtract" => "-",
@@ -256,7 +367,6 @@ impl Compiler<'_> {
                     "modulo" => "%",
                     "less" => "<",
                     "greater" => ">",
-                    "equal" => "==",
                     "and" => "and",
                     "or" => "or",
                     _ => "",
@@ -267,24 +377,47 @@ impl Compiler<'_> {
                     format!("({a} {op} {b})")
                 }
             }
-            "not" => format!("(not {})", self.input(id, "a", stack)?),
-            "ceil" => format!("math.ceil({})", self.input(id, "value", stack)?),
-            "to_string" => format!("tostring({})", self.input(id, "value", stack)?),
+            "not" => format!("(not {})", self.input(id, "a", stack, scope)?),
+            "ceil" => format!("math.ceil({})", self.input(id, "value", stack, scope)?),
+            "abs" | "floor" | "sin" | "cos" => format!(
+                "ctx:{}({})", node.kind, self.input(id, "value", stack, scope)?
+            ),
+            "clamp" | "lerp" | "vec3_make" | "vec3_add" | "vec3_subtract"
+            | "vec3_scale" | "vec3_dot" | "vec3_cross" | "vec3_length"
+            | "vec3_normalize" | "vec3_distance" | "vec3_lerp"
+            | "negate" | "sqrt" | "power" | "round" | "sign" | "tan" | "asin" | "acos"
+            | "atan2" | "log" | "exp" | "remap" | "smoothstep" | "ping_pong"
+            | "equal" | "less_equal" | "greater_equal" | "not_equal" | "xor" | "parse_number"
+            | "number_to_bool" | "bool_to_number" | "string_length" | "string_contains"
+            | "string_starts_with" | "string_ends_with" | "string_slice" | "vec3_angle"
+            | "vec3_reflect" | "vec3_move_towards" | "color_make" | "color_lerp" => {
+                let arguments = spec(&node.kind).unwrap().inputs.iter()
+                    .map(|(port, _)| self.input(id, port, stack, scope))
+                    .collect::<Result<Vec<_>, _>>()?;
+                format!("ctx:{}({})", node.kind, arguments.join(", "))
+            }
+            "vec3_split" => format!(
+                "ctx:vec3_{}({})", output, self.input(id, "value", stack, scope)?
+            ),
+            "color_split" => format!(
+                "ctx:color_{}({})", output, self.input(id, "value", stack, scope)?
+            ),
+            "to_string" => format!("tostring({})", self.input(id, "value", stack, scope)?),
             "join" => format!(
                 "({} .. {})",
-                self.input(id, "a", stack)?,
-                self.input(id, "b", stack)?
+                self.input(id, "a", stack, scope)?,
+                self.input(id, "b", stack, scope)?
             ),
             "select" => format!(
-                "(if {} then {} else {})",
-                self.input(id, "test", stack)?,
-                self.input(id, "yes", stack)?,
-                self.input(id, "no", stack)?
+                "(if ctx:condition({}) then {} else {})",
+                self.input(id, "test", stack, scope)?,
+                self.input(id, "yes", stack, scope)?,
+                self.input(id, "no", stack, scope)?
             ),
             "rotation_y" => format!(
                 "ctx:rotation_y({}, {})",
-                self.input(id, "degrees", stack)?,
-                self.input(id, "base", stack)?
+                self.input(id, "degrees", stack, scope)?,
+                self.input(id, "base", stack, scope)?
             ),
             _ => return Err(format!("{} is not a value node", node.kind)),
         };
@@ -299,6 +432,7 @@ impl Compiler<'_> {
         drive: bool,
         capture_allowed: bool,
         stack: &mut HashSet<String>,
+        scope: &[&str],
     ) -> Result<String, String> {
         let mut code = String::new();
         for next in self.outgoing.get(&(id, output)).into_iter().flatten() {
@@ -309,16 +443,40 @@ impl Compiler<'_> {
             let node = self.nodes[next];
             match node.kind.as_str() {
                 "branch" => {
-                    let test = self.input(next, "test", &mut HashSet::new())?;
+                    let test = self.input(next, "test", &mut HashSet::new(), scope)?;
                     code.push_str(&format!(
-                        "if {test} then\n{}else\n{}end\n",
-                        self.actions(next, "yes", drive, capture_allowed, stack)?,
-                        self.actions(next, "no", drive, capture_allowed, stack)?
+                        "if ctx:condition({test}) then\n{}else\n{}end\n",
+                        self.actions(next, "yes", drive, capture_allowed, stack, scope)?,
+                        self.actions(next, "no", drive, capture_allowed, stack, scope)?
                     ));
                 }
                 "sequence" => {
-                    code.push_str(&self.actions(next, "first", drive, capture_allowed, stack)?);
-                    code.push_str(&self.actions(next, "second", drive, capture_allowed, stack)?);
+                    code.push_str(&self.actions(next, "first", drive, capture_allowed, stack, scope)?);
+                    code.push_str(&self.actions(next, "second", drive, capture_allowed, stack, scope)?);
+                }
+                "for_range" | "while_loop" => {
+                    let mut nested = scope.to_vec();
+                    nested.push(next);
+                    if node.kind == "for_range" {
+                        let start = self.input(next, "start", &mut HashSet::new(), scope)?;
+                        let end = self.input(next, "end", &mut HashSet::new(), scope)?;
+                        let step = self.input(next, "step", &mut HashSet::new(), scope)?;
+                        let body = self.actions(next, "body", drive, capture_allowed, stack, &nested)?;
+                        code.push_str(&format!(
+                            "do\nlocal _start_{next}, _end_{next}, _step_{next} = {start}, {end}, {step}\nlocal _count_{next} = ctx:for_count(_start_{next}, _end_{next}, _step_{next})\nlocal _range_index_{next} = _start_{next}\nfor _counter_{next} = 1, _count_{next} do\nlocal _loop_index_{next} = _range_index_{next}\n_range_index_{next} += _step_{next}\nctx:loop_step()\n{body}end\nend\n"
+                        ));
+                    } else {
+                        let test = self.input(next, "test", &mut HashSet::new(), scope)?;
+                        let body = self.actions(next, "body", drive, capture_allowed, stack, &nested)?;
+                        code.push_str(&format!("while ctx:condition({test}) do\nctx:loop_step()\n{body}end\n"));
+                    }
+                    code.push_str(&self.actions(next, "done", drive, capture_allowed, stack, scope)?);
+                }
+                "break_loop" | "continue_loop" => {
+                    if scope.is_empty() { return Err("Break and Continue require a loop body".into()); }
+                    // A lexical block keeps the terminator last in its block even
+                    // when another outgoing flow edge emits subsequent statements.
+                    code.push_str(if node.kind == "break_loop" { "do break end\n" } else { "do continue end\n" });
                 }
                 "write_field" | "drive_field" => {
                     if (node.kind == "drive_field") != drive {
@@ -327,28 +485,28 @@ impl Compiler<'_> {
                                 .into(),
                         );
                     }
-                    let value = self.input(next, "value", &mut HashSet::new())?;
+                    let value = self.input(next, "value", &mut HashSet::new(), scope)?;
                     code.push_str(&format!(
                         "ctx:{}(ctx.self.{}.ref_{}, {value})\n",
                         node.kind, self.graph.name, next
                     ));
-                    code.push_str(&self.actions(next, "next", drive, capture_allowed, stack)?);
+                    code.push_str(&self.actions(next, "next", drive, capture_allowed, stack, scope)?);
                 }
                 "set_state" => {
                     if drive {
                         return Err("Set State cannot run under On Drive".into());
                     }
-                    let value = self.input(next, "value", &mut HashSet::new())?;
+                    let value = self.input(next, "value", &mut HashSet::new(), scope)?;
                     code.push_str(&format!(
                         "ctx:set_state({}, {value})\n",
                         lua_string(state_key(node)?)
                     ));
-                    code.push_str(&self.actions(next, "next", drive, capture_allowed, stack)?);
+                    code.push_str(&self.actions(next, "next", drive, capture_allowed, stack, scope)?);
                 }
                 "capture_camera" => {
                     if !capture_allowed { return Err("Capture Camera cannot run under On Drive".into()); }
                     code.push_str("ctx:capture_camera(ctx.self)\n");
-                    code.push_str(&self.actions(next, "next", drive, capture_allowed, stack)?);
+                    code.push_str(&self.actions(next, "next", drive, capture_allowed, stack, scope)?);
                 }
                 _ => return Err(format!("{} is not a flow node", node.kind)),
             }
@@ -514,7 +672,7 @@ pub fn compile(source: &str) -> Result<String, String> {
         ("on_drive", "drive", true),
     ] {
         if let Some(node) = graph.nodes.iter().find(|n| n.kind == kind) {
-            let actions = compiler.actions(&node.id, "flow", drive, !drive, &mut HashSet::new())?;
+            let actions = compiler.actions(&node.id, "flow", drive, !drive, &mut HashSet::new(), &[])?;
             code.push_str(&format!("{handler}=function(ctx,dt)\n{actions}end,"));
         }
     }
@@ -771,11 +929,19 @@ mod tests {
             "or",
             "not",
             "ceil",
+            "abs", "floor", "sin", "cos", "clamp", "lerp", "vec3_make", "vec3_split",
+            "vec3_add", "vec3_subtract", "vec3_scale", "vec3_dot", "vec3_cross",
+            "vec3_length", "vec3_normalize", "vec3_distance", "vec3_lerp",
             "select",
             "to_string",
             "join",
             "rotation_y",
             "display",
+            "negate", "sqrt", "power", "round", "sign", "tan", "asin", "acos", "atan2", "log", "exp",
+            "remap", "smoothstep", "ping_pong", "less_equal", "greater_equal", "not_equal", "xor",
+            "parse_number", "number_to_bool", "bool_to_number", "string_length", "string_contains",
+            "string_starts_with", "string_ends_with", "string_slice", "vec3_angle", "vec3_reflect",
+            "vec3_move_towards", "color_make", "color_split", "color_lerp",
         ] {
             let value = match kind {
                 "number" | "public_number" => json!(1),
@@ -793,12 +959,14 @@ mod tests {
             ];
             let mut links = vec![
                 json!({"from":"e","out":"flow","to":"a","input":"flow"}),
-                json!({"from":"v","out":"value","to":"a","input":"value"}),
+                json!({"from":"v","out":spec(kind).unwrap().outputs[0].0,"to":"a","input":"value"}),
             ];
             for (index, (port, ty)) in spec(kind).unwrap().inputs.iter().enumerate() {
                 let (source_kind, default) = match *ty {
                     "bool" => ("bool", json!(true)),
                     "string" => ("string", json!("x")),
+                    "vec3" => ("vec3", json!([1, 2, 3])),
+                    "color" => ("color", json!([0.1, 0.2, 0.3, 0.4])),
                     _ => ("number", json!(2)),
                 };
                 let id = format!("i{index}");
@@ -807,6 +975,344 @@ mod tests {
             }
             let graph = json!({"name":"Graph1","nodes":nodes,"links":links});
             assert!(Program::compile(&source(graph)).is_ok(), "{kind} failed");
+        }
+    }
+
+    fn evaluate_math(kind: &str, inputs: &[Value], output: &str) -> Result<Value, String> {
+        let mut nodes = vec![
+            json!({"id":"event","kind":"on_update","x":0,"y":0}),
+            json!({"id":"state","kind":"set_state","x":0,"y":0,"value":"result"}),
+            json!({"id":"math","kind":kind,"x":0,"y":0}),
+        ];
+        let mut links = vec![
+            json!({"from":"event","out":"flow","to":"state","input":"flow"}),
+            json!({"from":"math","out":output,"to":"state","input":"value"}),
+        ];
+        for (index, ((port, ty), value)) in spec(kind).unwrap().inputs.iter().zip(inputs).enumerate() {
+            let id = format!("input{index}");
+            let literal_kind = if *ty == "any" {
+                match value {
+                    Value::Bool(_) => "bool", Value::String(_) => "string",
+                    Value::Array(values) if values.len() == 4 => "color",
+                    Value::Array(_) => "vec3", _ => "number",
+                }
+            } else { *ty };
+            nodes.push(json!({"id":id,"kind":literal_kind,"x":0,"y":0,"value":value}));
+            links.push(json!({"from":id,"out":"value","to":"math","input":port}));
+        }
+        let graph_source = source(json!({"name":"MathTest","nodes":nodes,"links":links}));
+        let program = Program::compile(&graph_source)?;
+        let component = ScriptComponent {
+            id: "1".into(), revision: "0".into(), enabled: true, source: graph_source,
+            schema: program.schema.clone(), parameters: Default::default(),
+            state: Default::default(), clock: ScriptClock::default(),
+        };
+        let object: ObjectView = serde_json::from_value(json!({
+            "address":{"instance_id":"00000000-0000-0000-0000-000000000001","local_id":1},
+            "object_revision":"0","world_position":[0,0,0],"fields":[],"scripts":[component.clone()]
+        })).unwrap();
+        Ok(program.run(&object, &component, Event::Update, 0.05)?.state["result"].clone())
+    }
+
+    #[test]
+    fn scalar_math_nodes_produce_values_and_validate_ranges() {
+        for (kind, inputs, expected) in [
+            ("abs", vec![json!(-3.5)], json!(3.5)),
+            ("floor", vec![json!(-1.25)], json!(-2.0)),
+            ("sin", vec![json!(std::f64::consts::FRAC_PI_2)], json!(1.0)),
+            ("cos", vec![json!(std::f64::consts::PI)], json!(-1.0)),
+            ("clamp", vec![json!(-2), json!(0), json!(1)], json!(0.0)),
+            ("clamp", vec![json!(2), json!(0), json!(1)], json!(1.0)),
+            ("lerp", vec![json!(2), json!(10), json!(0.25)], json!(4.0)),
+            ("lerp", vec![json!(2), json!(10), json!(-1)], json!(2.0)),
+            ("lerp", vec![json!(2), json!(10), json!(2)], json!(10.0)),
+        ] {
+            assert_eq!(evaluate_math(kind, &inputs, "value").unwrap().as_f64(), expected.as_f64(), "{kind}");
+        }
+        assert!(evaluate_math("clamp", &[json!(0), json!(2), json!(1)], "value").unwrap_err().contains("minimum"));
+    }
+
+    #[test]
+    fn new_unary_nodes_reject_numeric_strings_from_any_ports() {
+        for kind in ["abs", "floor", "sin", "cos"] {
+            let graph_source = source(json!({"name":"StrictMath","nodes":[
+                {"id":"event","kind":"on_update","x":0,"y":0},
+                {"id":"state","kind":"set_state","x":0,"y":0,"value":"result"},
+                {"id":"math","kind":kind,"x":0,"y":0},
+                {"id":"input","kind":"get_state","x":0,"y":0,"value":"input"}
+            ],"links":[
+                {"from":"event","out":"flow","to":"state","input":"flow"},
+                {"from":"math","out":"value","to":"state","input":"value"},
+                {"from":"input","out":"value","to":"math","input":"value"}
+            ]}));
+            let program = Program::compile(&graph_source).unwrap();
+            let component = ScriptComponent {
+                id: "1".into(), revision: "0".into(), enabled: true, source: graph_source,
+                schema: program.schema.clone(), parameters: Default::default(),
+                state: std::collections::BTreeMap::from([("input".into(),json!("3"))]), clock: ScriptClock::default(),
+            };
+            let object: ObjectView = serde_json::from_value(json!({
+                "address":{"instance_id":"00000000-0000-0000-0000-000000000001","local_id":1},
+                "object_revision":"0","world_position":[0,0,0],"fields":[],"scripts":[component.clone()]
+            })).unwrap();
+            let error = program.run(&object,&component,Event::Update,0.05).unwrap_err();
+            assert!(error.contains("finite number"), "{kind}: {error}");
+        }
+    }
+
+    #[test]
+    fn vector_math_nodes_evaluate_and_preserve_all_split_outputs() {
+        for (kind, inputs, expected) in [
+            ("vec3_make", vec![json!(2), json!(4), json!(8)], json!([2.0,4.0,8.0])),
+            ("vec3_add", vec![json!([1,2,3]), json!([4,5,6])], json!([5.0,7.0,9.0])),
+            ("vec3_subtract", vec![json!([1,2,3]), json!([4,5,6])], json!([-3.0,-3.0,-3.0])),
+            ("vec3_scale", vec![json!([1,2,3]), json!(2)], json!([2.0,4.0,6.0])),
+            ("vec3_dot", vec![json!([1,2,3]), json!([4,5,6])], json!(32.0)),
+            ("vec3_cross", vec![json!([1,2,3]), json!([4,5,6])], json!([-3.0,6.0,-3.0])),
+            ("vec3_length", vec![json!([3,4,0])], json!(5.0)),
+            ("vec3_normalize", vec![json!([0,3,4])], json!([0.0,0.6,0.8])),
+            ("vec3_normalize", vec![json!([0,0,0])], json!([0.0,0.0,0.0])),
+            ("vec3_distance", vec![json!([1,2,3]), json!([4,6,3])], json!(5.0)),
+            ("vec3_lerp", vec![json!([1,2,3]), json!([4,6,3]), json!(0.25)], json!([1.75,3.0,3.0])),
+        ] {
+            let actual = evaluate_math(kind, &inputs, "value").unwrap();
+            if expected.is_number() {
+                assert_eq!(actual.as_f64(), expected.as_f64(), "{kind}");
+            } else {
+                assert_eq!(actual, expected, "{kind}");
+            }
+        }
+        for (port, expected) in [("x", 2.0), ("y", 4.0), ("z", 8.0)] {
+            assert_eq!(evaluate_math("vec3_split", &[json!([2,4,8])], port).unwrap().as_f64(), Some(expected));
+        }
+        assert!(evaluate_math("vec3_split", &[json!([2,4,8])], "value").unwrap_err().contains("output port"));
+    }
+
+    #[test]
+    fn vector_nodes_reject_wrong_types_and_missing_inputs() {
+        let mut graph = json!({"name":"BadMath","nodes":[
+            {"id":"event","kind":"on_update","x":0,"y":0},
+            {"id":"state","kind":"set_state","x":0,"y":0,"value":"result"},
+            {"id":"math","kind":"vec3_length","x":0,"y":0},
+            {"id":"number","kind":"number","x":0,"y":0,"value":3}
+        ],"links":[
+            {"from":"event","out":"flow","to":"state","input":"flow"},
+            {"from":"math","out":"value","to":"state","input":"value"},
+            {"from":"number","out":"value","to":"math","input":"value"}
+        ]});
+        assert!(Program::compile(&source(graph.clone())).err().unwrap().contains("Incompatible ports"));
+        graph["links"].as_array_mut().unwrap().pop();
+        assert!(Program::compile(&source(graph)).err().unwrap().contains("Missing input value"));
+    }
+
+    #[test]
+    fn repeated_vector_inputs_still_obey_graph_expansion_budget() {
+        let mut nodes = vec![
+            json!({"id":"event","kind":"on_update","x":0,"y":0}),
+            json!({"id":"state","kind":"set_state","x":0,"y":0,"value":"result"}),
+            json!({"id":"v0","kind":"vec3","x":0,"y":0,"value":[1,2,3]}),
+        ];
+        let mut links = vec![json!({"from":"event","out":"flow","to":"state","input":"flow"})];
+        for index in 1..=9 {
+            let id = format!("v{index}");
+            let previous = format!("v{}",index-1);
+            nodes.push(json!({"id":id,"kind":"vec3_add","x":0,"y":0}));
+            for input in ["a","b"] {
+                links.push(json!({"from":previous,"out":"value","to":id,"input":input}));
+            }
+        }
+        links.push(json!({"from":"v9","out":"value","to":"state","input":"value"}));
+        let graph = json!({"name":"Expansion","nodes":nodes,"links":links});
+        assert!(Program::compile(&source(graph)).err().unwrap().contains("too many operations"));
+    }
+
+    fn run_control(graph: Value) -> Result<crate::Output, String> {
+        let graph_source = source(graph);
+        let program = Program::compile(&graph_source)?;
+        let component = ScriptComponent {
+            id: "1".into(), revision: "0".into(), enabled: true, source: graph_source,
+            schema: program.schema.clone(), parameters: parameters(&program.schema,&Default::default()).unwrap(),
+            state: Default::default(), clock: ScriptClock::default(),
+        };
+        let object: ObjectView = serde_json::from_value(json!({
+            "address":{"instance_id":"00000000-0000-0000-0000-000000000001","local_id":1},
+            "object_revision":"0","world_position":[0,0,0],"fields":[],"scripts":[component.clone()]
+        })).unwrap();
+        let result = program.run(&object,&component,Event::Update,0.05);
+        assert!(component.state.is_empty(),"A callback modified its saved input state");
+        result
+    }
+
+    fn range_graph(start: i32, end: i32, step: i32) -> Value {
+        json!({"name":"Range","nodes":[
+            {"id":"event","kind":"on_update","x":0,"y":0},
+            {"id":"range","kind":"for_range","x":0,"y":0},
+            {"id":"start","kind":"number","x":0,"y":0,"value":start},
+            {"id":"end","kind":"number","x":0,"y":0,"value":end},
+            {"id":"step","kind":"number","x":0,"y":0,"value":step},
+            {"id":"read","kind":"get_state","x":0,"y":0,"value":"sum"},
+            {"id":"sum","kind":"add","x":0,"y":0},
+            {"id":"write","kind":"set_state","x":0,"y":0,"value":"sum"},
+            {"id":"done","kind":"set_state","x":0,"y":0,"value":"done"},
+            {"id":"true","kind":"bool","x":0,"y":0,"value":true}
+        ],"links":[
+            {"from":"event","out":"flow","to":"range","input":"flow"},
+            {"from":"start","out":"value","to":"range","input":"start"},
+            {"from":"end","out":"value","to":"range","input":"end"},
+            {"from":"step","out":"value","to":"range","input":"step"},
+            {"from":"range","out":"body","to":"write","input":"flow"},
+            {"from":"read","out":"value","to":"sum","input":"a"},
+            {"from":"range","out":"index","to":"sum","input":"b"},
+            {"from":"sum","out":"value","to":"write","input":"value"},
+            {"from":"range","out":"done","to":"done","input":"flow"},
+            {"from":"true","out":"value","to":"done","input":"value"}
+        ]})
+    }
+
+    #[test]
+    fn for_ranges_accumulate_indices_and_handle_descending_empty_and_zero_ranges() {
+        for (start,end,step,expected) in [(1,5,1,Some(15)),(5,1,-2,Some(9)),(0,0,1,Some(0)),(5,1,1,None),(1,5,-1,None),(0,63,1,Some(2016))] {
+            let output = run_control(range_graph(start,end,step)).unwrap();
+            assert_eq!(output.state.get("sum").and_then(Value::as_i64),expected,"{start}..{end} step {step}");
+            assert_eq!(output.state["done"],json!(true));
+        }
+        assert!(run_control(range_graph(0,1,0)).unwrap_err().contains("step"));
+        assert!(run_control(range_graph(0,64,1)).unwrap_err().contains("64 iterations"));
+    }
+
+    fn while_graph(limit: i32) -> Value {
+        let mut graph = range_graph(0,0,1);
+        graph["name"] = json!("While");
+        graph["nodes"][1]["kind"] = json!("while_loop");
+        graph["nodes"][2]["id"] = json!("limit");
+        graph["nodes"][2]["value"] = json!(limit);
+        graph["nodes"][4]["value"] = json!(1);
+        graph["nodes"].as_array_mut().unwrap().push(json!({"id":"test","kind":"less","x":0,"y":0}));
+        let links = graph["links"].as_array_mut().unwrap();
+        links.retain(|link| !(link["to"] == "range" && link["input"] != "flow") && !(link["from"] == "range" && link["out"] == "index"));
+        links.extend([
+            json!({"from":"read","out":"value","to":"test","input":"a"}),
+            json!({"from":"limit","out":"value","to":"test","input":"b"}),
+            json!({"from":"test","out":"value","to":"range","input":"test"}),
+            json!({"from":"step","out":"value","to":"sum","input":"b"}),
+        ]);
+        graph
+    }
+
+    #[test]
+    fn while_rechecks_changed_state_and_aborts_the_whole_proposal_at_limit() {
+        let output = run_control(while_graph(3)).unwrap();
+        assert_eq!(output.state["sum"],json!(3));
+        assert_eq!(output.state["done"],json!(true));
+        let error = run_control(while_graph(65)).unwrap_err();
+        assert!(error.contains("64 iterations"),"{error}");
+        let mut bad = while_graph(1);
+        bad["links"].as_array_mut().unwrap().iter_mut().find(|link| link["to"] == "range" && link["input"] == "test").unwrap()["from"] = json!("read");
+        assert!(run_control(bad).unwrap_err().contains("boolean"));
+    }
+
+    #[test]
+    fn break_and_continue_skip_remaining_body_and_done_still_runs() {
+        let mut graph = range_graph(0,5,1);
+        graph["nodes"].as_array_mut().unwrap().extend([
+            json!({"id":"two","kind":"number","x":0,"y":0,"value":2}),
+            json!({"id":"four","kind":"number","x":0,"y":0,"value":4}),
+            json!({"id":"is_two","kind":"equal","x":0,"y":0}),
+            json!({"id":"is_four","kind":"equal","x":0,"y":0}),
+            json!({"id":"skip","kind":"branch","x":0,"y":0}),
+            json!({"id":"stop","kind":"branch","x":0,"y":0}),
+            json!({"id":"continue","kind":"continue_loop","x":0,"y":0}),
+            json!({"id":"break","kind":"break_loop","x":0,"y":0}),
+        ]);
+        let links = graph["links"].as_array_mut().unwrap();
+        links.iter_mut().find(|link| link["from"] == "range" && link["out"] == "body").unwrap()["to"] = json!("skip");
+        for (value,compare,branch) in [("two","is_two","skip"),("four","is_four","stop")] {
+            links.extend([
+                json!({"from":"range","out":"index","to":compare,"input":"a"}),
+                json!({"from":value,"out":"value","to":compare,"input":"b"}),
+                json!({"from":compare,"out":"value","to":branch,"input":"test"}),
+            ]);
+        }
+        links.extend([
+            json!({"from":"skip","out":"yes","to":"continue","input":"flow"}),
+            json!({"from":"skip","out":"no","to":"stop","input":"flow"}),
+            json!({"from":"stop","out":"yes","to":"break","input":"flow"}),
+            json!({"from":"stop","out":"no","to":"write","input":"flow"}),
+        ]);
+        let output = run_control(graph).unwrap();
+        assert_eq!(output.state["sum"],json!(4));
+        assert_eq!(output.state["done"],json!(true));
+    }
+
+    fn nested_ranges(inner_end: i32) -> Value {
+        let mut graph = range_graph(0,7,1);
+        graph["nodes"].as_array_mut().unwrap().extend([
+            json!({"id":"inner","kind":"for_range","x":0,"y":0}),
+            json!({"id":"inner_end","kind":"number","x":0,"y":0,"value":inner_end}),
+        ]);
+        let links = graph["links"].as_array_mut().unwrap();
+        links.iter_mut().find(|link| link["from"] == "range" && link["out"] == "body").unwrap()["to"] = json!("inner");
+        links.iter_mut().find(|link| link["to"] == "sum" && link["input"] == "b").unwrap()["from"] = json!("step");
+        links.iter_mut().find(|link| link["to"] == "sum" && link["input"] == "b").unwrap()["out"] = json!("value");
+        links.extend([
+            json!({"from":"start","out":"value","to":"inner","input":"start"}),
+            json!({"from":"inner_end","out":"value","to":"inner","input":"end"}),
+            json!({"from":"step","out":"value","to":"inner","input":"step"}),
+            json!({"from":"inner","out":"body","to":"write","input":"flow"}),
+        ]);
+        graph
+    }
+
+    #[test]
+    fn nested_loops_share_one_budget_and_break_targets_innermost_loop() {
+        assert_eq!(run_control(nested_ranges(6)).unwrap().state["sum"],json!(56));
+        assert!(run_control(nested_ranges(7)).unwrap_err().contains("64 iterations"));
+        let mut graph = nested_ranges(6);
+        graph["nodes"].as_array_mut().unwrap().push(json!({"id":"break","kind":"break_loop","x":0,"y":0}));
+        let links = graph["links"].as_array_mut().unwrap();
+        links.iter_mut().find(|link| link["from"] == "inner" && link["out"] == "body").unwrap()["to"] = json!("break");
+        links.push(json!({"from":"inner","out":"done","to":"write","input":"flow"}));
+        assert_eq!(run_control(graph).unwrap().state["sum"],json!(8));
+    }
+
+    #[test]
+    fn loop_scope_and_drive_write_rules_are_checked_at_compile_time() {
+        for kind in ["break_loop","continue_loop"] {
+            let graph = json!({"name":"BadScope","nodes":[
+                {"id":"event","kind":"on_update","x":0,"y":0},
+                {"id":"control","kind":kind,"x":0,"y":0}
+            ],"links":[{"from":"event","out":"flow","to":"control","input":"flow"}]});
+            assert!(Program::compile(&source(graph)).err().unwrap().contains("loop body"));
+        }
+        let mut bad = range_graph(0,2,1);
+        bad["links"].as_array_mut().unwrap().iter_mut().find(|link| link["to"] == "done" && link["input"] == "value").unwrap().clone_from(&json!({"from":"range","out":"index","to":"done","input":"value"}));
+        assert!(Program::compile(&source(bad)).err().unwrap().contains("inside its loop body"));
+        let mut drive = range_graph(0,2,1);
+        drive["nodes"][0]["kind"] = json!("on_drive");
+        assert!(Program::compile(&source(drive.clone())).err().unwrap().contains("Set State cannot"));
+        drive["nodes"][7] = json!({"id":"write","kind":"write_field","x":0,"y":0});
+        assert!(Program::compile(&source(drive)).err().unwrap().contains("Drive belongs"));
+    }
+
+    #[test]
+    fn new_operator_ports_and_color_split_compile_to_the_right_helpers() {
+        for (kind,inputs,expected) in [
+            ("atan2",vec![json!(1),json!(0)],json!(std::f64::consts::FRAC_PI_2)),
+            ("remap",vec![json!(0.25),json!(0),json!(1),json!(10),json!(20)],json!(12.5)),
+            ("smoothstep",vec![json!(0),json!(1),json!(0.5)],json!(0.5)),
+            ("string_length",vec![json!("한A🙂")],json!(3)),
+            ("string_slice",vec![json!("한A🙂"),json!(1),json!(2)],json!("A🙂")),
+            ("string_contains",vec![json!("hello"),json!("ell")],json!(true)),
+            ("equal",vec![json!([1,2,3]),json!([1,2,3])],json!(true)),
+            ("not_equal",vec![json!([1,2,3]),json!([1,2,4])],json!(true)),
+            ("color_make",vec![json!(0.1),json!(0.2),json!(0.3),json!(0.4)],json!([0.1,0.2,0.3,0.4])),
+        ] {
+            let actual = evaluate_math(kind,&inputs,"value").unwrap();
+            if expected.is_number() { assert_eq!(actual.as_f64(),expected.as_f64(),"{kind}"); }
+            else { assert_eq!(actual,expected,"{kind}"); }
+        }
+        for (port,expected) in [("r",0.1),("g",0.2),("b",0.3),("a",0.4)] {
+            assert_eq!(evaluate_math("color_split",&[json!([0.1,0.2,0.3,0.4])],port).unwrap().as_f64(),Some(expected));
         }
     }
 }

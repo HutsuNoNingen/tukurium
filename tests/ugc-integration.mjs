@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 const root=resolve(import.meta.dirname,'..'),session=`ugc-${randomUUID()}`;
 const base=52000+Math.floor(Math.random()*700),work=resolve(root,'.run',session),saved=resolve(work,'world.json');
 const relay=process.argv.find(arg=>arg.startsWith('--relay='))?.slice(8);
+const windowArgs=process.argv.includes('--offscreen')?['--position','20000,20000','--single-window','--max-fps','60']:[];
 mkdirSync(work,{recursive:true});const children=[],sockets=[];
 function start(file,args){const child=spawn(resolve(root,file),args,{cwd:root,windowsHide:true,stdio:['ignore','pipe','pipe']});child.logs='';child.stdout.on('data',d=>child.logs+=d);child.stderr.on('data',d=>child.logs+=d);children.push(child);return child;}
 async function until(test,message,ms=15000){const end=Date.now()+ms;while(Date.now()<end){const value=test();if(value)return value;await delay(20);}throw Error(message);}
@@ -23,34 +24,47 @@ async function connect(port){
 }
 async function peer(role,index){const port=base+2+index*2;const child=start('target/release/kokoverse-engine.exe',['--role',role,'--session',session,'--port',String(port),'--transport-port',String(port+1),'--asset-dir',resolve(work,`assets-${index}`),...(role==='host'?['--save',saved]:[])]);const client=await connect(port);start('.run/build/kokosync-adapter.exe',['--session',session,'--peer',role==='host'?'host':`guest-${index}`,'--engine',`127.0.0.1:${port+1}`,'--address',relay||`127.0.0.1:${base+1}`,...(relay?[]:['--insecure-development'])]);await until(()=>client.latest()?.editable,'Peer did not sync');return {child,client,port};}
 async function command(client,action,target){const command_id=randomUUID();client.send({kind:'script',command:{command_id,target, ...action}});const result=await client.wait(m=>m.kind==='result'&&m.command_id===command_id);return result;}
+function failureState(client){return {scripts:client.latest()?.snapshot.objects[0]?.scripts?.map(s=>({name:s.schema.name,id:s.id,enabled:s.enabled,state:s.state})),status:client.messages.filter(m=>m.kind==='script_statuses').at(-1)?.statuses.map(s=>({script_id:s.script_id,error:s.error}))};}
 try {
   if(!relay)start('.tools/kokosync-relay.exe',['--http',`127.0.0.1:${base}`,'--quic',`127.0.0.1:${base+1}`]);
   const host=await peer('host',0),guest=await peer('guest',1);
-  const probe=await command(guest.client,{action:'attach',source:host.client.latest().script_templates[0].source},host.client.latest().snapshot.objects[0].address);
+  const probeSource=`return {
+    name="MathDriveProbe", fields={speed={type="number",default=45}},
+    drive=function(ctx)
+      ctx:drive(ctx.self,"rotation",ctx:rotation_y(ctx.self.MathDriveProbe.speed*ctx.time,ctx.self.Transform.rotation))
+      ctx:drive(ctx.self,"position",ctx:vec3_add(ctx.self.Transform.position,ctx:vec3_make(0,ctx:sin(ctx.time),0)))
+    end
+  }`;
+  const probe=await command(guest.client,{action:'attach',source:probeSource},host.client.latest().snapshot.objects[0].address);
   assert.equal(probe.ok,true,JSON.stringify(probe));
   await until(()=>host.client.latest().snapshot.objects[0].scripts?.length===1,'Probe script did not arrive');
   const probeScript=host.client.latest().snapshot.objects[0].scripts[0];
+  const probePosition=host.client.latest().snapshot.objects[0].world_position;
   const driveFor=(client,id)=>client.messages.filter(m=>m.kind==='drive_frame'&&m.frame.objects.some(o=>o.target.instance_id===id));
   const objectId=host.client.latest().snapshot.objects[0].address.instance_id;
-  await until(()=>driveFor(host.client,objectId).length>2&&driveFor(guest.client,objectId).length>2,'Both Engines must evaluate the local Drive after calibrating their clocks');
+  try { await until(()=>driveFor(host.client,objectId).length>2&&driveFor(guest.client,objectId).length>2,'Both Engines must evaluate the local Drive after calibrating their clocks'); }
+  catch(error) { for(const peer of [host,guest])console.error('DRIVE FAILURE STATUS',JSON.stringify(peer.client.messages.filter(m=>m.kind==='script_statuses').at(-1)));throw error; }
   const baseRevision=host.client.latest().snapshot.world_revision;
   await delay(250);
   assert.equal(host.client.latest().snapshot.world_revision,baseRevision,'Local rotation must not produce shared world commits');
   for(const client of [host.client,guest.client]) {
     const frame=driveFor(client,objectId).at(-1).frame;
     const q=frame.objects.find(o=>o.target.instance_id===objectId).values.rotation;
+    const position=frame.objects.find(o=>o.target.instance_id===objectId).values.position;
     const seconds=probeScript.clock.elapsed+Math.max(0,frame.world_time-probeScript.clock.anchor);
     const half=(seconds*probeScript.parameters.speed%360)*Math.PI/360;
     assert.ok(Math.abs(q[1]*Math.sin(half)+q[3]*Math.cos(half))>1-1e-10,'Drive rotation must be derived from calibrated WorldTime');
+    assert.ok(Math.abs(position[0]-probePosition[0])<1e-10&&Math.abs(position[1]-probePosition[1]-Math.sin(seconds))<1e-10&&Math.abs(position[2]-probePosition[2])<1e-10,'Vector math must generate the same time-based position in each Engine');
   }
   const guestFrame=driveFor(guest.client,objectId).at(-1).frame;
   assert.ok(driveFor(host.client,objectId).some(m=>Math.abs(m.frame.world_time-guestFrame.world_time)<0.1),'Host and guest clocks must share a timeline');
-  console.log('PASS: host and guest evaluate local Drives from a shared clock without changing the replicated world');
+  console.log('PASS: host and guest evaluate rotation and vector-math Drives from a shared clock without changing the replicated world');
 
   assert.equal((await command(guest.client,{action:'remove',script_id:probeScript.id,expected_revision:probeScript.revision},host.client.latest().snapshot.objects[0].address)).ok,true);
   const rendered=process.argv.includes('--rendered');
-  const godot=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(rendered?['--rendering-method','gl_compatibility']:['--headless']),'--path','client-godot','--script','res://script_smoke.gd','--',`--port=${guest.port}`,`--session=${session}`,...(rendered?[`--screenshot=${resolve(work,'script-editor.png')}`]:[])]);
+  const godot=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(rendered?['--rendering-method','gl_compatibility',...windowArgs]:['--headless']),'--log-file',resolve(work,'script-editor.log'),'--path','client-godot','--script','res://script_smoke.gd','--',`--port=${guest.port}`,`--session=${session}`,...(rendered?[`--screenshot=${resolve(work,'script-editor.png')}`]:[])]);
   await until(()=>godot.exitCode!==null,'Godot UGC test did not finish',45000);
+  if(godot.exitCode!==0)for(const peer of [host,guest])console.error('UGC FAILURE STATE',JSON.stringify(failureState(peer.client)));
   assert.equal(godot.exitCode,0,godot.logs);assert.doesNotMatch(godot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(godot.logs,/SCRIPT EDITOR SMOKE PASS/);
   await until(()=>host.client.latest().snapshot.objects[0].scripts?.length===3,'Host did not receive script edits');
   let object=host.client.latest().snapshot.objects[0];
@@ -75,15 +89,28 @@ try {
   const broken=object.scripts.find(s=>s.schema.name==='Broken');
   assert.equal((await command(guest.client,{action:'remove',script_id:broken.id,expected_revision:broken.revision},object.address)).ok,true);
 
+  const mathGodot=start('.tools/godot/Godot_v4.7.2-stable_win64_console.exe',[...(rendered?['--rendering-method','gl_compatibility',...windowArgs]:['--headless']),'--log-file',resolve(work,'math-nodes.log'),'--path','client-godot','--script','res://math_nodes_smoke.gd','--',`--port=${guest.port}`,`--session=${session}`,...(rendered?[`--screenshot=${resolve(work,'math-nodes.png')}`]:[])]);
+  await until(()=>mathGodot.exitCode!==null,'Godot math-node test did not finish',45000);
+  if(mathGodot.exitCode!==0)for(const peer of [host,guest])console.error('MATH FAILURE STATE',JSON.stringify(failureState(peer.client)));
+  assert.equal(mathGodot.exitCode,0,mathGodot.logs);assert.doesNotMatch(mathGodot.logs,/SCRIPT ERROR:|\bERROR:/);assert.match(mathGodot.logs,/MATH NODES SMOKE PASS/);
+  await until(()=>host.client.latest().snapshot.objects[0].scripts.some(s=>s.schema.name==='MathNodes'&&JSON.stringify(s.state.math_result)==='[3,1,2]'&&JSON.stringify(s.state.color_result)==='[0.4,0.1,0.2,0.3]'&&s.state.loop_result===13&&s.state.loop_done===true),'Math, color and structured-loop results did not reach the host');
+  await until(()=>JSON.stringify(host.client.latest().snapshot)===JSON.stringify(guest.client.latest().snapshot),'Math graph results differ across peers');
+  console.log('PASS: math nodes and bounded For/While apply through Godot; split outputs and loop results agree across peers');
+
   object=host.client.latest().snapshot.objects[0];
+  const originalActive=object.scripts[1].state.active;
   const copyId=randomUUID();guest.client.send({kind:'structure',command:{command_id:copyId,action:'duplicate',target:object.address,expected_revision:object.object_revision}});
   const copied=await guest.client.wait(m=>m.kind==='result'&&m.command_id===copyId);assert.equal(copied.ok,true);
   await until(()=>host.client.latest().snapshot.objects.length===2,'Copy not replicated');
   const copy=host.client.latest().snapshot.objects.find(o=>o.address.instance_id===copied.selected.instance_id);
   assert.notEqual(copy.scripts[0].id,object.scripts[0].id);
+  const mathOriginal=object.scripts.find(s=>s.schema.name==='MathNodes'),mathCopy=copy.scripts.find(s=>s.schema.name==='MathNodes');
+  assert.notEqual(mathCopy.id,mathOriginal.id);assert.equal(mathCopy.source,mathOriginal.source);assert.deepEqual(mathCopy.state.math_result,[3,1,2]);
+  assert.equal(mathCopy.state.loop_result,13);
+  assert.equal(mathCopy.state.loop_done,true);assert.deepEqual(mathCopy.state.color_result,[0.4,0.1,0.2,0.3]);
   await command(guest.client,{action:'interact'},copy.address);
-  await until(()=>host.client.latest().snapshot.objects.find(o=>o.address.instance_id===copy.address.instance_id).scripts[1].state.active===false,'Copy state did not change');
-  assert.equal(host.client.latest().snapshot.objects.find(o=>o.address.instance_id===object.address.instance_id).scripts[1].state.active,true);
+  await until(()=>host.client.latest().snapshot.objects.find(o=>o.address.instance_id===copy.address.instance_id).scripts[1].state.active===!originalActive,'Copy state did not change');
+  assert.equal(host.client.latest().snapshot.objects.find(o=>o.address.instance_id===object.address.instance_id).scripts[1].state.active,originalActive);
   const late=await peer('guest',2);
   assert.deepEqual(late.client.latest().snapshot,host.client.latest().snapshot);
   const request_id=randomUUID();host.client.send({kind:'save_world',request_id});assert.equal((await host.client.wait(m=>m.kind==='save_result'&&m.request_id===request_id)).ok,true);
@@ -93,6 +120,6 @@ try {
   const restored=await connect(base+8);await until(()=>restored.latest(),'Restored snapshot missing');
   assert.deepEqual(restored.latest().snapshot,expected);
   console.log('PASS: execution limits stop only the bad script; diagnostics reach guests; copies have independent IDs/state; late join and disk restore preserve scripts');
-  if(rendered)console.log(`SCREENSHOT=${resolve(work,'script-editor.png')}`);
+  if(rendered)console.log(`SCREENSHOT=${resolve(work,'script-editor.png')} MATH_SCREENSHOT=${resolve(work,'math-nodes.png')}`);
 }catch(error){for(const child of children)if(child.logs)console.error(child.logs.slice(-3500));throw error;}
 finally{for(const socket of sockets)socket.destroy();for(const child of children)if(child.exitCode===null)child.kill();}
