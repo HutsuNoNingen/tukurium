@@ -18,6 +18,7 @@ fn main() {
     let mut online_server: Option<String> = None;
     {
         let mut args = env::args();
+        _ = args.next(); // Skip executable path when parsing arguments
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "-ServerAddress" => {
