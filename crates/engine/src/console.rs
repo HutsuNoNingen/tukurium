@@ -78,7 +78,7 @@ pub async fn close_requested() {
 }
 
 #[cfg(windows)]
-#[link(name = "Kernel32")]
+#[link(name = "kernel32")]
 unsafe extern "system" {
     fn SetConsoleCtrlHandler(
         handler: Option<unsafe extern "system" fn(u32) -> i32>,

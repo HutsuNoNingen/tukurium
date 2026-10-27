@@ -135,6 +135,10 @@ impl Supervisor {
                 //
                 // Normally you're supposed to use SIGTERM,
                 // but tokio requires OS-specific things to handle stuff that isn't SIGINT.
+                //
+                // Also, this block needs to be filtered out on non-Unix-y platforms.
+                // Otherwise it won't compile.
+                #[cfg(unix)]
                 unsafe {
                     _ = libc::kill(
                         pid.try_into().expect("Could not kill process"),
