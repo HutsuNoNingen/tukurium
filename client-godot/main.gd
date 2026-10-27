@@ -1230,10 +1230,19 @@ func accept_message(message: Dictionary) -> void:
 					avatars.erase(id)
 			people_label.text = "\n".join(names)
 			social_panels.update_participants(body.participants,self_id)
+		"catalog":
+			# Static session data, sent once at hello: component
+			# schemas for the panels and the script templates. The
+			# catalog can land after the first snapshot; refresh the
+			# panels so views built without schemas rebuild now
+			# instead of waiting for the next snapshot.
+			script_templates = body.get("script_templates", [])
+			world_panels.component_schemas = body.get("component_schemas", [])
+			world_panels.sync()
 		"snapshot":
 			editable = body.editable
 			social_panels.set_messages(body.get("chat",[]))
-			script_templates = body.get("script_templates", [])
+			if body.has("script_templates"): script_templates = body["script_templates"]
 			script_statuses = body.get("script_statuses", [])
 			engine_role=str(body.role)
 			refresh_localized_chrome()

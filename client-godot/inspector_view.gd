@@ -547,7 +547,11 @@ func refresh(object: Dictionary) -> void:
 	# Structure key compared as data (deep equality) instead of a JSON
 	# string; every leaf is a scalar, so this matches comparing the
 	# stringified form while skipping the serialization.
-	var next_signature: Array = [inspected.get("fields", []).map(func(f): return [f.component_id,f.id,f.value_type]),inspected.get("scripts", []).map(func(s): return [s.id,s.schema.name,s.enabled])]
+	# The schema set is part of the build key: schemas arrive separately
+	# (the catalog message) and can land after the first snapshot, so a
+	# view built while they were still empty must rebuild once they
+	# arrive even though the inspected object itself did not change.
+	var next_signature: Array = [inspected.get("fields", []).map(func(f): return [f.component_id,f.id,f.value_type]),inspected.get("scripts", []).map(func(s): return [s.id,s.schema.name,s.enabled]),manager.component_schemas.map(func(s): return [int(s.local_id),str(s.type_id),s.get("attach_defaults") != null])]
 	if new_target != target_id or not built or (next_signature != field_signature and edits.is_empty()):
 		for field in edits:
 			# A target switch ends the old lease; never redirect a draft to the new target.

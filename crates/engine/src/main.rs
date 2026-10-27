@@ -411,7 +411,17 @@ impl Engine {
             "chat":self.model.chat_messages(),
             "role":if self.host {"host"} else {"guest"},
             "script_statuses":if self.host {self.model.script_statuses()} else {self.remote_script_status.clone()},
-            "drive_frame":self.model.drive_frame(),
+            "drive_frame":self.model.drive_frame()})
+    }
+    /// The static half of what state() used to carry on every
+    /// publish: component schemas and script templates are fixed
+    /// for the whole session, so they are sent once per UI
+    /// connection (at hello) as a `catalog` message instead of
+    /// being rebuilt, cloned to every UI client, and re-parsed on
+    /// each world change. Clients keep the last catalog they
+    /// received; snapshot messages no longer contain these keys.
+    fn catalog() -> Value {
+        json!({"kind":"catalog",
             "component_schemas":REGISTRY.schemas(),
             "script_templates":[{"name":"Rotator","source":kokoverse_core::scripting::ROTATOR},
                 {"name":"ClickColor","source":kokoverse_core::scripting::CLICK_COLOR},
@@ -749,6 +759,8 @@ impl Engine {
             return;
         }
         if envelope.body["kind"] == "hello" {
+            let e = self.envelope(Self::catalog());
+            self.send(id, e);
             let state = self.state();
             let e = self.envelope(state);
             self.send(id, e);
@@ -1688,4 +1700,24 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     tokio::time::sleep(Duration::from_millis(150)).await;
     eprintln!("Engine stopped.");
     Ok(())
+}
+
+#[cfg(test)]
+mod catalog_tests {
+    use super::*;
+
+    #[test]
+    fn catalog_carries_the_static_schemas_and_templates() {
+        let catalog = Engine::catalog();
+        assert_eq!(catalog["kind"], json!("catalog"));
+        assert_eq!(catalog["component_schemas"], json!(REGISTRY.schemas()));
+        let templates = catalog["script_templates"].as_array().unwrap();
+        assert_eq!(templates.len(), 4);
+        assert_eq!(templates[0]["name"], json!("Rotator"));
+        assert_eq!(
+            templates[0]["source"],
+            json!(kokoverse_core::scripting::ROTATOR)
+        );
+        assert_eq!(templates[3]["name"], json!("Countdown Camera · Nodes"));
+    }
 }

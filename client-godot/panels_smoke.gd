@@ -69,6 +69,17 @@ func run() -> void:
 	var target_id: String = view.target_id
 	var other_target: String = other.content.target_id
 	if target_id == other_target: push_error("Fixture targets should differ"); quit(1); return
+	# Regression: a catalog landing after the first snapshot must rebuild
+	# views created while the schemas were still empty. Simulate the
+	# ordering by clearing the schemas (fields disappear), then deliver
+	# the catalog through the real message entry (fields come back).
+	var arrived_schemas: Array = scene.world_panels.component_schemas.duplicate()
+	if arrived_schemas.is_empty(): push_error("Fixture expected component schemas to have arrived"); quit(1); return
+	scene.world_panels.component_schemas = []
+	scene.world_panels.sync()
+	if view.controls.has("name"): push_error("Clearing schemas should remove the field controls"); quit(1); return
+	scene.accept_message({"protocol_version": 3, "session_id": scene.session, "authority_epoch": scene.epoch, "body": {"kind": "catalog", "component_schemas": arrived_schemas, "script_templates": scene.script_templates}})
+	if not view.controls.has("name"): push_error("Late catalog did not rebuild the inspector fields"); quit(1); return
 	var line: LineEdit = view.controls.name[0]
 	var canvas_point: Vector2 = line.get_global_rect().get_center()
 	var local_point := Vector3((canvas_point.x / panel.viewport.size.x - 0.5)*panel.mesh.size.x, (0.5-canvas_point.y/panel.viewport.size.y)*panel.mesh.size.y, 0.03)
