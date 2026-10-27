@@ -1,4 +1,4 @@
-param([string]$OutputDirectory = '', [switch]$SkipBuild, [string]$Version = '')
+param([string]$OutputDirectory = '', [switch]$SkipBuild, [string]$Version = '', [switch]$SkipTests)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $projectRoot
@@ -30,8 +30,12 @@ try {
     $goTool = (Resolve-Path -LiteralPath $goTool).Path
     Push-Location tools/kokosync-adapter
     try {
-        & $goTool test -mod=readonly ./...
-        if ($LASTEXITCODE -ne 0) { throw 'Adapter tests failed' }
+        if (-not $SkipTests) {
+            & $goTool test -mod=readonly ./...
+            if ($LASTEXITCODE -ne 0) { throw 'Adapter tests failed' }
+        } else {
+            Write-Warning 'Adapter tests skipped by explicit request.'
+        }
         & $goTool build -mod=readonly -trimpath '-ldflags=-s -w' -o (Join-Path $packageRoot 'bin/kokosync-adapter.exe') .
         if ($LASTEXITCODE -ne 0) { throw 'Adapter build failed' }
         & $goTool build -mod=readonly -trimpath '-ldflags=-s -w' -o (Join-Path $packageRoot 'bin/kokosync-relay.exe') ./cmd/relay

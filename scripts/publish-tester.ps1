@@ -7,6 +7,7 @@ param(
     [switch]$CreateTag,
     [switch]$PushTag,
     [switch]$PrepareOnly,
+    [switch]$SkipTests,
     [string]$OutputDirectory = '',
     [string]$PackageRoot = ''
 )
@@ -60,7 +61,7 @@ try {
     }
     if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repo 'dist' }
     if (-not $PackageRoot) {
-        $packageOutput = @( & (Join-Path $PSScriptRoot 'package.ps1') -OutputDirectory $OutputDirectory -Version $Tag )
+        $packageOutput = @( & (Join-Path $PSScriptRoot 'package.ps1') -OutputDirectory $OutputDirectory -Version $Tag -SkipTests:$SkipTests )
         $packageOutput | Write-Output
         $rootLine = $packageOutput | Where-Object { "$_" -like 'PACKAGE_ROOT=*' } | Select-Object -Last 1
         if (-not $rootLine) { throw 'Packaging did not return PACKAGE_ROOT.' }
