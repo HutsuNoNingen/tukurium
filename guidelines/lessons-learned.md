@@ -417,3 +417,10 @@ Component スキーマは catalog メッセージで接続時に一度だけ届�
 
 - 再現・確認：[panels_smoke.gd](../client-godot/panels_smoke.gd) がスキーマを空にしてフィールドが消えること、続いて catalog を本物のメッセージ入口（`accept_message`）から届けてフィールドが戻ることを確認する。[panels-integration.mjs](../tests/panels-integration.mjs) で確認する。
 - コード：[inspector_view.gd](../client-godot/inspector_view.gd) の再構築キー、[main.gd](../client-godot/main.gd) の catalog ハンドラ。確認日：2026-10-26。
+
+## 描画の署名ゲートは「後段が直す前提」の前段処理と組み合わせない
+
+インスペクタの表示更新を署名ゲートで省略するとき、前段（snapshot の `fill_values()`）が他者の下書き表示を共有値で上書きしても、後段（`refresh_sessions()`）は署名不変で再適用を省略し、下書き・カレットが失われたままになる。ゲートを入れる場合は、ゲートされる側が直していた表示を前段が触らないことまで含めて設計する。今回の修正では `fill_values()` がリモート編集中のFieldを対象から外し、判定はキャッシュ済みの `remote_fields` ではなく現在のセッション一覧からその場で導出する（対象切替直後の陳腐化を避けるため）。
+
+- 再現・確認：リモート編集中に snapshot が届く順序を [panel_observer_smoke.gd](../client-godot/panel_observer_smoke.gd) が決定的に踏む（下書き表示を確認した直後に `world_panels.sync()` を呼び、状態が保たれることを同期的に再確認する）。[panels-integration.mjs](../tests/panels-integration.mjs) `--rendered` で確認する。
+- コード：[inspector_view.gd](../client-godot/inspector_view.gd) の `fill_values()` / `remote_session()` / `refresh_sessions()`。確認日：2026-10-26。

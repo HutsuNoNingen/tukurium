@@ -81,16 +81,32 @@ func update_drive_sources(frame: Dictionary) -> void:
 	for object in frame.get("objects", []):
 		drive_sources[object.target.instance_id] = object.get("sources", {})
 
+var script_index: Dictionary = {}
+var script_index_key: Array = []
+
+# The driver lookup used to scan every object x every script on each
+# call (several times per inspector frame). The index maps script id
+# to (owner, script) and is rebuilt only when the (owner, id,
+# revision) set changes — a script's revision changes on every write
+# to it, so a cached entry can never outlive the script it describes.
 func field_driver(object_id: String, field: String) -> Dictionary:
 	var script_id: String = drive_sources.get(object_id, {}).get(field, "")
 	if script_id.is_empty(): return {}
+	var key: Array = []
 	for owner_id in app.objects:
 		for script in app.objects[owner_id].get("scripts", []):
-			if script.id == script_id:
-				var driver: Dictionary = script.duplicate(false)
-				driver["owner_id"] = owner_id
-				return driver
-	return {}
+			key.append([owner_id, script.id, str(script.get("revision", ""))])
+	if key != script_index_key:
+		script_index_key = key
+		script_index.clear()
+		for owner_id in app.objects:
+			for script in app.objects[owner_id].get("scripts", []):
+				script_index[script.id] = [owner_id, script]
+	if not script_index.has(script_id): return {}
+	var entry: Array = script_index[script_id]
+	var driver: Dictionary = entry[1].duplicate(false)
+	driver["owner_id"] = entry[0]
+	return driver
 
 func panel_spawn_position(distance: float) -> Vector3:
 	var origin: Vector3 = app.camera.global_position
